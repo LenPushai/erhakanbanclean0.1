@@ -1,64 +1,15 @@
 import React from 'react';
 import { useState, useEffect } from 'react'
-import { ClipboardList, Briefcase, ChevronRight, Factory, Building2, Calendar, Hash, RefreshCw, ArrowDownToLine, ArrowUpFromLine, X, Mail, ChevronDown, User, FileText, Paperclip, AlertCircle, Send, Plus } from 'lucide-react'
+import { ClipboardList, Briefcase, ChevronRight, Factory, Building2, Calendar, Hash, RefreshCw, ArrowDownToLine, ArrowUpFromLine, X, Mail, FileText, Paperclip, Send, Plus } from 'lucide-react'
 import { supabase } from './lib/supabase'
 import { format } from 'date-fns'
 
 type Board = 'rfq' | 'job'
 
 interface RFQ {
-  id: string
-  rfq_no: string
-  enq_number: string
-  client_rfq_number: string | null
-  additional_reference: string | null
-  rfq_direction: string | null
-  description: string
-  status: string
-  priority: string
-  request_date: string | null
-  required_date: string | null
-  contact_person: string | null
-  contact_email: string | null
-  contact_phone: string | null
-  assigned_quoter_name: string | null
-  drawing_number: string | null
-  requested_by: string | null
-  media_received: string | null
-  department_cg: string | null
-  actions_required: string | null
-  operating_entity: string | null
-  special_requirements: string | null
-  notes: string | null
-  remarks: string | null
-  created_at: string
-  quote_number?: string | null
-  quote_value_excl_vat?: number | null
-  quote_value_incl_vat?: number | null
-  valid_until?: string | null
-  po_number?: string | null
-  order_number?: string | null
-  order_date?: string | null
-  invoice_number?: string | null
-  invoice_date?: string | null
-  invoice_value?: number | null
-  payment_status?: string | null
-  clients?: { company_name: string } | null
-}
 
-interface Client {
-  id: string
-  company_name: string
-}
 
 interface LineItem {
-  id: string
-  line_number: number
-  item_type: string | null
-  description: string
-  quantity: number | null
-  unit_of_measure: string | null
-}
 
 const RFQ_COLUMNS = [
   { key: 'NEW',              label: 'New',              color: 'bg-blue-500',   hover: 'hover:border-blue-300'   },
@@ -112,48 +63,6 @@ function formatDate(dateStr: string | null) {
   try { return format(new Date(dateStr), 'dd MMM yyyy') } catch { return '-' }
 }
 
-function today() { return format(new Date(), 'yyyy-MM-dd') }
-
-// ?? Role Selector ?????????????????????????????????????????????????????????????
-
-function RoleSelector({ onSelect }: any) {
-  return (
-    <div className="fixed inset-0 bg-gray-900 flex items-center justify-center z-50">
-      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4 overflow-hidden">
-        <div className="bg-orange-500 px-8 py-6 text-center">
-          <div className="w-14 h-14 bg-white rounded-xl flex items-center justify-center mx-auto mb-3">
-            <span className="text-orange-500 font-black text-xl">ERHA</span>
-          </div>
-          <h1 className="text-white font-bold text-xl">Operations Board</h1>
-          <p className="text-orange-100 text-sm mt-1">Who are you?</p>
-        </div>
-        <div className="p-6 space-y-3">
-          <button onClick={() => onSelect('HENDRIK')}
-            className="w-full flex items-center gap-4 px-5 py-4 border-2 border-gray-200 rounded-xl hover:border-orange-400 hover:bg-orange-50 transition-all group">
-            <div className="w-10 h-10 bg-orange-100 rounded-full flex items-center justify-center shrink-0 group-hover:bg-orange-200">
-              <span className="text-orange-600 font-bold text-sm">HK</span>
-            </div>
-            <div className="text-left">
-              <p className="font-semibold text-gray-900">Hendrik</p>
-              <p className="text-xs text-gray-400">CEO - Full access</p>
-            </div>
-          </button>
-          <button onClick={() => onSelect('JUANIC')}
-            className="w-full flex items-center gap-4 px-5 py-4 border-2 border-gray-200 rounded-xl hover:border-blue-400 hover:bg-blue-50 transition-all group">
-            <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center shrink-0 group-hover:bg-blue-200">
-              <span className="text-blue-600 font-bold text-sm">JU</span>
-            </div>
-            <div className="text-left">
-              <p className="font-semibold text-gray-900">Juanic</p>
-              <p className="text-xs text-gray-400">Admin - RFQ management</p>
-            </div>
-          </button>
-        </div>
-        <p className="text-center text-xs text-gray-400 pb-4">PUSH AI Foundation</p>
-      </div>
-    </div>
-  )
-}
 
 // ?? App ???????????????????????????????????????????????????????????????????????
 
