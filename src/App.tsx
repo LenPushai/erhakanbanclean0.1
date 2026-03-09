@@ -327,7 +327,7 @@ function CreateRFQModal({ onClose, onCreated }: { onClose: () => void; onCreated
     special_requirements: '',
     notes: '',
   })
-  const [, setLineItems] = React.useState([
+  const [lineItems, setLineItems] = React.useState([
     { item_type: 'MATERIAL', description: '', quantity: 1, unit_of_measure: 'EA' }
   ])
 
@@ -734,7 +734,7 @@ function CreateRFQModal({ onClose, onCreated }: { onClose: () => void; onCreated
 // ?? RFQ Detail Panel ??????????????????????????????????????????????????????????
 
 function RFQDetailPanel({ rfq, onClose, onUpdate, role }: { rfq: RFQ; onClose: () => void; onUpdate: (rfq: RFQ) => void; role: string | null }) {
-  const [, setLineItems] = React.useState<LineItem[]>([])
+  const [lineItems, setLineItems] = React.useState<LineItem[]>([])
   const [panelLineItems, setPanelLineItems] = React.useState<any[]>([])
   const [loadingItems, setLoadingItems] = React.useState(true)
   const [panelAttachments, setPanelAttachments] = React.useState<any[]>([])
@@ -778,7 +778,7 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role }: { rfq: RFQ; onClose: (
       .select('id, line_number, item_type, description, quantity, unit_of_measure')
       .eq('rfq_id', rfq.id).order('line_number')
       .then(({ data }) => { setLineItems(data || []); setPanelLineItems(data || []) })
-      .finally(() => setLoadingItems(false))
+      
     supabase.from('rfq_attachments')
       .select('id, file_name, file_path')
       .eq('rfq_id', rfq.id)
