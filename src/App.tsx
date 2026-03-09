@@ -1,15 +1,64 @@
 import React from 'react';
 import { useState, useEffect } from 'react'
-import { ClipboardList, Briefcase, ChevronRight, Factory, Building2, Calendar, Hash, RefreshCw, ArrowDownToLine, ArrowUpFromLine, X, Mail, FileText, Paperclip, Send, Plus } from 'lucide-react'
+import { ClipboardList, Briefcase, ChevronRight, Factory, Building2, Calendar, Hash, RefreshCw, ArrowDownToLine, ArrowUpFromLine, X, Mail, ChevronDown, User, FileText, Paperclip, AlertCircle, Send, Plus } from 'lucide-react'
 import { supabase } from './lib/supabase'
 import { format } from 'date-fns'
 
 type Board = 'rfq' | 'job'
 
 interface RFQ {
+  id: string
+  rfq_no: string
+  enq_number: string
+  client_rfq_number: string | null
+  additional_reference: string | null
+  rfq_direction: string | null
+  description: string
+  status: string
+  priority: string
+  request_date: string | null
+  required_date: string | null
+  contact_person: string | null
+  contact_email: string | null
+  contact_phone: string | null
+  assigned_quoter_name: string | null
+  drawing_number: string | null
+  requested_by: string | null
+  media_received: string | null
+  department_cg: string | null
+  actions_required: string | null
+  operating_entity: string | null
+  special_requirements: string | null
+  notes: string | null
+  remarks: string | null
+  created_at: string
+  quote_number?: string | null
+  quote_value_excl_vat?: number | null
+  quote_value_incl_vat?: number | null
+  valid_until?: string | null
+  po_number?: string | null
+  order_number?: string | null
+  order_date?: string | null
+  invoice_number?: string | null
+  invoice_date?: string | null
+  invoice_value?: number | null
+  payment_status?: string | null
+  clients?: { company_name: string } | null
+}
 
+interface Client {
+  id: string
+  company_name: string
+}
 
 interface LineItem {
+  id: string
+  line_number: number
+  item_type: string | null
+  description: string
+  quantity: number | null
+  unit_of_measure: string | null
+}
 
 const RFQ_COLUMNS = [
   { key: 'NEW',              label: 'New',              color: 'bg-blue-500',   hover: 'hover:border-blue-300'   },
@@ -63,8 +112,50 @@ function formatDate(dateStr: string | null) {
   try { return format(new Date(dateStr), 'dd MMM yyyy') } catch { return '-' }
 }
 
+function today() { return format(new Date(), 'yyyy-MM-dd') }
 
-// ?? App ???????????????????????????????????????????????????????????????????????
+// ── Role Selector ─────────────────────────────────────────────────────────────
+
+function RoleSelector({ onSelect }: any) {
+  return (
+    <div className="fixed inset-0 bg-gray-900 flex items-center justify-center z-50">
+      <div className="bg-white rounded-2xl shadow-2xl w-full max-w-sm mx-4 overflow-hidden">
+        <div className="bg-orange-500 px-8 py-6 text-center">
+          <div className="w-14 h-14 bg-white rounded-xl flex items-center justify-center mx-auto mb-3">
+            <span className="text-orange-500 font-black text-xl">ERHA</span>
+          </div>
+          <h1 className="text-white font-bold text-xl">Operations Board</h1>
+          <p className="text-orange-100 text-sm mt-1">Who are you?</p>
+        </div>
+        <div className="p-6 space-y-3">
+          <button onClick={() => onSelect('HENDRIK')}
+            className="w-full flex items-center gap-4 px-5 py-4 border-2 border-gray-200 rounded-xl hover:border-orange-400 hover:bg-orange-50 transition-all group">
+            <div className="w-10 h-10 bg-orange-100 rounded-full flex items-center justify-center shrink-0 group-hover:bg-orange-200">
+              <span className="text-orange-600 font-bold text-sm">HK</span>
+            </div>
+            <div className="text-left">
+              <p className="font-semibold text-gray-900">Hendrik</p>
+              <p className="text-xs text-gray-400">CEO - Full access</p>
+            </div>
+          </button>
+          <button onClick={() => onSelect('JUANIC')}
+            className="w-full flex items-center gap-4 px-5 py-4 border-2 border-gray-200 rounded-xl hover:border-blue-400 hover:bg-blue-50 transition-all group">
+            <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center shrink-0 group-hover:bg-blue-200">
+              <span className="text-blue-600 font-bold text-sm">JU</span>
+            </div>
+            <div className="text-left">
+              <p className="font-semibold text-gray-900">Juanic</p>
+              <p className="text-xs text-gray-400">Admin - RFQ management</p>
+            </div>
+          </button>
+        </div>
+        <p className="text-center text-xs text-gray-400 pb-4">PUSH AI Foundation</p>
+      </div>
+    </div>
+  )
+}
+
+// ── App ───────────────────────────────────────────────────────────────────────
 
 function App() {
   const [currentRole, setCurrentRole] = useState<string | null>(null)
@@ -160,7 +251,7 @@ function App() {
   )
 }
 
-// ?? RFQ Board ?????????????????????????????????????????????????????????????????
+// ── RFQ Board ─────────────────────────────────────────────────────────────────
 
 function RFQBoard({ rfqs, loading, error, onRefresh, onCardClick, selectedId }: { rfqs: RFQ[]; loading: boolean; error: string | null; onRefresh: () => void; onCardClick: (rfq: RFQ) => void; selectedId?: string }) {
   if (loading) return <div className="flex items-center justify-center h-64 gap-3 text-gray-400"><div className="w-5 h-5 border-2 border-gray-300 border-t-blue-500 rounded-full animate-spin" /><span>Loading RFQs...</span></div>
@@ -187,7 +278,7 @@ function RFQBoard({ rfqs, loading, error, onRefresh, onCardClick, selectedId }: 
   )
 }
 
-// ?? RFQ Card ??????????????????????????????????????????????????????????????????
+// ── RFQ Card ──────────────────────────────────────────────────────────────────
 
 function RFQCard({ rfq, hoverColor, onClick, isSelected }: { rfq: RFQ; hoverColor: string; onClick: () => void; isSelected: boolean }) {
   const priority = rfq.priority?.toUpperCase() || 'NORMAL'
@@ -213,7 +304,7 @@ function RFQCard({ rfq, hoverColor, onClick, isSelected }: { rfq: RFQ; hoverColo
   )
 }
 
-// ?? Create RFQ Modal ??????????????????????????????????????????????????????????
+// ── Create RFQ Modal ──────────────────────────────────────────────────────────
 
 function CreateRFQModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
   const [saving, setSaving] = React.useState(false)
@@ -645,7 +736,7 @@ function CreateRFQModal({ onClose, onCreated }: { onClose: () => void; onCreated
   )
 }
 
-// ?? RFQ Detail Panel ??????????????????????????????????????????????????????????
+// ── RFQ Detail Panel ──────────────────────────────────────────────────────────
 
 function RFQDetailPanel({ rfq, onClose, onUpdate, role }: { rfq: RFQ; onClose: () => void; onUpdate: (rfq: RFQ) => void; role: string | null }) {
   const [lineItems, setLineItems] = React.useState<LineItem[]>([])
@@ -1197,7 +1288,7 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role }: { rfq: RFQ; onClose: (
   )
 }
 
-// ?? Email Modal ???????????????????????????????????????????????????????????????
+// ── Email Modal ───────────────────────────────────────────────────────────────
 
 function EmailModal({ rfq, onClose }: { rfq: RFQ; onClose: () => void }) {
   const template = EMAIL_TEMPLATES[rfq.status] || EMAIL_TEMPLATES['NEW']
@@ -1208,21 +1299,6 @@ function EmailModal({ rfq, onClose }: { rfq: RFQ; onClose: () => void }) {
   const [body, setBody] = useState(template.body.replace(/\{enq\}/g, enqNo).replace('{contact}', contactName))
   const [sending, setSending] = useState(false)
   const [sent, setSent] = useState(false)
-  const [rfqAttachments, setRfqAttachments] = useState<any[]>([])
-  const [selectedAttachments, setSelectedAttachments] = useState<string[]>([])
-
-  React.useEffect(() => {
-    supabase.from('rfq_attachments')
-      .select('id, file_name, file_path')
-      .eq('rfq_id', rfq.id)
-      .then(({ data }) => setRfqAttachments(data || []))
-  }, [rfq.id])
-
-  const toggleAttachment = (id: string) => {
-    setSelectedAttachments(prev =>
-      prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id]
-    )
-  }
 
   const handleSend = async () => {
     if (!to) { alert('Please enter a recipient email address'); return }
@@ -1230,58 +1306,22 @@ function EmailModal({ rfq, onClose }: { rfq: RFQ; onClose: () => void }) {
     try {
       const apiKey = import.meta.env.VITE_RESEND_API_KEY
       if (!apiKey) throw new Error('Resend API key not configured')
-
-      // Build attachments array - fetch each selected file and base64 encode
-      const attachments: { filename: string; content: string }[] = []
-      for (const att of rfqAttachments.filter(a => selectedAttachments.includes(a.id))) {
-        const { data, error } = await supabase.storage
-          .from('rfq-attachments')
-          .download(att.file_path)
-        if (!error && data) {
-          const buffer = await data.arrayBuffer()
-          const base64 = btoa(String.fromCharCode(...new Uint8Array(buffer)))
-          attachments.push({ filename: att.file_name, content: base64 })
-        }
-      }
-
-      const payload: any = {
-        from: 'ERHA Operations <onboarding@resend.dev>',
-        to: [to],
-        subject: subject,
-        text: body,
-        html: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;">
-          <div style="background:#1e3a5f;color:white;padding:20px 24px;border-radius:8px 8px 0 0;">
-            <h2 style="margin:0;font-size:18px;">ERHA Fabrication &amp; Construction</h2>
-            <p style="margin:4px 0 0;font-size:13px;opacity:0.8;">${enqNo}</p>
-          </div>
-          <div style="padding:24px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px;white-space:pre-line;">${body.replace(/\n/g,'<br>')}</div>
-          <p style="font-size:11px;color:#9ca3af;margin-top:12px;text-align:center;">ERHA Operations System</p>
-        </div>`,
-      }
-
-      if (attachments.length > 0) payload.attachments = attachments
-
       const res = await fetch('http://localhost:3001/send', {
         method: 'POST',
-        headers: {
-          'Authorization': `Bearer ${apiKey}`,
-          'Content-Type': 'application/json',
-        },
-        body: JSON.stringify(payload),
+        headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          from: 'ERHA Operations <onboarding@resend.dev>',
+          to: [to],
+          subject: subject,
+          text: body,
+          html: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;"><div style="background:#1e3a5f;color:white;padding:20px 24px;border-radius:8px 8px 0 0;"><h2 style="margin:0;font-size:18px;">ERHA Fabrication &amp; Construction</h2><p style="margin:4px 0 0;font-size:13px;opacity:0.8;">${enqNo}</p></div><div style="padding:24px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px;white-space:pre-line;">${body.replace(/\n/g,'<br>')}</div><p style="font-size:11px;color:#9ca3af;margin-top:12px;text-align:center;">ERHA Operations System</p></div>`,
+        }),
       })
-
-      if (!res.ok) {
-        const err = await res.json()
-        throw new Error(err.message || 'Send failed')
-      }
-
+      if (!res.ok) { const err = await res.json(); throw new Error(err.message || 'Send failed') }
       setSent(true)
       setTimeout(onClose, 1500)
-    } catch (err: any) {
-      alert('Failed to send email: ' + err.message)
-    } finally {
-      setSending(false)
-    }
+    } catch (err: any) { alert('Failed to send email: ' + err.message) }
+    finally { setSending(false) }
   }
 
   return (
@@ -1292,44 +1332,13 @@ function EmailModal({ rfq, onClose }: { rfq: RFQ; onClose: () => void }) {
           <button onClick={onClose} className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg"><X size={16} /></button>
         </div>
         <div className="px-6 py-4 space-y-4">
-          <div>
-            <label className="text-xs font-medium text-gray-600 block mb-1">To</label>
-            <input value={to} onChange={e => setTo(e.target.value)}
-              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400"
-              placeholder="client@email.com" />
-          </div>
-          <div>
-            <label className="text-xs font-medium text-gray-600 block mb-1">Subject</label>
-            <input value={subject} onChange={e => setSubject(e.target.value)}
-              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400" />
-          </div>
-          <div>
-            <label className="text-xs font-medium text-gray-600 block mb-1">Message</label>
-            <textarea value={body} onChange={e => setBody(e.target.value)} rows={7}
-              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400 resize-none" />
-          </div>
-          {rfqAttachments.length > 0 && (
-            <div>
-              <label className="text-xs font-medium text-gray-600 block mb-2">Attach Files</label>
-              <div className="space-y-1.5">
-                {rfqAttachments.map(att => (
-                  <label key={att.id} className="flex items-center gap-3 px-3 py-2 border border-gray-200 rounded-lg cursor-pointer hover:bg-gray-50 transition-colors">
-                    <input type="checkbox"
-                      checked={selectedAttachments.includes(att.id)}
-                      onChange={() => toggleAttachment(att.id)}
-                      className="accent-orange-500" />
-                    <FileText size={13} className="text-gray-400 shrink-0" />
-                    <span className="text-xs font-medium text-gray-700 truncate">{att.file_name}</span>
-                  </label>
-                ))}
-              </div>
-            </div>
-          )}
+          <div><label className="text-xs font-medium text-gray-600 block mb-1">To</label><input value={to} onChange={e => setTo(e.target.value)} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400" placeholder="client@email.com" /></div>
+          <div><label className="text-xs font-medium text-gray-600 block mb-1">Subject</label><input value={subject} onChange={e => setSubject(e.target.value)} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400" /></div>
+          <div><label className="text-xs font-medium text-gray-600 block mb-1">Message</label><textarea value={body} onChange={e => setBody(e.target.value)} rows={7} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400 resize-none" /></div>
         </div>
         <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-3">
           <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
-          <button onClick={handleSend} disabled={!to || sending || sent}
-            className="flex items-center gap-2 px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white text-sm font-semibold rounded-lg disabled:opacity-50 transition-colors">
+          <button onClick={handleSend} disabled={!to || sending || sent} className="flex items-center gap-2 px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white text-sm font-semibold rounded-lg disabled:opacity-50 transition-colors">
             <Send size={14} />{sent ? 'Sent!' : sending ? 'Sending...' : 'Send Email'}
           </button>
         </div>
@@ -1338,7 +1347,7 @@ function EmailModal({ rfq, onClose }: { rfq: RFQ; onClose: () => void }) {
   )
 }
 
-// ?? Helpers ???????????????????????????????????????????????????????????????????
+// ── Helpers ───────────────────────────────────────────────────────────────────
 
 function Section({ title, icon, children }: { title: string; icon: React.ReactNode; children: React.ReactNode }) {
   return (
