@@ -1,6 +1,6 @@
 import React from 'react';
 import { useState, useEffect } from 'react'
-import { ClipboardList, Briefcase, ChevronRight, Factory, Building2, Calendar, Hash, RefreshCw, ArrowDownToLine, ArrowUpFromLine, X, Mail, FileText, Paperclip, Send, Plus } from 'lucide-react'
+import { ClipboardList, Briefcase, ChevronRight, Factory, Building2, Calendar, Hash, RefreshCw, ArrowDownToLine, ArrowUpFromLine, X, Mail, ChevronDown, User, FileText, Paperclip, AlertCircle, Send, Plus } from 'lucide-react'
 import { supabase } from './lib/supabase'
 import { format } from 'date-fns'
 
@@ -46,6 +46,10 @@ interface RFQ {
   clients?: { company_name: string } | null
 }
 
+interface Client {
+  id: string
+  company_name: string
+}
 
 interface LineItem {
   id: string
@@ -54,6 +58,46 @@ interface LineItem {
   description: string
   quantity: number | null
   unit_of_measure: string | null
+}
+
+
+interface Job {
+  id: string
+  job_number: string | null
+  rfq_id: string | null
+  rfq_no: string | null
+  enq_number: string | null
+  client_name: string | null
+  description: string | null
+  status: string
+  priority: string
+  work_type: string | null
+  po_number: string | null
+  site_req_po: string | null
+  assigned_to: string | null
+  supervisor: string | null
+  compiled_by: string | null
+  is_emergency: boolean
+  action_manufacture: boolean
+  action_sandblast: boolean
+  action_prepare_material: boolean
+  action_service: boolean
+  action_paint: boolean
+  action_other: boolean
+  action_repair: boolean
+  action_installation: boolean
+  action_cut: boolean
+  action_modify: boolean
+  doc_service_schedule: boolean
+  doc_drawing_sketches: boolean
+  doc_internal_order: boolean
+  drawing_attached: boolean
+  date_received: string | null
+  material_ordered_date: string | null
+  completion_date: string | null
+  due_date: string | null
+  notes: string | null
+  created_at: string
 }
 
 const RFQ_COLUMNS = [
@@ -65,6 +109,19 @@ const RFQ_COLUMNS = [
   { key: 'JOB_CREATED',      label: 'Complete',         color: 'bg-gray-500',   hover: 'hover:border-gray-300'   },
   { key: 'REJECTED',         label: 'Lost',             color: 'bg-red-400',    hover: 'hover:border-red-300'    },
 ]
+
+
+const JOB_COLUMNS = [
+  { key: 'PENDING',       label: 'Pending',       color: 'bg-gray-500',   hover: 'hover:border-gray-300'   },
+  { key: 'SCHEDULED',     label: 'Scheduled',     color: 'bg-blue-500',   hover: 'hover:border-blue-300'   },
+  { key: 'IN_PROGRESS',   label: 'In Progress',   color: 'bg-orange-500', hover: 'hover:border-orange-300' },
+  { key: 'ON_HOLD',       label: 'On Hold',       color: 'bg-red-400',    hover: 'hover:border-red-300'    },
+  { key: 'QUALITY_CHECK', label: 'Quality Check', color: 'bg-purple-500', hover: 'hover:border-purple-300' },
+  { key: 'COMPLETE',      label: 'Complete',      color: 'bg-green-500',  hover: 'hover:border-green-300'  },
+]
+
+const WORKERS = ['Dewald', 'Jaco', 'Hendrik', 'Juanic', 'Workshop Team']
+const SUPERVISORS = ['Hendrik', 'Juanic', 'Wessie']
 
 const PRIORITY_BADGE: Record<string, string> = {
   URGENT: 'bg-red-100 text-red-700 border border-red-200',
@@ -108,6 +165,7 @@ function formatDate(dateStr: string | null) {
   try { return format(new Date(dateStr), 'dd MMM yyyy') } catch { return '-' }
 }
 
+function today() { return format(new Date(), 'yyyy-MM-dd') }
 
 // ?? Role Selector ?????????????????????????????????????????????????????????????
 
@@ -160,6 +218,11 @@ function App() {
   const [error, setError] = useState<string | null>(null)
   const [selectedRFQ, setSelectedRFQ] = useState<RFQ | null>(null)
   const [showCreateModal, setShowCreateModal] = useState(false)
+  const [jobs, setJobs] = useState<Job[]>([])
+  const [jobsLoading, setJobsLoading] = useState(false)
+  const [selectedJob, setSelectedJob] = useState<Job | null>(null)
+  const [showJobModal, setShowJobModal] = useState(false)
+  const [pendingJobRFQ, setPendingJobRFQ] = useState<{ rfq: RFQ; lineItems: any[] } | null>(null)
 
   const fetchRFQs = async () => {
     setLoading(true); setError(null)
@@ -171,11 +234,27 @@ function App() {
     finally { setLoading(false) }
   }
 
-  useEffect(() => { fetchRFQs() }, [])
+  const fetchJobs = async () => {
+    setJobsLoading(true)
+    try {
+      const { data } = await supabase.from('jobs').select('*').order('created_at', { ascending: false })
+      setJobs(data || [])
+    } catch (e: any) { console.error(e) }
+    finally { setJobsLoading(false) }
+  }
+
+  useEffect(() => { fetchRFQs(); fetchJobs() }, [])
 
   const handleRFQUpdate = (updated: RFQ) => {
     setRfqs(prev => prev.map(r => r.id === updated.id ? updated : r))
     setSelectedRFQ(updated)
+  }
+
+  const handleOrderWon = (updated: RFQ, lineItems: any[]) => {
+    setRfqs(prev => prev.map(r => r.id === updated.id ? updated : r))
+    setSelectedRFQ(updated)
+    setPendingJobRFQ({ rfq: updated, lineItems })
+    setShowJobModal(true)
   }
 
   const handleRFQCreated = () => {
@@ -225,6 +304,11 @@ function App() {
                 <Plus size={15} />New RFQ
               </button>
             )}
+            {activeBoard === 'job' && (
+              <button onClick={fetchJobs} className="flex items-center gap-2 px-3 py-1.5 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors">
+                <RefreshCw size={14} />Refresh
+              </button>
+            )}
             <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold ${activeBoard === 'rfq' ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-700'}`}>
               {activeBoard === 'rfq' ? 'RFQ Board' : 'Job Board'}
             </span>
@@ -235,13 +319,26 @@ function App() {
           <div className="flex-1 overflow-auto p-6 min-w-0">
             {activeBoard === 'rfq'
               ? <RFQBoard rfqs={rfqs} loading={loading} error={error} onRefresh={fetchRFQs} onCardClick={setSelectedRFQ} selectedId={selectedRFQ?.id} />
-              : <JobBoardPlaceholder />}
+              : <JobBoard jobs={jobs} loading={jobsLoading} onCardClick={setSelectedJob} selectedId={selectedJob?.id} />}
           </div>
-          {selectedRFQ && <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4"><RFQDetailPanel rfq={selectedRFQ} onClose={() => setSelectedRFQ(null)} onUpdate={handleRFQUpdate} role={currentRole} /></div>}
+          {selectedRFQ && <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4"><RFQDetailPanel rfq={selectedRFQ} onClose={() => setSelectedRFQ(null)} onUpdate={handleRFQUpdate} onOrderWon={handleOrderWon} role={currentRole} /></div>}
         </div>
       </main>
 
       {showCreateModal && <CreateRFQModal onClose={() => setShowCreateModal(false)} onCreated={handleRFQCreated} />}
+      {showJobModal && pendingJobRFQ && (
+        <CreateJobModal
+          rfq={pendingJobRFQ.rfq}
+          lineItems={pendingJobRFQ.lineItems}
+          onClose={() => { setShowJobModal(false); setPendingJobRFQ(null) }}
+          onCreated={() => { setShowJobModal(false); setPendingJobRFQ(null); fetchJobs() }}
+        />
+      )}
+      {selectedJob && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+          <JobDetailPanel job={selectedJob} onClose={() => setSelectedJob(null)} onUpdate={(j) => { setJobs(prev => prev.map(x => x.id === j.id ? j : x)); setSelectedJob(j) }} />
+        </div>
+      )}
     </div>
   )
 }
@@ -327,7 +424,7 @@ function CreateRFQModal({ onClose, onCreated }: { onClose: () => void; onCreated
     special_requirements: '',
     notes: '',
   })
-  const [, setLineItems] = React.useState([
+  const [lineItems, setLineItems] = React.useState([
     { item_type: 'MATERIAL', description: '', quantity: 1, unit_of_measure: 'EA' }
   ])
 
@@ -733,8 +830,8 @@ function CreateRFQModal({ onClose, onCreated }: { onClose: () => void; onCreated
 
 // ?? RFQ Detail Panel ??????????????????????????????????????????????????????????
 
-function RFQDetailPanel({ rfq, onClose, onUpdate, role }: { rfq: RFQ; onClose: () => void; onUpdate: (rfq: RFQ) => void; role: string | null }) {
-  const [, setLineItems] = React.useState<LineItem[]>([])
+function RFQDetailPanel({ rfq, onClose, onUpdate, onOrderWon, role }: { rfq: RFQ; onClose: () => void; onUpdate: (rfq: RFQ) => void; onOrderWon?: (rfq: RFQ, lineItems: any[]) => void; role: string | null }) {
+  const [lineItems, setLineItems] = React.useState<LineItem[]>([])
   const [panelLineItems, setPanelLineItems] = React.useState<any[]>([])
   const [loadingItems, setLoadingItems] = React.useState(true)
   const [panelAttachments, setPanelAttachments] = React.useState<any[]>([])
@@ -778,7 +875,7 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role }: { rfq: RFQ; onClose: (
       .select('id, line_number, item_type, description, quantity, unit_of_measure')
       .eq('rfq_id', rfq.id).order('line_number')
       .then(({ data }) => { setLineItems(data || []); setPanelLineItems(data || []) })
-      .finally(() => setLoadingItems(false))
+      
     supabase.from('rfq_attachments')
       .select('id, file_name, file_path')
       .eq('rfq_id', rfq.id)
@@ -885,7 +982,11 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role }: { rfq: RFQ; onClose: (
       }).eq('id', rfq.id).select('*, clients(company_name)').single()
       if (error) throw error
       onUpdate(data)
-      showMsg('Order saved - card moved to Order Won')
+      showMsg('Order saved - creating job...')
+      // Auto-trigger job creation modal with current line items
+      if (onOrderWon) {
+        onOrderWon(data, panelLineItems)
+      }
     } catch (e: any) { alert('Error: ' + e.message) }
     finally { setSaving(false) }
   }
@@ -1363,9 +1464,451 @@ function InfoRow({ label, value }: { label: string; value: string | null | undef
   )
 }
 
-function JobBoardPlaceholder() {
-  return <div className="flex items-center justify-center h-64"><p className="text-gray-400 text-lg font-medium">Job Board - coming soon</p></div>
+// ?? Job Board ?????????????????????????????????????????????????????????????????
+
+function JobBoard({ jobs, loading, onCardClick, selectedId }: { jobs: Job[]; loading: boolean; onCardClick: (job: Job) => void; selectedId?: string }) {
+  if (loading) return <div className="flex items-center justify-center h-64 gap-3 text-gray-400"><div className="w-5 h-5 border-2 border-gray-300 border-t-green-500 rounded-full animate-spin" /><span>Loading Jobs...</span></div>
+  return (
+    <div className="flex gap-4 h-full" style={{ minWidth: 'max-content' }}>
+      {JOB_COLUMNS.map((col) => {
+        const cards = jobs.filter(j => j.status === col.key)
+        return (
+          <div key={col.key} className="w-64 flex flex-col shrink-0">
+            <div className={`flex items-center gap-2 px-3 py-2.5 rounded-t-lg ${col.color}`}>
+              <span className="text-white text-sm font-bold">{col.label}</span>
+              <span className="ml-auto bg-white bg-opacity-25 text-white text-xs font-bold px-2 py-0.5 rounded-full">{cards.length}</span>
+            </div>
+            <div className="flex-1 bg-gray-200 rounded-b-lg p-2 min-h-96 space-y-2">
+              {cards.length === 0 && <div className="flex items-center justify-center h-20"><p className="text-gray-400 text-xs">No jobs</p></div>}
+              {cards.map(job => <JobCard key={job.id} job={job} hoverColor={col.hover} onClick={() => onCardClick(job)} isSelected={job.id === selectedId} />)}
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
 }
+
+// ?? Job Card ??????????????????????????????????????????????????????????????????
+
+function JobCard({ job, hoverColor, onClick, isSelected }: { job: Job; hoverColor: string; onClick: () => void; isSelected: boolean }) {
+  const priority = job.priority?.toUpperCase() || 'NORMAL'
+  return (
+    <div onClick={onClick} className={`bg-white rounded-lg shadow-sm border-2 p-3 cursor-pointer hover:shadow-md ${hoverColor} transition-all ${isSelected ? 'border-green-400 shadow-md' : 'border-transparent'}`}>
+      <div className="flex items-center gap-1.5 mb-2 flex-wrap">
+        <span className="text-xs font-bold text-green-600 tracking-wide">{job.job_number || 'Pending'}</span>
+        {job.is_emergency && <span className="text-xs font-bold px-1.5 py-0.5 rounded bg-red-100 text-red-700">EMERGENCY</span>}
+        <span className={`ml-auto text-xs font-semibold px-2 py-0.5 rounded-full ${PRIORITY_BADGE[priority] || PRIORITY_BADGE['NORMAL']}`}>{priority}</span>
+      </div>
+      <p className="text-sm font-medium text-gray-800 leading-snug mb-3 line-clamp-2">{job.description || 'No description'}</p>
+      {job.client_name && <div className="flex items-center gap-1.5 mb-1"><Building2 size={12} className="text-gray-400 shrink-0" /><span className="text-xs text-gray-500 truncate">{job.client_name}</span></div>}
+      {job.enq_number && <div className="flex items-center gap-1.5 mb-1"><Hash size={12} className="text-gray-400 shrink-0" /><span className="text-xs text-gray-400">{job.enq_number}</span></div>}
+      {job.due_date && <div className="flex items-center gap-1.5"><Calendar size={12} className="text-gray-400 shrink-0" /><span className="text-xs text-gray-400">Due {formatDate(job.due_date)}</span></div>}
+      {job.assigned_to && <div className="mt-2 flex items-center gap-1.5"><div className="w-5 h-5 rounded-full bg-green-100 flex items-center justify-center"><span className="text-green-700 font-bold text-xs">{job.assigned_to[0]}</span></div><span className="text-xs text-gray-500">{job.assigned_to}</span></div>}
+    </div>
+  )
+}
+
+// ?? Create Job Modal (Line Item Split) ????????????????????????????????????????
+
+function CreateJobModal({ rfq, lineItems, onClose, onCreated }: { rfq: RFQ; lineItems: any[]; onClose: () => void; onCreated: () => void }) {
+  const [saving, setSaving] = useState(false)
+  const [splitMode, setSplitMode] = useState<'single' | 'split'>('single')
+  const [selectedItems, setSelectedItems] = useState<string[]>([])
+  const [dueDate, setDueDate] = useState('')
+  const [assignedTo, setAssignedTo] = useState('')
+  const [supervisor, setSupervisor] = useState('')
+  const [workType, setWorkType] = useState('QUOTED')
+  const [isEmergency, setIsEmergency] = useState(false)
+  const [notes, setNotes] = useState(rfq.notes || '')
+
+  const clientName = rfq.clients?.company_name || ''
+  const enqNo = rfq.enq_number || rfq.rfq_no || '-'
+
+  const toggleItem = (id: string) => {
+    setSelectedItems(prev => prev.includes(id) ? prev.filter(x => x !== id) : [...prev, id])
+  }
+
+  const handleCreate = async () => {
+    setSaving(true)
+    try {
+      const baseJob = {
+        rfq_id: rfq.id,
+        rfq_no: rfq.rfq_no,
+        enq_number: rfq.enq_number,
+        client_name: clientName,
+        description: rfq.description,
+        status: 'PENDING',
+        priority: rfq.priority || 'NORMAL',
+        work_type: workType,
+        po_number: rfq.po_number || null,
+        assigned_to: assignedTo || null,
+        supervisor: supervisor || null,
+        is_emergency: isEmergency,
+        due_date: dueDate || null,
+        notes: notes || null,
+        date_received: new Date().toISOString().split('T')[0],
+      }
+
+      if (splitMode === 'single' || selectedItems.length === 0) {
+        // Create one job with all line items
+        const { data: job, error } = await supabase.from('jobs').insert(baseJob).select('id').single()
+        if (error) throw error
+        if (lineItems.length > 0) {
+          await supabase.from('job_line_items').insert(
+            lineItems.map((li, i) => ({
+              job_id: job.id,
+              rfq_line_item_id: li.id || null,
+              line_number: i + 1,
+              description: li.description,
+              quantity: parseFloat(li.quantity) || 1,
+              unit_of_measure: li.unit_of_measure || 'EA',
+              item_type: li.item_type || 'MATERIAL',
+            }))
+          )
+        }
+      } else {
+        // Create separate job per selected line item
+        const splitItems = lineItems.filter(li => selectedItems.includes(li.id || String(li.line_number)))
+        const remainingItems = lineItems.filter(li => !selectedItems.includes(li.id || String(li.line_number)))
+
+        for (const li of splitItems) {
+          const { data: job, error } = await supabase.from('jobs').insert({
+            ...baseJob,
+            description: li.description || rfq.description,
+          }).select('id').single()
+          if (error) throw error
+          await supabase.from('job_line_items').insert({
+            job_id: job.id,
+            rfq_line_item_id: li.id || null,
+            line_number: 1,
+            description: li.description,
+            quantity: parseFloat(li.quantity) || 1,
+            unit_of_measure: li.unit_of_measure || 'EA',
+            item_type: li.item_type || 'MATERIAL',
+          })
+        }
+
+        if (remainingItems.length > 0) {
+          const { data: job, error } = await supabase.from('jobs').insert(baseJob).select('id').single()
+          if (error) throw error
+          await supabase.from('job_line_items').insert(
+            remainingItems.map((li, i) => ({
+              job_id: job.id,
+              rfq_line_item_id: li.id || null,
+              line_number: i + 1,
+              description: li.description,
+              quantity: parseFloat(li.quantity) || 1,
+              unit_of_measure: li.unit_of_measure || 'EA',
+              item_type: li.item_type || 'MATERIAL',
+            }))
+          )
+        }
+      }
+      onCreated()
+    } catch (e: any) { alert('Error creating job: ' + e.message) }
+    finally { setSaving(false) }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-start justify-center overflow-y-auto py-8">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl mx-4">
+        <div className="bg-green-600 px-6 py-4 rounded-t-xl flex items-center justify-between">
+          <div>
+            <h2 className="text-white font-bold text-base">Create Job from Order Won</h2>
+            <p className="text-green-100 text-xs mt-0.5">{enqNo} ? {clientName}</p>
+          </div>
+          <button onClick={onClose} className="text-white hover:text-green-200"><X size={18} /></button>
+        </div>
+
+        <div className="px-6 py-5 space-y-5 max-h-[75vh] overflow-y-auto">
+
+          {/* RFQ Summary */}
+          <div className="bg-gray-50 rounded-lg px-4 py-3 border border-gray-200">
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">From RFQ</p>
+            <p className="text-sm font-medium text-gray-800 mb-1">{rfq.description}</p>
+            <div className="flex gap-4 text-xs text-gray-500">
+              {rfq.po_number && <span>PO: <span className="font-semibold text-gray-700">{rfq.po_number}</span></span>}
+              {rfq.quote_number && <span>Quote: <span className="font-semibold text-gray-700">{rfq.quote_number}</span></span>}
+              <span>Priority: <span className="font-semibold text-gray-700">{rfq.priority}</span></span>
+            </div>
+          </div>
+
+          {/* Line Item Split Mode */}
+          {lineItems.length > 1 && (
+            <div>
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Job Cards</p>
+              <div className="grid grid-cols-2 gap-3 mb-3">
+                <button onClick={() => setSplitMode('single')}
+                  className={`py-3 px-4 rounded-lg border-2 text-sm font-semibold text-left transition-all ${splitMode === 'single' ? 'border-green-500 bg-green-50 text-green-700' : 'border-gray-200 text-gray-500 hover:border-gray-300'}`}>
+                  <div>One Job Card</div>
+                  <div className="text-xs font-normal mt-0.5 opacity-70">All line items in one job</div>
+                </button>
+                <button onClick={() => setSplitMode('split')}
+                  className={`py-3 px-4 rounded-lg border-2 text-sm font-semibold text-left transition-all ${splitMode === 'split' ? 'border-green-500 bg-green-50 text-green-700' : 'border-gray-200 text-gray-500 hover:border-gray-300'}`}>
+                  <div>Split into Multiple</div>
+                  <div className="text-xs font-normal mt-0.5 opacity-70">Select items to split off</div>
+                </button>
+              </div>
+
+              {splitMode === 'split' && (
+                <div className="border border-gray-200 rounded-lg overflow-hidden">
+                  <div className="bg-gray-50 px-3 py-2 text-xs font-semibold text-gray-500">Select items to become their own job cards:</div>
+                  {lineItems.map((li, i) => {
+                    const itemId = li.id || String(li.line_number || i)
+                    return (
+                      <label key={i} className="flex items-center gap-3 px-3 py-2.5 border-t border-gray-100 cursor-pointer hover:bg-gray-50">
+                        <input type="checkbox" checked={selectedItems.includes(itemId)} onChange={() => toggleItem(itemId)} className="accent-green-600" />
+                        <div className="flex-1 min-w-0">
+                          <p className="text-sm font-medium text-gray-800 truncate">{li.description || 'No description'}</p>
+                          <p className="text-xs text-gray-400">{li.quantity} {li.unit_of_measure} ? {li.item_type}</p>
+                        </div>
+                      </label>
+                    )
+                  })}
+                  {selectedItems.length > 0 && (
+                    <div className="bg-green-50 px-3 py-2 text-xs text-green-700 border-t border-green-100">
+                      {selectedItems.length} separate job card{selectedItems.length > 1 ? 's' : ''} + {lineItems.length > selectedItems.length ? '1 combined job for remaining items' : ''}
+                    </div>
+                  )}
+                </div>
+              )}
+            </div>
+          )}
+
+          {lineItems.length === 1 && (
+            <div className="border border-gray-200 rounded-lg px-3 py-2.5 bg-gray-50">
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-1">Line Item</p>
+              <p className="text-sm font-medium text-gray-800">{lineItems[0]?.description || 'No description'}</p>
+              <p className="text-xs text-gray-400">{lineItems[0]?.quantity} {lineItems[0]?.unit_of_measure}</p>
+            </div>
+          )}
+
+          {lineItems.length === 0 && (
+            <div className="border border-dashed border-gray-200 rounded-lg px-3 py-4 text-center">
+              <p className="text-xs text-gray-400">No line items on this RFQ</p>
+            </div>
+          )}
+
+          {/* Job Details */}
+          <div>
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Job Details</p>
+            <div className="grid grid-cols-2 gap-3 mb-3">
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Work Type</label>
+                <div className="flex gap-2">
+                  {['QUOTED', 'CONTRACT'].map(wt => (
+                    <button key={wt} onClick={() => setWorkType(wt)}
+                      className={`flex-1 py-2 rounded-lg text-xs font-semibold border-2 transition-all ${workType === wt ? 'border-green-500 bg-green-50 text-green-700' : 'border-gray-200 text-gray-500'}`}>
+                      {wt}
+                    </button>
+                  ))}
+                </div>
+              </div>
+              <div className="flex items-center gap-3 pt-5">
+                <label className="flex items-center gap-2 cursor-pointer">
+                  <input type="checkbox" checked={isEmergency} onChange={e => setIsEmergency(e.target.checked)} className="accent-red-500" />
+                  <span className="text-xs font-semibold text-red-600">EMERGENCY</span>
+                </label>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Assign to Employee</label>
+                <select value={assignedTo} onChange={e => setAssignedTo(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500">
+                  <option value="">Select...</option>
+                  {WORKERS.map(w => <option key={w}>{w}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Supervisor</label>
+                <select value={supervisor} onChange={e => setSupervisor(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500">
+                  <option value="">Select...</option>
+                  {SUPERVISORS.map(s => <option key={s}>{s}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs font-medium text-gray-600 mb-1">Due Date</label>
+                <input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
+              </div>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Notes</label>
+              <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 resize-none" />
+            </div>
+          </div>
+        </div>
+
+        <div className="flex justify-end gap-3 px-6 py-4 border-t border-gray-200 bg-gray-50 rounded-b-xl">
+          <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800 font-medium">Skip for now</button>
+          <button onClick={handleCreate} disabled={saving}
+            className="px-6 py-2 bg-green-600 text-white text-sm font-semibold rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors">
+            {saving ? 'Creating...' : splitMode === 'split' && selectedItems.length > 0 ? `Create ${selectedItems.length + (lineItems.length > selectedItems.length ? 1 : 0)} Job Cards` : 'Create Job Card'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ?? Job Detail Panel ??????????????????????????????????????????????????????????
+
+function JobDetailPanel({ job, onClose, onUpdate }: { job: Job; onClose: () => void; onUpdate: (job: Job) => void }) {
+  const [saving, setSaving] = useState(false)
+  const [jobLineItems, setJobLineItems] = useState<any[]>([])
+  const [actionMsg, setActionMsg] = useState<string | null>(null)
+  const [editAssignedTo, setEditAssignedTo] = useState(job.assigned_to || '')
+  const [editSupervisor, setEditSupervisor] = useState(job.supervisor || '')
+  const [editDueDate, setEditDueDate] = useState(job.due_date || '')
+  const [editMaterialDate, setEditMaterialDate] = useState(job.material_ordered_date || '')
+  const [editCompletionDate, setEditCompletionDate] = useState(job.completion_date || '')
+  const [editNotes, setEditNotes] = useState(job.notes || '')
+  const [editStatus, setEditStatus] = useState(job.status)
+  const [editPriority, setEditPriority] = useState(job.priority)
+
+  React.useEffect(() => {
+    supabase.from('job_line_items').select('*').eq('job_id', job.id).order('line_number')
+      .then(({ data }) => setJobLineItems(data || []))
+  }, [job.id])
+
+  const showMsg = (msg: string) => { setActionMsg(msg); setTimeout(() => setActionMsg(null), 3000) }
+
+  const handleSave = async () => {
+    setSaving(true)
+    try {
+      const { data, error } = await supabase.from('jobs').update({
+        status: editStatus,
+        priority: editPriority,
+        assigned_to: editAssignedTo || null,
+        supervisor: editSupervisor || null,
+        due_date: editDueDate || null,
+        material_ordered_date: editMaterialDate || null,
+        completion_date: editCompletionDate || null,
+        notes: editNotes || null,
+      }).eq('id', job.id).select('*').single()
+      if (error) throw error
+      onUpdate(data)
+      showMsg('Job saved')
+    } catch (e: any) { alert('Error: ' + e.message) }
+    finally { setSaving(false) }
+  }
+
+  return (
+    <div className="bg-white rounded-xl shadow-2xl w-full max-w-xl flex flex-col max-h-[90vh]">
+      <div className="px-6 py-4 border-b border-gray-100 flex items-start justify-between shrink-0">
+        <div>
+          <div className="flex items-center gap-2 mb-1">
+            <span className="text-base font-bold text-gray-900">{job.job_number || 'Pending'}</span>
+            {job.is_emergency && <span className="text-xs font-bold px-2 py-0.5 rounded bg-red-100 text-red-700">EMERGENCY</span>}
+            <span className={`text-xs font-semibold px-2 py-0.5 rounded-full ${PRIORITY_BADGE[job.priority] || PRIORITY_BADGE['NORMAL']}`}>{job.priority}</span>
+          </div>
+          <p className="text-sm text-gray-500">{job.client_name}</p>
+          {job.enq_number && <p className="text-xs text-gray-400">From: {job.enq_number}</p>}
+        </div>
+        <button onClick={onClose} className="ml-3 p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg"><X size={16} /></button>
+      </div>
+
+      <div className="flex-1 overflow-y-auto">
+        {actionMsg && <div className="mx-5 mt-3 px-3 py-2 bg-green-50 border border-green-200 rounded-lg text-green-700 text-sm">{actionMsg}</div>}
+
+        {/* Status */}
+        <div className="px-5 py-4 border-b border-gray-100">
+          <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-2">Status</p>
+          <div className="flex flex-wrap gap-2">
+            {JOB_COLUMNS.map(col => (
+              <button key={col.key} onClick={() => setEditStatus(col.key)}
+                className={`px-3 py-1.5 rounded-lg text-xs font-semibold border-2 transition-all ${editStatus === col.key ? col.color + ' text-white border-transparent' : 'border-gray-200 text-gray-600 hover:border-gray-300'}`}>
+                {col.label}
+              </button>
+            ))}
+          </div>
+        </div>
+
+        {/* Description */}
+        <div className="px-5 py-4 border-b border-gray-100">
+          <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-2">Description</p>
+          <p className="text-sm text-gray-800">{job.description || '-'}</p>
+          {job.po_number && <p className="text-xs text-gray-500 mt-1">PO: {job.po_number}</p>}
+        </div>
+
+        {/* Line Items */}
+        {jobLineItems.length > 0 && (
+          <div className="px-5 py-4 border-b border-gray-100">
+            <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-2">Line Items</p>
+            <div className="space-y-1.5">
+              {jobLineItems.map((li, i) => (
+                <div key={i} className="flex items-center gap-3 px-3 py-2 bg-gray-50 rounded-lg border border-gray-100">
+                  <span className="text-xs font-bold text-gray-400 w-4">{li.line_number}</span>
+                  <span className="text-xs font-medium text-gray-700 flex-1">{li.description}</span>
+                  <span className="text-xs text-gray-400">{li.quantity} {li.unit_of_measure}</span>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* Assignment & Planning */}
+        <div className="px-5 py-4 border-b border-gray-100">
+          <div className="flex items-center justify-between mb-3">
+            <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest">Planning</p>
+            <button onClick={handleSave} disabled={saving}
+              className="px-3 py-1 text-xs font-semibold bg-green-600 hover:bg-green-700 text-white rounded-lg disabled:opacity-50">
+              {saving ? 'Saving...' : 'Save Changes'}
+            </button>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="text-xs text-gray-500 block mb-1">Assigned To</label>
+              <select value={editAssignedTo} onChange={e => setEditAssignedTo(e.target.value)}
+                className="w-full border border-gray-200 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-green-400 bg-white">
+                <option value="">Select...</option>
+                {WORKERS.map(w => <option key={w}>{w}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-xs text-gray-500 block mb-1">Supervisor</label>
+              <select value={editSupervisor} onChange={e => setEditSupervisor(e.target.value)}
+                className="w-full border border-gray-200 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-green-400 bg-white">
+                <option value="">Select...</option>
+                {SUPERVISORS.map(s => <option key={s}>{s}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-xs text-gray-500 block mb-1">Priority</label>
+              <select value={editPriority} onChange={e => setEditPriority(e.target.value)}
+                className="w-full border border-gray-200 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-green-400 bg-white">
+                {['LOW','NORMAL','MEDIUM','HIGH','URGENT'].map(p => <option key={p}>{p}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="text-xs text-gray-500 block mb-1">Due Date</label>
+              <input type="date" value={editDueDate} onChange={e => setEditDueDate(e.target.value)}
+                className="w-full border border-gray-200 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-green-400" />
+            </div>
+            <div>
+              <label className="text-xs text-gray-500 block mb-1">Material Ordered</label>
+              <input type="date" value={editMaterialDate} onChange={e => setEditMaterialDate(e.target.value)}
+                className="w-full border border-gray-200 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-green-400" />
+            </div>
+            <div>
+              <label className="text-xs text-gray-500 block mb-1">Completion Date</label>
+              <input type="date" value={editCompletionDate} onChange={e => setEditCompletionDate(e.target.value)}
+                className="w-full border border-gray-200 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-green-400" />
+            </div>
+          </div>
+          <div className="mt-3">
+            <label className="text-xs text-gray-500 block mb-1">Notes</label>
+            <textarea value={editNotes} onChange={e => setEditNotes(e.target.value)} rows={2}
+              className="w-full border border-gray-200 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-green-400 resize-none" />
+          </div>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 
 interface NavItemProps { icon: React.ReactNode; label: string; description: string; active: boolean; accentColor: string; onClick: () => void }
 function NavItem({ icon, label, description, active, accentColor, onClick }: NavItemProps) {

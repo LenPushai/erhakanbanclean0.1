@@ -853,8 +853,6 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, onJobCreated }: { rfq: R
       onUpdate(data)
       const { error: jobError } = await supabase.from('jobs').insert({
         rfq_id: rfq.id,
-        rfq_no: rfq.rfq_no || rfq.enq_number,
-        enq_number: rfq.enq_number,
         client_name: rfq.clients?.company_name || null,
         description: rfq.description,
         po_number: poNumber.trim(),
