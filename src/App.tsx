@@ -232,7 +232,7 @@ function App() {
         </div>
         <nav className="flex-1 px-3 py-4 space-y-1">
           <p className="text-gray-500 text-xs font-semibold uppercase tracking-widest px-3 mb-3">Boards</p>
-          <NavItem icon={<ClipboardList size={18} />} label="RFQ Board" description="Sales pipeline" active={activeBoard === 'rfq'} accentColor="text-blue-400" onClick={() => setActiveBoard('rfq')} />
+          <NavItem icon={<ClipboardList size={18} />} label="Work Order Board" description="Work Order pipeline" active={activeBoard === 'rfq'} accentColor="text-blue-400" onClick={() => setActiveBoard('rfq')} />
           <NavItem icon={<Briefcase size={18} />} label="Job Board" description="Project tracking" active={activeBoard === 'job'} accentColor="text-green-400" onClick={() => setActiveBoard('job')} />
         </nav>
         <div className="px-6 py-4 border-t border-gray-700">
@@ -244,8 +244,8 @@ function App() {
       <main className="flex-1 flex flex-col overflow-hidden">
         <header className="bg-white border-b border-gray-200 px-8 py-4 flex items-center justify-between shrink-0">
           <div>
-            <h1 className="text-xl font-bold text-gray-900">{activeBoard === 'rfq' ? 'RFQ Board' : 'Job Board'}</h1>
-            <p className="text-sm text-gray-500 mt-0.5">{activeBoard === 'rfq' ? 'Enquiry to job creation - sales pipeline' : 'Job created to paid - project tracking'}</p>
+            <h1 className="text-xl font-bold text-gray-900">{activeBoard === 'rfq' ? 'Work Order Board' : 'Job Board'}</h1>
+            <p className="text-sm text-gray-500 mt-0.5">{activeBoard === 'rfq' ? 'Work Order to job creation - sales pipeline' : 'Job created to paid - project tracking'}</p>
           </div>
           <div className="flex items-center gap-3">
             <button onClick={() => { fetchRFQs(); fetchJobs() }} className="flex items-center gap-2 px-3 py-1.5 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors">
@@ -253,11 +253,11 @@ function App() {
             </button>
             {activeBoard === 'rfq' && (
               <button onClick={() => setShowCreateModal(true)} className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg transition-colors">
-                <Plus size={15} />New RFQ
+                <Plus size={15} />New Work Order
               </button>
             )}
             <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold ${activeBoard === 'rfq' ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-700'}`}>
-              {activeBoard === 'rfq' ? 'RFQ Board' : 'Job Board'}
+              {activeBoard === 'rfq' ? 'Work Order Board' : 'Job Board'}
             </span>
           </div>
         </header>
@@ -481,7 +481,7 @@ function CreateRFQModal({ onClose, onCreated }: { onClose: () => void; onCreated
       }
 
       const { count } = await supabase.from('rfqs').select('*', { count: 'exact', head: true })
-      const enqNumber = `ENQ-26-${String((count || 0) + 1).padStart(4, '0')}`
+      const enqNumber = `WO-26-${String((count || 0) + 1).padStart(4, '0')}`
 
       const { data: rfq, error: rfqError } = await supabase.from('rfqs').insert({
         enq_number: enqNumber,
@@ -552,7 +552,7 @@ function CreateRFQModal({ onClose, onCreated }: { onClose: () => void; onCreated
     <div className="fixed inset-0 bg-black/50 z-50 flex items-start justify-center overflow-y-auto py-8">
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl mx-4">
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
-          <h2 className="text-lg font-bold text-gray-900">New RFQ</h2>
+          <h2 className="text-lg font-bold text-gray-900">New Work Order</h2>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl font-bold leading-none"><X size={18} /></button>
         </div>
 
@@ -725,7 +725,7 @@ function CreateRFQModal({ onClose, onCreated }: { onClose: () => void; onCreated
         <div className="flex justify-end gap-3 px-6 py-4 border-t border-gray-200 bg-gray-50 rounded-b-xl">
           <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800 font-medium">Cancel</button>
           <button type="button" onClick={handleSave} disabled={saving || uploadingFiles} className="px-6 py-2 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
-            {saving ? 'Creating...' : 'Create RFQ'}
+            {saving ? 'Creating...' : 'Create Work Order'}
           </button>
         </div>
       </div>
@@ -740,6 +740,7 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, onJobCreated }: { rfq: R
   const [panelLineItems, setPanelLineItems] = React.useState<any[]>([])
   const [loadingItems, setLoadingItems] = React.useState(true)
   const [panelAttachments, setPanelAttachments] = React.useState<any[]>([])
+  const [uploadingPanelFiles, setUploadingPanelFiles] = React.useState(false)
   const [selectedQuoter, setSelectedQuoter] = React.useState(rfq.assigned_quoter_name || '')
   const [assigning, setAssigning] = React.useState(false)
   const [showEmail, setShowEmail] = React.useState(false)
@@ -767,7 +768,7 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, onJobCreated }: { rfq: R
   const [quoteValue, setQuoteValue] = React.useState(rfq.quote_value_excl_vat ? String(rfq.quote_value_excl_vat) : '')
   const [validUntil, setValidUntil] = React.useState(rfq.valid_until || '')
   const [poNumber, setPoNumber] = React.useState(rfq.po_number || '')
-  const [orderNumber, setOrderNumber] = React.useState(rfq.order_number || '')
+
   const [orderDate, setOrderDate] = React.useState(rfq.order_date || '')
   const [invoiceNumber, setInvoiceNumber] = React.useState(rfq.invoice_number || '')
   const [invoiceDate, setInvoiceDate] = React.useState(rfq.invoice_date || '')
@@ -848,24 +849,52 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, onJobCreated }: { rfq: R
     if (!poNumber.trim()) { alert('Please enter the client PO number'); return }
     setSaving(true)
     try {
-      const { data, error } = await supabase.from('rfqs').update({ po_number: poNumber.trim(), order_number: orderNumber || null, order_date: orderDate || null, status: 'ACCEPTED' }).eq('id', rfq.id).select('*, clients(company_name)').single()
+      // 1. Update RFQ to ACCEPTED
+      const { data, error } = await supabase.from('rfqs').update({ po_number: poNumber.trim(), order_date: orderDate || null, status: 'ACCEPTED' }).eq('id', rfq.id).select('*, clients(company_name)').single()
       if (error) throw error
       onUpdate(data)
-      const { error: jobError } = await supabase.from('jobs').insert({
+
+      // 2. Create job record
+      const { data: jobData, error: jobError } = await supabase.from('jobs').insert({
         rfq_id: rfq.id,
-        rfq_no: rfq.rfq_no || rfq.enq_number,
-        enq_number: rfq.enq_number,
         client_name: rfq.clients?.company_name || null,
         description: rfq.description,
         po_number: poNumber.trim(),
         status: 'PENDING',
         priority: rfq.priority || 'NORMAL',
-      })
+      }).select('id').single()
+
       if (jobError) {
         console.error('Job creation error:', jobError.message)
         showMsg('Order saved but job creation failed - check console')
       } else {
-        showMsg('Order won - Job created on Job Board!')
+        // 3. Copy line items from RFQ to job
+        const { data: rfqItems } = await supabase
+          .from('rfq_line_items')
+          .select('line_number, item_type, description, quantity, unit_of_measure')
+          .eq('rfq_id', rfq.id)
+          .order('line_number')
+
+        if (rfqItems && rfqItems.length > 0) {
+          const jobLineItems = rfqItems.map((item, idx) => ({
+            job_id: jobData.id,
+            description: item.description,
+            quantity: item.quantity || 1,
+            uom: item.unit_of_measure || 'EA',
+            item_type: item.item_type || 'MATERIAL',
+            cost_price: 0,
+            sell_price: 0,
+            line_total: 0,
+            status: 'PENDING',
+            sort_order: idx + 1,
+            can_spawn_job: true,
+          }))
+          const { error: liError } = await supabase.from('job_line_items').insert(jobLineItems)
+          if (liError) console.error('Line items copy error:', liError.message)
+          else console.log('Copied', jobLineItems.length, 'line items to job')
+        }
+
+        showMsg('Order won - Job created with line items!')
         if (onJobCreated) onJobCreated()
       }
     } catch (e: any) { alert('Error: ' + e.message) }
@@ -946,11 +975,11 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, onJobCreated }: { rfq: R
               <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-3">Order Information (when won)</p>
               <div className="grid grid-cols-3 gap-3 mb-3">
                 <div><label className="text-xs font-medium text-gray-600 block mb-1">Client PO Number *</label><input value={poNumber} onChange={e => setPoNumber(e.target.value)} placeholder="Client PO" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400" /></div>
-                <div><label className="text-xs font-medium text-gray-600 block mb-1">Order Number</label><input value={orderNumber} onChange={e => setOrderNumber(e.target.value)} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400" /></div>
+
                 <div><label className="text-xs font-medium text-gray-600 block mb-1">Order Date</label><input type="date" value={orderDate} onChange={e => setOrderDate(e.target.value)} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400" /></div>
               </div>
               {(status === 'QUOTED' || status === 'SENT_TO_CUSTOMER') && <button onClick={handleSaveOrder} disabled={saving} className="w-full py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-lg disabled:opacity-50">{saving ? 'Saving...' : 'Save Order - Move to Order Won'}</button>}
-              {status === 'ACCEPTED' && poNumber && <div className="flex items-center gap-2 text-sm text-green-700 bg-green-50 px-3 py-2 rounded-lg"><FileText size={14} /> PO: {poNumber} {orderNumber ? '| Order: ' + orderNumber : ''}</div>}
+              {status === 'ACCEPTED' && poNumber && <div className="flex items-center gap-2 text-sm text-green-700 bg-green-50 px-3 py-2 rounded-lg"><FileText size={14} /> PO: {poNumber}</div>}
             </div>
           )}
 
@@ -977,7 +1006,7 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, onJobCreated }: { rfq: R
 
           <div className="px-5 py-4 border-b border-gray-100">
             <div className="flex items-center justify-between mb-3">
-              <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest">RFQ Details</p>
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest">Work Order Details</p>
               <button onClick={handleSaveRFQDetails} disabled={saving} className="px-3 py-1 text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white rounded-lg disabled:opacity-50">{saving ? 'Saving...' : 'Save Changes'}</button>
             </div>
             <p className="text-xs font-medium text-gray-500 mb-2">Client Information</p>
@@ -1058,22 +1087,58 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, onJobCreated }: { rfq: R
             )}
           </div>
 
-          {panelAttachments.length > 0 && (
-            <div className="px-5 py-4 border-b border-gray-100">
-              <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-2">Attachments</p>
+          <div className="px-5 py-4 border-b border-gray-100">
+            <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-3">Attachments</p>
+            <label className={`flex items-center gap-3 px-4 py-3 border-2 border-dashed rounded-lg cursor-pointer transition-colors mb-3 ${uploadingPanelFiles ? 'border-blue-300 bg-blue-50 cursor-wait' : 'border-gray-300 hover:border-blue-400 hover:bg-blue-50'}`}>
+              <Paperclip size={16} className="text-gray-400 shrink-0" />
+              <div>
+                <p className="text-xs font-medium text-gray-700">{uploadingPanelFiles ? 'Uploading...' : 'Click to attach files'}</p>
+                <p className="text-xs text-gray-400">Any file type - multiple allowed</p>
+              </div>
+              <input type="file" multiple className="hidden" disabled={uploadingPanelFiles} onChange={async (e) => {
+                const files = e.target.files
+                if (!files || files.length === 0) return
+                setUploadingPanelFiles(true)
+                for (const file of Array.from(files)) {
+                  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_')
+                  const filePath = `${rfq.id}/${Date.now()}-${safeName}`
+                  const { error: upErr } = await supabase.storage.from('rfq-attachments').upload(filePath, file)
+                  if (!upErr) {
+                    await supabase.from('rfq_attachments').insert({ rfq_id: rfq.id, file_name: file.name, file_path: filePath, file_size: file.size })
+                  }
+                }
+                const { data } = await supabase.from('rfq_attachments').select('id, file_name, file_path').eq('rfq_id', rfq.id)
+                setPanelAttachments(data || [])
+                setUploadingPanelFiles(false)
+                e.target.value = ''
+              }} />
+            </label>
+            {panelAttachments.length === 0 && !uploadingPanelFiles && (
+              <p className="text-xs text-gray-400 text-center py-2">No attachments yet</p>
+            )}
+            {panelAttachments.length > 0 && (
               <div className="space-y-1.5">
                 {panelAttachments.map(att => {
                   const url = supabase.storage.from('rfq-attachments').getPublicUrl(att.file_path).data.publicUrl
                   return (
-                    <a key={att.id} href={url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 px-3 py-2 bg-blue-50 hover:bg-blue-100 rounded-lg border border-blue-100 transition-colors">
-                      <FileText size={13} className="text-blue-500 shrink-0" />
-                      <span className="text-xs font-medium text-blue-700 truncate">{att.file_name}</span>
-                    </a>
+                    <div key={att.id} className="flex items-center justify-between px-3 py-2 bg-blue-50 rounded-lg border border-blue-100">
+                      <a href={url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 min-w-0 hover:underline">
+                        <FileText size={13} className="text-blue-500 shrink-0" />
+                        <span className="text-xs font-medium text-blue-700 truncate">{att.file_name}</span>
+                      </a>
+                      <button onClick={async () => {
+                        await supabase.storage.from('rfq-attachments').remove([att.file_path])
+                        await supabase.from('rfq_attachments').delete().eq('id', att.id)
+                        setPanelAttachments(prev => prev.filter(a => a.id !== att.id))
+                      }} className="ml-2 text-red-400 hover:text-red-600 shrink-0">
+                        <X size={12} />
+                      </button>
+                    </div>
                   )
                 })}
               </div>
-            </div>
-          )}
+            )}
+          </div>
 
           {rfq.assigned_quoter_name && (
             <div className="px-5 py-3">

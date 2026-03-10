@@ -875,22 +875,18 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, onJobCreated }: { rfq: R
           .order('line_number')
 
         if (rfqItems && rfqItems.length > 0) {
-          const jobLineItems = rfqItems.map((item, idx) => ({
+          const jobLineItems = rfqItems.map(item => ({
             job_id: jobData.id,
+            rfq_line_item_id: null,
             description: item.description,
             quantity: item.quantity || 1,
-            uom: item.unit_of_measure || 'EA',
-            item_type: item.item_type || 'MATERIAL',
-            cost_price: 0,
-            sell_price: 0,
-            line_total: 0,
+            unit_price: 0,
+            total_price: 0,
             status: 'PENDING',
-            sort_order: idx + 1,
-            can_spawn_job: true,
+            notes: item.item_type || null,
           }))
           const { error: liError } = await supabase.from('job_line_items').insert(jobLineItems)
           if (liError) console.error('Line items copy error:', liError.message)
-          else console.log('Copied', jobLineItems.length, 'line items to job')
         }
 
         showMsg('Order won - Job created with line items!')

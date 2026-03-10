@@ -740,6 +740,7 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, onJobCreated }: { rfq: R
   const [panelLineItems, setPanelLineItems] = React.useState<any[]>([])
   const [loadingItems, setLoadingItems] = React.useState(true)
   const [panelAttachments, setPanelAttachments] = React.useState<any[]>([])
+  const [uploadingPanelFiles, setUploadingPanelFiles] = React.useState(false)
   const [selectedQuoter, setSelectedQuoter] = React.useState(rfq.assigned_quoter_name || '')
   const [assigning, setAssigning] = React.useState(false)
   const [showEmail, setShowEmail] = React.useState(false)
@@ -1086,22 +1087,58 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, onJobCreated }: { rfq: R
             )}
           </div>
 
-          {panelAttachments.length > 0 && (
-            <div className="px-5 py-4 border-b border-gray-100">
-              <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-2">Attachments</p>
+          <div className="px-5 py-4 border-b border-gray-100">
+            <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-2">Attachments</p>
+            <label className={`flex items-center gap-3 px-4 py-3 border-2 border-dashed rounded-lg cursor-pointer transition-colors mb-3 ${uploadingPanelFiles ? 'border-blue-300 bg-blue-50 cursor-wait' : 'border-gray-300 hover:border-blue-400 hover:bg-blue-50'}`}>
+              <Paperclip size={16} className="text-gray-400 shrink-0" />
+              <div>
+                <p className="text-xs font-medium text-gray-700">{uploadingPanelFiles ? 'Uploading...' : 'Click to attach files'}</p>
+                <p className="text-xs text-gray-400">Any file type - multiple allowed</p>
+              </div>
+              <input type="file" multiple className="hidden" disabled={uploadingPanelFiles} onChange={async (e) => {
+                const files = e.target.files
+                if (!files || files.length === 0) return
+                setUploadingPanelFiles(true)
+                for (const file of Array.from(files)) {
+                  const safeName = file.name.replace(/[^a-zA-Z0-9.\-_]/g, '_')
+                  const filePath = `${rfq.id}/${Date.now()}-${safeName}`
+                  const { error: upErr } = await supabase.storage.from('rfq-attachments').upload(filePath, file)
+                  if (!upErr) {
+                    await supabase.from('rfq_attachments').insert({ rfq_id: rfq.id, file_name: file.name, file_path: filePath, file_size: file.size })
+                  }
+                }
+                const { data } = await supabase.from('rfq_attachments').select('id, file_name, file_path').eq('rfq_id', rfq.id)
+                setPanelAttachments(data || [])
+                setUploadingPanelFiles(false)
+                e.target.value = ''
+              }} />
+            </label>
+            {panelAttachments.length > 0 && (
               <div className="space-y-1.5">
                 {panelAttachments.map(att => {
                   const url = supabase.storage.from('rfq-attachments').getPublicUrl(att.file_path).data.publicUrl
                   return (
-                    <a key={att.id} href={url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 px-3 py-2 bg-blue-50 hover:bg-blue-100 rounded-lg border border-blue-100 transition-colors">
-                      <FileText size={13} className="text-blue-500 shrink-0" />
-                      <span className="text-xs font-medium text-blue-700 truncate">{att.file_name}</span>
-                    </a>
+                    <div key={att.id} className="flex items-center justify-between px-3 py-2 bg-blue-50 rounded-lg border border-blue-100">
+                      <a href={url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 min-w-0 hover:underline">
+                        <FileText size={13} className="text-blue-500 shrink-0" />
+                        <span className="text-xs font-medium text-blue-700 truncate">{att.file_name}</span>
+                      </a>
+                      <button onClick={async () => {
+                        await supabase.storage.from('rfq-attachments').remove([att.file_path])
+                        await supabase.from('rfq_attachments').delete().eq('id', att.id)
+                        setPanelAttachments(prev => prev.filter(a => a.id !== att.id))
+                      }} className="ml-2 text-red-400 hover:text-red-600 shrink-0">
+                        <X size={12} />
+                      </button>
+                    </div>
                   )
                 })}
               </div>
-            </div>
-          )}
+            )}
+            {panelAttachments.length === 0 && !uploadingPanelFiles && (
+              <p className="text-xs text-gray-400 text-center py-2">No attachments yet</p>
+            )}
+          </div>
 
           {rfq.assigned_quoter_name && (
             <div className="px-5 py-3">
