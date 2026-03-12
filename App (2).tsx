@@ -1,6 +1,6 @@
 import React from 'react';
 import { useState, useEffect } from 'react'
-import { ClipboardList, Briefcase, ChevronRight, Factory, Building2, Calendar, Hash, RefreshCw, ArrowDownToLine, ArrowUpFromLine, X, Mail, FileText, Paperclip, Send, Plus, Check, Printer } from 'lucide-react'
+import { ClipboardList, Briefcase, ChevronRight, Factory, Building2, Calendar, Hash, RefreshCw, ArrowDownToLine, ArrowUpFromLine, X, Mail, FileText, Paperclip, Send, Plus, Search } from 'lucide-react'
 import { supabase } from './lib/supabase'
 import { format } from 'date-fns'
 
@@ -32,11 +32,6 @@ interface RFQ {
   notes: string | null
   remarks: string | null
   created_at: string
-  entry_type: string | null
-  assigned_employee_name: string | null
-  assigned_supervisor_name: string | null
-  is_contract_work: boolean | null
-  site_req: string | null
   quote_number?: string | null
   quote_value_excl_vat?: number | null
   quote_value_incl_vat?: number | null
@@ -183,10 +178,9 @@ function App() {
   const [error, setError] = useState<string | null>(null)
   const [selectedRFQ, setSelectedRFQ] = useState<RFQ | null>(null)
   const [showCreateModal, setShowCreateModal] = useState(false)
-  const [showCreateDirectJob, setShowCreateDirectJob] = useState(false)
-  const [selectedJob, setSelectedJob] = useState<Job | null>(null)
   const [jobs, setJobs] = useState<Job[]>([])
   const [jobsLoading, setJobsLoading] = useState(false)
+  const [selectedJob, setSelectedJob] = useState<Job | null>(null)
 
   const fetchRFQs = async () => {
     setLoading(true); setError(null)
@@ -196,15 +190,6 @@ function App() {
       setRfqs(data || [])
     } catch (e: any) { setError(e.message) }
     finally { setLoading(false) }
-  }
-
-  const handlePrintJobCard = (job: Job) => {
-    alert('Print Job Card: ' + (job.job_number || 'New Job') + ' - PDF coming next!')
-  }
-
-  const handleJobStatusChange = async (jobId: string, newStatus: string) => {
-    await supabase.from('jobs').update({ status: newStatus }).eq('id', jobId)
-    fetchJobs()
   }
 
   const fetchJobs = async () => {
@@ -271,11 +256,6 @@ function App() {
                 <Plus size={15} />New Work Order
               </button>
             )}
-            {activeBoard === 'job' && (
-              <button onClick={() => setShowCreateDirectJob(true)} className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-lg transition-colors">
-                <Plus size={15} />New Job
-              </button>
-            )}
             <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold ${activeBoard === 'rfq' ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-700'}`}>
               {activeBoard === 'rfq' ? 'Work Order Board' : 'Job Board'}
             </span>
@@ -286,15 +266,13 @@ function App() {
           <div className="flex-1 overflow-auto p-6 min-w-0">
             {activeBoard === 'rfq'
               ? <RFQBoard rfqs={rfqs} loading={loading} error={error} onRefresh={fetchRFQs} onCardClick={setSelectedRFQ} selectedId={selectedRFQ?.id} />
-              : <JobBoard jobs={jobs} loading={jobsLoading} onCardClick={setSelectedJob} selectedId={selectedJob?.id} onStatusChange={handleJobStatusChange} onPrintCard={handlePrintJobCard} onCardClick={setSelectedJob} selectedId={selectedJob?.id} />}
+              : <JobBoard jobs={jobs} loading={jobsLoading} onCardClick={setSelectedJob} selectedId={selectedJob?.id} />}
           </div>
           {selectedRFQ && <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4"><RFQDetailPanel rfq={selectedRFQ} onClose={() => setSelectedRFQ(null)} onUpdate={handleRFQUpdate} role={currentRole} onJobCreated={fetchJobs} /></div>}
         </div>
       </main>
 
       {showCreateModal && <CreateRFQModal onClose={() => setShowCreateModal(false)} onCreated={handleRFQCreated} />}
-      {showCreateDirectJob && <CreateDirectJobModal onClose={() => setShowCreateDirectJob(false)} onCreated={fetchJobs} />}
-      {selectedJob && <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4"><JobDetailPanel job={selectedJob} onClose={() => setSelectedJob(null)} onUpdate={(j) => { setSelectedJob(j); fetchJobs() }} /></div>}
     </div>
   )
 }
@@ -302,25 +280,43 @@ function App() {
 // RFQ BOARD
 
 function RFQBoard({ rfqs, loading, error, onRefresh, onCardClick, selectedId }: { rfqs: RFQ[]; loading: boolean; error: string | null; onRefresh: () => void; onCardClick: (rfq: RFQ) => void; selectedId?: string }) {
+  const [woSearch, setWoSearch] = React.useState('')
   if (loading) return <div className="flex items-center justify-center h-64 gap-3 text-gray-400"><div className="w-5 h-5 border-2 border-gray-300 border-t-blue-500 rounded-full animate-spin" /><span>Loading RFQs...</span></div>
   if (error) return <div className="flex items-center justify-center h-64"><div className="bg-red-50 border border-red-200 rounded-xl p-6 text-center"><p className="text-red-700 font-semibold mb-2">Failed to load</p><p className="text-red-500 text-sm mb-4">{error}</p><button onClick={onRefresh} className="px-4 py-2 bg-red-600 text-white rounded-lg text-sm">Try Again</button></div></div>
+  const woQ = woSearch.toLowerCase().trim()
+  const woFiltered = woQ ? rfqs.filter(r =>
+    (r.enq_number || '').toLowerCase().includes(woQ) ||
+    (r.clients?.company_name || '').toLowerCase().includes(woQ) ||
+    (r.description || '').toLowerCase().includes(woQ) ||
+    (r.assigned_quoter_name || '').toLowerCase().includes(woQ)
+  ) : rfqs
   return (
-    <div className="flex gap-4 h-full" style={{ minWidth: 'max-content' }}>
-      {RFQ_COLUMNS.map((col) => {
-        const cards = rfqs.filter(r => r.status === col.key)
-        return (
-          <div key={col.key} className="w-64 flex flex-col shrink-0">
-            <div className={`flex items-center gap-2 px-3 py-2.5 rounded-t-lg ${col.color}`}>
-              <span className="text-white text-sm font-bold">{col.label}</span>
-              <span className="ml-auto bg-white bg-opacity-25 text-white text-xs font-bold px-2 py-0.5 rounded-full">{cards.length}</span>
+    <div className="flex flex-col h-full">
+      <div className="flex items-center gap-3 pb-3 shrink-0">
+        <div className="relative">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+          <input value={woSearch} onChange={e => setWoSearch(e.target.value)} placeholder="Search WO number, client, description..." className="pl-8 pr-4 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-blue-400 bg-white w-80" />
+        </div>
+        {woQ && <span className="text-xs text-gray-500">{woFiltered.length} result{woFiltered.length !== 1 ? 's' : ''}</span>}
+        {woQ && <button onClick={() => setWoSearch('')} className="text-xs text-blue-500 hover:underline">Clear</button>}
+      </div>
+      <div className="flex gap-4 overflow-x-auto flex-1" style={{ minWidth: 'max-content' }}>
+        {RFQ_COLUMNS.map((col) => {
+          const cards = woFiltered.filter(r => r.status === col.key)
+          return (
+            <div key={col.key} className="w-64 flex flex-col shrink-0">
+              <div className={`flex items-center gap-2 px-3 py-2.5 rounded-t-lg ${col.color}`}>
+                <span className="text-white text-sm font-bold">{col.label}</span>
+                <span className="ml-auto bg-white bg-opacity-25 text-white text-xs font-bold px-2 py-0.5 rounded-full">{cards.length}</span>
+              </div>
+              <div className="flex-1 bg-gray-200 rounded-b-lg p-2 min-h-96 space-y-2">
+                {cards.length === 0 && <div className="flex items-center justify-center h-20"><p className="text-gray-400 text-xs">{woQ ? 'No matches' : 'No RFQs'}</p></div>}
+                {cards.map(rfq => <RFQCard key={rfq.id} rfq={rfq} hoverColor={col.hover} onClick={() => onCardClick(rfq)} isSelected={rfq.id === selectedId} />)}
+              </div>
             </div>
-            <div className="flex-1 bg-gray-200 rounded-b-lg p-2 min-h-96 space-y-2">
-              {cards.length === 0 && <div className="flex items-center justify-center h-20"><p className="text-gray-400 text-xs">No RFQs</p></div>}
-              {cards.map(rfq => <RFQCard key={rfq.id} rfq={rfq} hoverColor={col.hover} onClick={() => onCardClick(rfq)} isSelected={rfq.id === selectedId} />)}
-            </div>
-          </div>
-        )
-      })}
+          )
+        })}
+      </div>
     </div>
   )
 }
@@ -353,12 +349,15 @@ function RFQCard({ rfq, hoverColor, onClick, isSelected }: { rfq: RFQ; hoverColo
 
 // JOB BOARD
 
-function JobBoard({ jobs, loading, onCardClick, selectedId, onStatusChange, onPrintCard }: { jobs: Job[]; loading: boolean; onCardClick: (job: Job) => void; selectedId?: string; onStatusChange: (jobId: string, newStatus: string) => void; onPrintCard: (job: Job) => void }) {
+function JobBoard({ jobs, loading, onCardClick, selectedId }: { jobs: Job[]; loading: boolean; onCardClick: (job: Job) => void; selectedId?: string }) {
+  const [jobSearch, setJobSearch] = React.useState('')
   const columns = [
-    { key: 'PENDING',        label: 'Pending',        color: 'bg-gray-500'  },
-    { key: 'IN_REVIEW',      label: 'In Review',      color: 'bg-blue-500'  },
-    { key: 'READY_TO_PRINT', label: 'Ready to Print', color: 'bg-amber-500' },
-    { key: 'PRINTED',        label: 'Printed',        color: 'bg-green-600' },
+    { key: 'PENDING',       label: 'Pending',       color: 'bg-gray-500'   },
+    { key: 'SCHEDULED',     label: 'Scheduled',     color: 'bg-blue-500'   },
+    { key: 'IN_PROGRESS',   label: 'In Progress',   color: 'bg-orange-500' },
+    { key: 'ON_HOLD',       label: 'On Hold',       color: 'bg-red-400'    },
+    { key: 'QUALITY_CHECK', label: 'Quality Check', color: 'bg-purple-500' },
+    { key: 'COMPLETE',      label: 'Complete',      color: 'bg-green-500'  },
   ]
   if (loading) return (
     <div className="flex items-center justify-center h-64 gap-3 text-gray-400">
@@ -366,348 +365,54 @@ function JobBoard({ jobs, loading, onCardClick, selectedId, onStatusChange, onPr
       <span>Loading jobs...</span>
     </div>
   )
+  const jobQ = jobSearch.toLowerCase().trim()
+  const jobFiltered = jobQ ? jobs.filter(j =>
+    (j.job_number || '').toLowerCase().includes(jobQ) ||
+    (j.client_name || '').toLowerCase().includes(jobQ) ||
+    (j.description || '').toLowerCase().includes(jobQ) ||
+    (j.po_number || '').toLowerCase().includes(jobQ)
+  ) : jobs
   return (
-    <div className="flex gap-4 h-full" style={{ minWidth: 'max-content' }}>
-      {columns.map(col => {
-        const cards = jobs.filter(j => j.status === col.key)
-        return (
-          <div key={col.key} className="w-64 flex flex-col shrink-0">
-            <div className={`flex items-center gap-2 px-3 py-2.5 rounded-t-lg ${col.color}`}>
-              <span className="text-white text-sm font-bold">{col.label}</span>
-              <span className="ml-auto bg-white bg-opacity-25 text-white text-xs font-bold px-2 py-0.5 rounded-full">{cards.length}</span>
-            </div>
-            <div className="flex-1 bg-gray-200 rounded-b-lg p-2 min-h-96 space-y-2">
-              {cards.length === 0 && (
-                <div className="flex items-center justify-center h-20">
-                  <p className="text-gray-400 text-xs">No jobs</p>
-                </div>
-              )}
-              {cards.map(job => {
-                const nextMap: Record<string, {label: string; next: string; color: string}[]> = {
-                  PENDING:        [{ label: 'Review', next: 'IN_REVIEW',      color: 'bg-blue-500 hover:bg-blue-600' }],
-                  IN_REVIEW:      [{ label: 'Ready',  next: 'READY_TO_PRINT', color: 'bg-amber-500 hover:bg-amber-600' }],
-                  READY_TO_PRINT: [{ label: 'Back',   next: 'IN_REVIEW',      color: 'bg-gray-400 hover:bg-gray-500' }],
-                  PRINTED:        [],
-                }
-                const nextActions = nextMap[job.status] || []
-                const canPrint = job.status === 'READY_TO_PRINT' || job.status === 'PRINTED'
-                return (
+    <div className="flex flex-col h-full">
+      <div className="flex items-center gap-3 pb-3 shrink-0">
+        <div className="relative">
+          <Search size={14} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400 pointer-events-none" />
+          <input value={jobSearch} onChange={e => setJobSearch(e.target.value)} placeholder="Search job number, client, description..." className="pl-8 pr-4 py-2 text-sm border border-gray-200 rounded-lg focus:outline-none focus:border-blue-400 bg-white w-80" />
+        </div>
+        {jobQ && <span className="text-xs text-gray-500">{jobFiltered.length} result{jobFiltered.length !== 1 ? 's' : ''}</span>}
+        {jobQ && <button onClick={() => setJobSearch('')} className="text-xs text-blue-500 hover:underline">Clear</button>}
+      </div>
+      <div className="flex gap-4 overflow-x-auto flex-1" style={{ minWidth: 'max-content' }}>
+        {columns.map(col => {
+          const cards = jobFiltered.filter(j => j.status === col.key)
+          return (
+            <div key={col.key} className="w-64 flex flex-col shrink-0">
+              <div className={`flex items-center gap-2 px-3 py-2.5 rounded-t-lg ${col.color}`}>
+                <span className="text-white text-sm font-bold">{col.label}</span>
+                <span className="ml-auto bg-white bg-opacity-25 text-white text-xs font-bold px-2 py-0.5 rounded-full">{cards.length}</span>
+              </div>
+              <div className="flex-1 bg-gray-200 rounded-b-lg p-2 min-h-96 space-y-2">
+                {cards.length === 0 && (
+                  <div className="flex items-center justify-center h-20">
+                    <p className="text-gray-400 text-xs">{jobQ ? 'No matches' : 'No jobs'}</p>
+                  </div>
+                )}
+                {cards.map(job => (
                   <div key={job.id} onClick={() => onCardClick(job)}
                     className={`bg-white rounded-lg shadow-sm border-2 p-3 cursor-pointer hover:shadow-md transition-all ${job.id === selectedId ? 'border-green-400 shadow-md' : 'border-transparent hover:border-green-300'}`}>
-                    <div className="flex items-center justify-between gap-1">
-                      <p className="text-xs font-bold text-green-600">{job.job_number || 'New'}</p>
-                      <div className="flex items-center gap-1">
-                        {job.entry_type === 'DIRECT' && <span className="text-xs font-bold px-1.5 py-0.5 bg-orange-100 text-orange-600 rounded">DIRECT</span>}
-                        {job.is_emergency && <span className="text-xs font-bold px-1.5 py-0.5 bg-red-100 text-red-600 rounded">!</span>}
-                      </div>
-                    </div>
-                    <p className="text-sm font-medium text-gray-800 mt-1 line-clamp-2">{job.description || job.client_name || 'No description'}</p>
-                    <p className="text-xs text-gray-500 mt-0.5 truncate">{job.client_name || '-'}</p>
+                    <p className="text-xs font-bold text-green-600">{job.job_number || 'Pending'}</p>
+                    <p className="text-sm font-medium text-gray-800 mt-1 line-clamp-2">{job.description || 'No description'}</p>
+                    <p className="text-xs text-gray-500 mt-1 truncate">{job.client_name || '-'}</p>
                     {job.due_date && (
-                      <p className="text-xs text-gray-400 mt-0.5">Due: {new Date(job.due_date).toLocaleDateString('en-ZA')}</p>
-                    )}
-                    {(nextActions.length > 0 || canPrint) && (
-                      <div className="flex gap-1 mt-2" onClick={e => e.stopPropagation()}>
-                        {nextActions.map(action => (
-                          <button key={action.next} onClick={() => onStatusChange(job.id, action.next)}
-                            className={`flex-1 py-1 text-xs font-semibold text-white rounded transition-colors ${action.color}`}>
-                            {action.label}
-                          </button>
-                        ))}
-                        {canPrint && (
-                          <button onClick={() => onPrintCard(job)}
-                            className="flex items-center justify-center gap-1 flex-1 py-1 text-xs font-semibold text-white rounded bg-green-600 hover:bg-green-700 transition-colors">
-                            <Printer size={11} />Print
-                          </button>
-                        )}
-                      </div>
+                      <p className="text-xs text-gray-400 mt-1">Due: {new Date(job.due_date).toLocaleDateString('en-ZA')}</p>
                     )}
                   </div>
-                )
-              })}
-            </div>
-          </div>
-        )
-      })}
-    </div>
-  )
-}
-
-
-// JOB DETAIL PANEL
-
-function JobDetailPanel({ job, onClose, onUpdate }: { job: Job; onClose: () => void; onUpdate: (j: Job) => void }) {
-  const [saving, setSaving] = React.useState(false)
-  const [status, setStatus] = React.useState(job.status)
-  const [priority, setPriority] = React.useState(job.priority || 'NORMAL')
-  const [assignedEmployee, setAssignedEmployee] = React.useState(job.assigned_employee_name || '')
-  const [assignedSupervisor, setAssignedSupervisor] = React.useState(job.assigned_supervisor_name || '')
-  const [notes, setNotes] = React.useState(job.notes || '')
-  const [msg, setMsg] = React.useState('')
-  const [lineItems, setLineItems] = React.useState<any[]>([])
-
-  React.useEffect(() => {
-    supabase.from('job_line_items').select('*').eq('job_id', job.id).order('sort_order').then(({ data }) => {
-      if (data) setLineItems(data)
-    })
-  }, [job.id])
-
-  const showMsg = (m: string) => { setMsg(m); setTimeout(() => setMsg(''), 3000) }
-
-  const handleSave = async () => {
-    setSaving(true)
-    try {
-      const { data, error } = await supabase.from('jobs').update({
-        status, priority,
-        assigned_employee_name: assignedEmployee || null,
-        assigned_supervisor_name: assignedSupervisor || null,
-        notes: notes || null,
-      }).eq('id', job.id).select().single()
-      if (error) throw error
-      onUpdate(data)
-      showMsg('Saved successfully')
-    } catch (err: any) {
-      showMsg('Error: ' + err.message)
-    } finally { setSaving(false) }
-  }
-
-  const statusOptions = ['PENDING','IN_REVIEW','READY_TO_PRINT','PRINTED']
-
-  return (
-    <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl flex flex-col max-h-[90vh]">
-      <div className="bg-green-600 text-white px-6 py-4 rounded-t-xl flex items-center justify-between shrink-0">
-        <div>
-          <div className="flex items-center gap-3">
-            <h2 className="text-lg font-bold">{job.job_number || 'New Job'}</h2>
-            {job.entry_type === 'DIRECT' && <span className="text-xs font-bold px-2 py-0.5 bg-orange-400 text-white rounded">DIRECT</span>}
-            {job.is_emergency && <span className="text-xs font-bold px-2 py-0.5 bg-red-500 text-white rounded">EMERGENCY</span>}
-          </div>
-          <p className="text-green-200 text-xs mt-0.5">{job.client_name || 'No client'}</p>
-        </div>
-        <button onClick={onClose} className="text-green-200 hover:text-white"><X size={20} /></button>
-      </div>
-      <div className="overflow-y-auto flex-1 p-6 space-y-5">
-        {msg && <div className="px-4 py-2 bg-green-50 border border-green-200 text-green-700 text-sm rounded-lg">{msg}</div>}
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">Status</label>
-            <select value={status} onChange={e => setStatus(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500">
-              {statusOptions.map(s => <option key={s} value={s}>{s.replace(/_/g,' ')}</option>)}
-            </select>
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">Priority</label>
-            <select value={priority} onChange={e => setPriority(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500">
-              <option value="LOW">Low</option>
-              <option value="NORMAL">Normal</option>
-              <option value="HIGH">High</option>
-              <option value="URGENT">Urgent</option>
-            </select>
-          </div>
-        </div>
-        <div className="grid grid-cols-2 gap-4 text-sm">
-          {job.site_req && <div><span className="text-xs text-gray-500 block">Site Req / PO</span><span className="font-medium">{job.site_req}</span></div>}
-          {job.rfq_no && <div><span className="text-xs text-gray-500 block">Work Order No</span><span className="font-medium text-blue-600">{job.rfq_no}</span></div>}
-          {job.due_date && <div><span className="text-xs text-gray-500 block">Due Date</span><span className="font-medium">{new Date(job.due_date).toLocaleDateString('en-ZA')}</span></div>}
-          {job.created_at && <div><span className="text-xs text-gray-500 block">Created</span><span className="font-medium">{new Date(job.created_at).toLocaleDateString('en-ZA')}</span></div>}
-        </div>
-        {job.description && (
-          <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">Description</label>
-            <p className="text-sm text-gray-800 bg-gray-50 rounded-lg px-3 py-2">{job.description}</p>
-          </div>
-        )}
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">Assigned Employee</label>
-            <input value={assignedEmployee} onChange={e => setAssignedEmployee(e.target.value)} placeholder="Employee name..." className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">Supervisor</label>
-            <input value={assignedSupervisor} onChange={e => setAssignedSupervisor(e.target.value)} placeholder="Supervisor..." className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
-          </div>
-        </div>
-        {lineItems.length > 0 && (
-          <div>
-            <label className="block text-xs font-medium text-gray-500 mb-2">Line Items</label>
-            <div className="border border-gray-200 rounded-lg overflow-hidden">
-              <table className="w-full text-xs">
-                <thead className="bg-gray-50"><tr>
-                  <th className="px-3 py-2 text-left text-gray-500 font-medium">#</th>
-                  <th className="px-3 py-2 text-left text-gray-500 font-medium">Description</th>
-                  <th className="px-3 py-2 text-left text-gray-500 font-medium w-14">Qty</th>
-                  <th className="px-3 py-2 text-left text-gray-500 font-medium w-16">UOM</th>
-                </tr></thead>
-                <tbody>
-                  {lineItems.map((item, i) => (
-                    <tr key={item.id} className="border-t border-gray-100">
-                      <td className="px-3 py-2 text-gray-400">{i + 1}</td>
-                      <td className="px-3 py-2 text-gray-800">{item.description}</td>
-                      <td className="px-3 py-2 text-gray-600">{item.quantity}</td>
-                      <td className="px-3 py-2 text-gray-600">{item.uom}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-        )}
-        <div>
-          <label className="block text-xs font-medium text-gray-500 mb-1">Notes</label>
-          <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={3} placeholder="Notes..." className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 resize-none" />
-        </div>
-      </div>
-      <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-gray-100 shrink-0">
-        <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors">Close</button>
-        <button onClick={handleSave} disabled={saving} className="flex items-center gap-2 px-5 py-2 bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white text-sm font-semibold rounded-lg transition-colors">
-          <Check size={14} />{saving ? 'Saving...' : 'Save Changes'}
-        </button>
-      </div>
-    </div>
-  )
-}
-
-// CREATE DIRECT JOB MODAL
-
-function CreateDirectJobModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
-  const [saving, setSaving] = React.useState(false)
-  const [clientName, setClientName] = React.useState('')
-  const [siteReq, setSiteReq] = React.useState('')
-  const [workType, setWorkType] = React.useState<'contract' | 'quoted'>('contract')
-  const [priority, setPriority] = React.useState('NORMAL')
-  const [compiledBy, setCompiledBy] = React.useState('')
-  const [isEmergency, setIsEmergency] = React.useState(false)
-  const [assignedEmployee, setAssignedEmployee] = React.useState('')
-  const [assignedSupervisor, setAssignedSupervisor] = React.useState('')
-  const [notes, setNotes] = React.useState('')
-  const [dateReceived] = React.useState(new Date().toISOString().split('T')[0])
-  const [dueDate, setDueDate] = React.useState('')
-  const [hasDrawing, setHasDrawing] = React.useState(false)
-  const [actions, setActions] = React.useState({ manufacture: false, sandblast: false, prepare_material: false, service: false, paint: false, other: false, repair: false, installation: false, cut: false, modify: false })
-  const [lineItems, setLineItems] = React.useState([{ description: '', quantity: 1, uom: 'Each', notes: '' }])
-
-  const toggleAction = (key: keyof typeof actions) => setActions(a => ({ ...a, [key]: !a[key] }))
-  const addLineItem = () => setLineItems(li => [...li, { description: '', quantity: 1, uom: 'Each', notes: '' }])
-  const removeLineItem = (i: number) => setLineItems(li => li.filter((_, idx) => idx !== i))
-  const updateLineItem = (i: number, field: string, val: any) => setLineItems(li => li.map((item, idx) => idx === i ? { ...item, [field]: val } : item))
-
-  const handleCreate = async () => {
-    if (!clientName.trim()) { alert('Client name is required'); return }
-    if (!dueDate) { alert('Due date is required'); return }
-    setSaving(true)
-    try {
-      const { data: job, error } = await supabase.from('jobs').insert({
-        client_name: clientName.trim(), site_req: siteReq.trim() || null,
-        is_contract_work: workType === 'contract', is_quoted_work: workType === 'quoted',
-        priority, compiled_by: compiledBy.trim() || null, is_emergency: isEmergency,
-        assigned_employee_name: assignedEmployee.trim() || null,
-        assigned_supervisor_name: assignedSupervisor.trim() || null,
-        notes: notes.trim() || null, date_received: dateReceived, due_date: dueDate,
-        has_drawing: hasDrawing,
-        action_manufacture: actions.manufacture, action_sandblast: actions.sandblast,
-        action_prepare_material: actions.prepare_material, action_service: actions.service,
-        action_paint: actions.paint, action_other: actions.other, action_repair: actions.repair,
-        action_installation: actions.installation, action_cut: actions.cut, action_modify: actions.modify,
-        entry_type: 'DIRECT', status: 'PENDING',
-      }).select().single()
-      if (error) throw error
-      const validItems = lineItems.filter(l => l.description.trim())
-      if (validItems.length > 0) {
-        await supabase.from('job_line_items').insert(
-          validItems.map((item, idx) => ({
-            job_id: job.id, description: item.description.trim(),
-            quantity: item.quantity, uom: item.uom,
-            specification: item.notes.trim() || null, sort_order: idx,
-            status: 'PENDING', cost_price: 0, sell_price: 0, line_total: 0, can_spawn_job: true,
-          }))
-        )
-      }
-      onCreated()
-    } catch (err: any) { alert('Error: ' + err.message) }
-    finally { setSaving(false) }
-  }
-
-  const uomOptions = ['Each', 'Meter', 'kg', 'Liter', 'Hour', 'Set', 'm2', 'm3']
-  const actionList = [
-    { key: 'manufacture' as const, label: 'Manufacture' }, { key: 'sandblast' as const, label: 'Sandblast' },
-    { key: 'prepare_material' as const, label: 'Prepare Material' }, { key: 'service' as const, label: 'Service' },
-    { key: 'paint' as const, label: 'Paint' }, { key: 'other' as const, label: 'Other' },
-    { key: 'repair' as const, label: 'Repair' }, { key: 'installation' as const, label: 'Installation' },
-    { key: 'cut' as const, label: 'Cut' }, { key: 'modify' as const, label: 'Modify' },
-  ]
-
-  return (
-    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
-      <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl flex flex-col max-h-[90vh]">
-        <div className="bg-indigo-600 text-white px-6 py-4 rounded-t-xl flex items-center justify-between shrink-0">
-          <div><h2 className="text-lg font-bold">Create New Job</h2><p className="text-indigo-200 text-xs mt-0.5">Direct Work Order (No RFQ)</p></div>
-          <button onClick={onClose} className="text-indigo-200 hover:text-white"><X size={20} /></button>
-        </div>
-        <div className="overflow-y-auto flex-1 p-6 space-y-5">
-          <div className="grid grid-cols-3 gap-4">
-            <div><label className="block text-xs font-medium text-gray-600 mb-1">Client *</label><input value={clientName} onChange={e => setClientName(e.target.value)} placeholder="Client name..." className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" /></div>
-            <div><label className="block text-xs font-medium text-gray-600 mb-1">Site Req / PO</label><input value={siteReq} onChange={e => setSiteReq(e.target.value)} placeholder="e.g. PO-12345" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" /></div>
-            <div><label className="block text-xs font-medium text-gray-600 mb-1">Due Date *</label><input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" /></div>
-          </div>
-          <div className="grid grid-cols-4 gap-4 items-end">
-            <div><label className="block text-xs font-medium text-gray-600 mb-1">Work Type</label>
-              <div className="flex rounded-lg overflow-hidden border border-gray-300">
-                <button onClick={() => setWorkType('contract')} className={'flex-1 py-2 text-xs font-semibold transition-colors ' + (workType === 'contract' ? 'bg-indigo-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50')}>Contract</button>
-                <button onClick={() => setWorkType('quoted')} className={'flex-1 py-2 text-xs font-semibold transition-colors ' + (workType === 'quoted' ? 'bg-indigo-600 text-white' : 'bg-white text-gray-600 hover:bg-gray-50')}>Quoted</button>
+                ))}
               </div>
             </div>
-            <div><label className="block text-xs font-medium text-gray-600 mb-1">Priority</label><select value={priority} onChange={e => setPriority(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"><option value="LOW">Low</option><option value="NORMAL">Normal</option><option value="HIGH">High</option><option value="URGENT">Urgent</option></select></div>
-            <div><label className="block text-xs font-medium text-gray-600 mb-1">Compiled By</label><input value={compiledBy} onChange={e => setCompiledBy(e.target.value)} placeholder="Name..." className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" /></div>
-            <div className="flex items-center gap-2 pb-2"><input type="checkbox" id="djEmergency" checked={isEmergency} onChange={e => setIsEmergency(e.target.checked)} className="w-4 h-4 text-red-600" /><label htmlFor="djEmergency" className="text-sm font-medium text-red-600">Emergency</label></div>
-          </div>
-          <div className="grid grid-cols-2 gap-4">
-            <div><label className="block text-xs font-medium text-gray-600 mb-1">Assigned Employee</label><input value={assignedEmployee} onChange={e => setAssignedEmployee(e.target.value)} placeholder="Employee name..." className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" /></div>
-            <div><label className="block text-xs font-medium text-gray-600 mb-1">Supervisor</label><input value={assignedSupervisor} onChange={e => setAssignedSupervisor(e.target.value)} placeholder="Supervisor name..." className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" /></div>
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-gray-600 mb-2">Actions Required</label>
-            <div className="grid grid-cols-5 gap-2">
-              {actionList.map(({ key, label }) => (
-                <label key={key} className="flex items-center gap-2 text-sm cursor-pointer">
-                  <input type="checkbox" checked={actions[key]} onChange={() => toggleAction(key)} className="w-4 h-4 text-indigo-600 rounded" />
-                  <span className="text-gray-700">{label}</span>
-                </label>
-              ))}
-            </div>
-          </div>
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <label className="text-xs font-medium text-gray-600">Line Items</label>
-              <button onClick={addLineItem} className="text-xs text-indigo-600 hover:underline font-medium">+ Add Item</button>
-            </div>
-            <div className="border border-gray-200 rounded-lg overflow-hidden">
-              <table className="w-full text-xs">
-                <thead className="bg-gray-50"><tr><th className="px-2 py-2 text-left text-gray-500 font-medium">#</th><th className="px-2 py-2 text-left text-gray-500 font-medium">Description</th><th className="px-2 py-2 text-left text-gray-500 font-medium w-16">Qty</th><th className="px-2 py-2 text-left text-gray-500 font-medium w-20">UOM</th><th className="w-6"></th></tr></thead>
-                <tbody>
-                  {lineItems.map((item, i) => (
-                    <tr key={i} className="border-t border-gray-100">
-                      <td className="px-2 py-1.5 text-gray-400">{i + 1}</td>
-                      <td className="px-2 py-1.5"><input value={item.description} onChange={e => updateLineItem(i, 'description', e.target.value)} placeholder="Description" className="w-full border-0 focus:outline-none text-xs" /></td>
-                      <td className="px-2 py-1.5"><input type="number" value={item.quantity} onChange={e => updateLineItem(i, 'quantity', Number(e.target.value))} min={1} className="w-full border border-gray-200 rounded px-1 py-0.5 text-xs" /></td>
-                      <td className="px-2 py-1.5"><select value={item.uom} onChange={e => updateLineItem(i, 'uom', e.target.value)} className="w-full border border-gray-200 rounded px-1 py-0.5 text-xs">{uomOptions.map(u => <option key={u}>{u}</option>)}</select></td>
-                      <td className="px-2 py-1.5 text-center">{lineItems.length > 1 && <button onClick={() => removeLineItem(i)} className="text-red-400 hover:text-red-600"><X size={12} /></button>}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-          </div>
-          <div className="flex items-center gap-2"><input type="checkbox" id="djDrawing" checked={hasDrawing} onChange={e => setHasDrawing(e.target.checked)} className="w-4 h-4" /><label htmlFor="djDrawing" className="text-sm text-gray-700">Drawing / Sketches Attached</label></div>
-          <div><label className="block text-xs font-medium text-gray-600 mb-1">Notes</label><textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2} placeholder="Additional notes..." className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none" /></div>
-        </div>
-        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-gray-100 shrink-0">
-          <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors">Cancel</button>
-          <button onClick={handleCreate} disabled={saving} className="flex items-center gap-2 px-5 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-sm font-semibold rounded-lg transition-colors">
-            <Briefcase size={14} />{saving ? 'Creating...' : 'Create Job'}
-          </button>
-        </div>
+          )
+        })}
       </div>
-    </div>
   )
 }
 
@@ -1098,7 +803,7 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, onJobCreated }: { rfq: R
   const [quoteValue, setQuoteValue] = React.useState(rfq.quote_value_excl_vat ? String(rfq.quote_value_excl_vat) : '')
   const [validUntil, setValidUntil] = React.useState(rfq.valid_until || '')
   const [poNumber, setPoNumber] = React.useState(rfq.po_number || '')
-
+  const [orderNumber, setOrderNumber] = React.useState(rfq.order_number || '')
   const [orderDate, setOrderDate] = React.useState(rfq.order_date || '')
   const [invoiceNumber, setInvoiceNumber] = React.useState(rfq.invoice_number || '')
   const [invoiceDate, setInvoiceDate] = React.useState(rfq.invoice_date || '')
@@ -1180,7 +885,7 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, onJobCreated }: { rfq: R
     setSaving(true)
     try {
       // 1. Update RFQ to ACCEPTED
-      const { data, error } = await supabase.from('rfqs').update({ po_number: poNumber.trim(), order_date: orderDate || null, status: 'ACCEPTED' }).eq('id', rfq.id).select('*, clients(company_name)').single()
+      const { data, error } = await supabase.from('rfqs').update({ po_number: poNumber.trim(), order_number: orderNumber || null, order_date: orderDate || null, status: 'ACCEPTED' }).eq('id', rfq.id).select('*, clients(company_name)').single()
       if (error) throw error
       onUpdate(data)
 
@@ -1305,11 +1010,11 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, onJobCreated }: { rfq: R
               <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-3">Order Information (when won)</p>
               <div className="grid grid-cols-3 gap-3 mb-3">
                 <div><label className="text-xs font-medium text-gray-600 block mb-1">Client PO Number *</label><input value={poNumber} onChange={e => setPoNumber(e.target.value)} placeholder="Client PO" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400" /></div>
-
+                <div><label className="text-xs font-medium text-gray-600 block mb-1">Order Number</label><input value={orderNumber} onChange={e => setOrderNumber(e.target.value)} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400" /></div>
                 <div><label className="text-xs font-medium text-gray-600 block mb-1">Order Date</label><input type="date" value={orderDate} onChange={e => setOrderDate(e.target.value)} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400" /></div>
               </div>
               {(status === 'QUOTED' || status === 'SENT_TO_CUSTOMER') && <button onClick={handleSaveOrder} disabled={saving} className="w-full py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-lg disabled:opacity-50">{saving ? 'Saving...' : 'Save Order - Move to Order Won'}</button>}
-              {status === 'ACCEPTED' && poNumber && <div className="flex items-center gap-2 text-sm text-green-700 bg-green-50 px-3 py-2 rounded-lg"><FileText size={14} /> PO: {poNumber}</div>}
+              {status === 'ACCEPTED' && poNumber && <div className="flex items-center gap-2 text-sm text-green-700 bg-green-50 px-3 py-2 rounded-lg"><FileText size={14} /> PO: {poNumber} {orderNumber ? '| Order: ' + orderNumber : ''}</div>}
             </div>
           )}
 
@@ -1418,7 +1123,7 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, onJobCreated }: { rfq: R
           </div>
 
           <div className="px-5 py-4 border-b border-gray-100">
-            <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-3">Attachments</p>
+            <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-2">Attachments</p>
             <label className={`flex items-center gap-3 px-4 py-3 border-2 border-dashed rounded-lg cursor-pointer transition-colors mb-3 ${uploadingPanelFiles ? 'border-blue-300 bg-blue-50 cursor-wait' : 'border-gray-300 hover:border-blue-400 hover:bg-blue-50'}`}>
               <Paperclip size={16} className="text-gray-400 shrink-0" />
               <div>
@@ -1430,7 +1135,7 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, onJobCreated }: { rfq: R
                 if (!files || files.length === 0) return
                 setUploadingPanelFiles(true)
                 for (const file of Array.from(files)) {
-                  const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_')
+                  const safeName = file.name.replace(/[^a-zA-Z0-9.\-_]/g, '_')
                   const filePath = `${rfq.id}/${Date.now()}-${safeName}`
                   const { error: upErr } = await supabase.storage.from('rfq-attachments').upload(filePath, file)
                   if (!upErr) {
@@ -1443,9 +1148,6 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, onJobCreated }: { rfq: R
                 e.target.value = ''
               }} />
             </label>
-            {panelAttachments.length === 0 && !uploadingPanelFiles && (
-              <p className="text-xs text-gray-400 text-center py-2">No attachments yet</p>
-            )}
             {panelAttachments.length > 0 && (
               <div className="space-y-1.5">
                 {panelAttachments.map(att => {
@@ -1467,6 +1169,9 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, onJobCreated }: { rfq: R
                   )
                 })}
               </div>
+            )}
+            {panelAttachments.length === 0 && !uploadingPanelFiles && (
+              <p className="text-xs text-gray-400 text-center py-2">No attachments yet</p>
             )}
           </div>
 
