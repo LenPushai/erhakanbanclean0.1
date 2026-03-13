@@ -2,6 +2,7 @@ import React from 'react';
 import { useState, useEffect } from 'react'
 import { ClipboardList, Briefcase, ChevronRight, Factory, Building2, Calendar, Hash, RefreshCw, ArrowDownToLine, ArrowUpFromLine, X, Mail, FileText, Paperclip, Send, Plus, Check, Printer } from 'lucide-react'
 import { supabase } from './lib/supabase'
+import { emailRFQCreated, emailQuoterAssigned, emailQuoteReady, emailOrderWon, emailJobInReview, emailJobReadyToPrint, emailJobPrinted, emailChildJobSpawned } from './emailService'
 import { format } from 'date-fns'
 
 type Board = 'rfq' | 'job'
@@ -198,12 +199,67 @@ function App() {
     finally { setLoading(false) }
   }
 
-  const handlePrintJobCard = (job: Job) => {
-    alert('Print Job Card: ' + (job.job_number || 'New Job') + ' - PDF coming next!')
+  const handlePrintJobCard = async (job: Job) => {
+    const { data: lineItems } = await supabase.from('job_line_items').select('*').eq('job_id', job.id).order('sort_order')
+    const items = lineItems || []
+    const fmtDate = (d: string | null) => d ? new Date(d).toLocaleDateString('en-ZA') : '—'
+    const chk = (v: any) => v ? '&#10003;' : ''
+    const val = (v: any) => v || '—'
+    const lineItemRows = items.length > 0
+      ? items.map((item: any, i: number) => `<tr><td class='no-col'>${i+1}</td><td>${item.description||'—'}</td><td class='qty-col'>${item.quantity||1}</td><td class='uom-col'>${item.uom||'EA'}</td><td class='spawn-col'>${item.child_job_id?'<span style="color:#16a34a;font-weight:bold">&#10003; Spawned</span>':'<div style="width:13px;height:13px;border:1.5px solid #1e3a5f;margin:auto"></div>'}</td></tr>`).join('')
+      : '<tr><td colspan="5" style="text-align:center;color:#aaa;padding:8px">No line items</td></tr>'
+    const logoHtml = '<img src="data:image/png;base64,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" alt="ERHA" style="height:45px">'
+    const css = `*{margin:0;padding:0;box-sizing:border-box}body{font-family:Arial,sans-serif;font-size:10pt;color:#1a1a1a;background:white}.page{width:210mm;min-height:297mm;margin:0 auto;padding:8mm 10mm}.header{display:flex;align-items:center;justify-content:space-between;border-bottom:3px solid #1e3a5f;padding-bottom:6px;margin-bottom:8px}.header-title{text-align:center;flex:1}.header-title h1{font-size:18pt;font-weight:900;color:#1e3a5f;letter-spacing:2px;text-transform:uppercase}.header-title p{font-size:8pt;color:#4a9a4a;font-weight:bold}.job-number{font-size:16pt;font-weight:900;color:#1e3a5f;font-family:'Courier New',monospace;text-align:right}.badge{font-size:9pt;font-weight:900;padding:3px 8px;border-radius:3px;display:inline-block;margin-top:3px}.section{border:1.5px solid #1e3a5f;margin-bottom:5px;border-radius:2px}.section-header{background:#1e3a5f;color:white;font-size:8pt;font-weight:bold;padding:3px 8px;letter-spacing:1px;text-transform:uppercase}.section-body{padding:6px 8px}.info-grid{display:grid;grid-template-columns:1fr 1fr;gap:4px 16px}.info-row{display:flex;gap:4px;align-items:baseline}.info-label{font-size:8pt;color:#555;font-weight:bold;white-space:nowrap;min-width:90px}.info-value{font-size:9pt;font-weight:600;border-bottom:1px solid #ccc;flex:1;padding-bottom:1px}.description-text{font-size:10pt;font-weight:600;line-height:1.4;min-height:20px}.actions-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:4px}.action-item{display:flex;align-items:center;gap:4px;font-size:9pt}.checkbox{width:13px;height:13px;border:1.5px solid #1e3a5f;display:inline-flex;align-items:center;justify-content:center;font-size:9pt;font-weight:900;color:#1e3a5f;flex-shrink:0}.checked{background:#e8f0fe}.line-items-table{width:100%;border-collapse:collapse;font-size:9pt}.line-items-table th{background:#f0f4f8;border:1px solid #cbd5e0;padding:4px 6px;text-align:left;font-size:8pt;color:#1e3a5f;font-weight:bold;text-transform:uppercase}.line-items-table td{border:1px solid #cbd5e0;padding:5px 6px;vertical-align:top}.line-items-table tr:nth-child(even) td{background:#f9fafb}.no-col{text-align:center;width:25px;color:#666}.qty-col{text-align:center;width:40px}.uom-col{text-align:center;width:45px}.spawn-col{text-align:center;width:60px}.assign-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.assign-label{font-size:8pt;color:#555;font-weight:bold;text-transform:uppercase;letter-spacing:.5px}.assign-value{font-size:10pt;font-weight:600;border-bottom:1.5px solid #1e3a5f;min-height:18px;padding-bottom:2px}.notes-box{border:1px solid #cbd5e0;min-height:30px;padding:4px;font-size:9pt;background:#fafafa}.sig-grid{display:grid;grid-template-columns:1fr 1fr;border:1.5px solid #1e3a5f;border-radius:2px}.sig-block{padding:8px}.sig-block:first-child{border-right:1.5px solid #1e3a5f}.sig-label{font-size:8pt;font-weight:bold;color:#1e3a5f;text-transform:uppercase;margin-bottom:4px}.sig-line{border-bottom:1.5px solid #1a1a1a;height:35px;margin-bottom:6px}.sig-date{display:flex;align-items:center;gap:6px;font-size:9pt}.sig-date-line{border-bottom:1px solid #1a1a1a;flex:1;height:16px}.footer{margin-top:6px;border-top:1px solid #1e3a5f;padding-top:4px;display:flex;justify-content:space-between;font-size:7pt;color:#888}.print-bar{background:#1e3a5f;color:white;padding:10px 20px;text-align:center;position:sticky;top:0;z-index:100}.print-btn{background:#4a9a4a;color:white;border:none;padding:8px 24px;font-size:11pt;font-weight:bold;border-radius:4px;cursor:pointer}@media print{.print-bar{display:none}@page{size:A4;margin:0}.page{margin:0;padding:8mm 10mm;width:100%}}`
+    const html = `<!DOCTYPE html><html><head><meta charset='UTF-8'><title>Job Card - ${val(job.job_number)}</title><style>${css}</style></head><body>
+<div class='print-bar'><button class='print-btn' onclick='window.print()'>&#128424; Print Job Card</button> <span style='font-size:9pt;opacity:.8'>Ctrl+P → Save as PDF</span></div>
+<div class='page'>
+<div class='header'><div>${logoHtml}</div><div class='header-title'><h1>Job Card</h1><p>ERHA OPERATIONS MANAGEMENT SYSTEM</p></div><div><div class='job-number'>${val(job.job_number)}</div>${job.is_emergency?'<div class="badge" style="background:#dc2626;color:white">&#9888; EMERGENCY</div>':''}${job.is_parent?'<div class="badge" style="background:#7c3aed;color:white">PARENT JOB</div>':''}${job.entry_type==='DIRECT'?'<div class="badge" style="background:#ea7c1e;color:white">DIRECT</div>':''}</div></div>
+<div class='section'><div class='section-header'>Job Information</div><div class='section-body'><div class='info-grid'>
+<div class='info-row'><span class='info-label'>Client:</span><span class='info-value'>${val(job.client_name)}</span></div>
+<div class='info-row'><span class='info-label'>Date Received:</span><span class='info-value'>${fmtDate(job.date_received)}</span></div>
+<div class='info-row'><span class='info-label'>RFQ Reference:</span><span class='info-value'>${val(job.rfq_no)}</span></div>
+<div class='info-row'><span class='info-label'>Due Date:</span><span class='info-value'>${fmtDate(job.due_date)}</span></div>
+<div class='info-row'><span class='info-label'>Site / PO:</span><span class='info-value'>${val(job.site_req)}</span></div>
+<div class='info-row'><span class='info-label'>Priority:</span><span class='info-value'>${val(job.priority)}</span></div>
+<div class='info-row'><span class='info-label'>Contact Person:</span><span class='info-value'>${val(job.contact_person)}</span></div>
+<div class='info-row'><span class='info-label'>Contract Work:</span><span class='info-value'>${job.is_contract_work?'YES':'NO'}</span></div>
+<div class='info-row'><span class='info-label'>Contact Phone:</span><span class='info-value'>${val(job.contact_phone)}</span></div>
+<div class='info-row'><span class='info-label'>Compiled By:</span><span class='info-value'>${val(job.compiled_by)}</span></div>
+</div></div></div>
+<div class='section'><div class='section-header'>Description of Work</div><div class='section-body'><div class='description-text'>${val(job.description)}</div></div></div>
+<div class='section'><div class='section-header'>Actions Required</div><div class='section-body'><div class='actions-grid'>
+<div class='action-item'><div class='checkbox ${job.action_manufacture?'checked':''}'>${chk(job.action_manufacture)}</div> Manufacture</div>
+<div class='action-item'><div class='checkbox ${job.action_sandblast?'checked':''}'>${chk(job.action_sandblast)}</div> Sandblast</div>
+<div class='action-item'><div class='checkbox ${job.action_prepare_material?'checked':''}'>${chk(job.action_prepare_material)}</div> Prepare Material</div>
+<div class='action-item'><div class='checkbox ${job.action_service?'checked':''}'>${chk(job.action_service)}</div> Service</div>
+<div class='action-item'><div class='checkbox ${job.action_paint?'checked':''}'>${chk(job.action_paint)}</div> Paint</div>
+<div class='action-item'><div class='checkbox ${job.action_repair?'checked':''}'>${chk(job.action_repair)}</div> Repair</div>
+<div class='action-item'><div class='checkbox ${job.action_installation?'checked':''}'>${chk(job.action_installation)}</div> Installation</div>
+<div class='action-item'><div class='checkbox ${job.action_cut?'checked':''}'>${chk(job.action_cut)}</div> Cut</div>
+<div class='action-item'><div class='checkbox ${job.action_modify?'checked':''}'>${chk(job.action_modify)}</div> Modify</div>
+<div class='action-item'><div class='checkbox ${job.action_other?'checked':''}'>${chk(job.action_other)}</div> Other</div>
+</div></div></div>
+<div class='section'><div class='section-header'>Scope of Work — Line Items</div><div class='section-body' style='padding:0'><table class='line-items-table'><thead><tr><th class='no-col'>#</th><th>Description</th><th class='qty-col'>Qty</th><th class='uom-col'>UOM</th><th class='spawn-col'>Child Job</th></tr></thead><tbody>${lineItemRows}</tbody></table></div></div>
+<div class='section'><div class='section-header'>Assignment &amp; Instructions</div><div class='section-body'>
+<div class='assign-grid' style='margin-bottom:8px'><div><span class='assign-label'>Assigned Employee</span><div class='assign-value'>${val(job.assigned_employee_name)}</div></div><div><span class='assign-label'>Supervisor</span><div class='assign-value'>${val(job.assigned_supervisor_name)}</div></div></div>
+<div style='margin-bottom:6px'><div class='assign-label' style='margin-bottom:3px'>Special Requirements</div><div class='notes-box'>${val(job.special_requirements)}</div></div>
+<div><div class='assign-label' style='margin-bottom:3px'>Notes</div><div class='notes-box'>${val(job.notes)}</div></div>
+</div></div>
+<div class='sig-grid'><div class='sig-block'><div class='sig-label'>Employee Signature</div><div class='sig-line'></div><div class='sig-date'><span>Date:</span><div class='sig-date-line'></div><span>/</span><div class='sig-date-line'></div><span>/</span><div class='sig-date-line'></div></div></div><div class='sig-block'><div class='sig-label'>Supervisor Signature</div><div class='sig-line'></div><div class='sig-date'><span>Date:</span><div class='sig-date-line'></div><span>/</span><div class='sig-date-line'></div><span>/</span><div class='sig-date-line'></div></div></div></div>
+<div class='footer'><span>ERHA Fabrication &amp; Construction — Confidential</span><span>Printed: ${new Date().toLocaleString('en-ZA')}</span><span>PUSH AI Foundation &copy; 2026</span></div>
+</div></body></html>`
+    const win = window.open('', '_blank')
+    if (win) { win.document.write(html); win.document.close() }
   }
 
   const handleJobStatusChange = async (jobId: string, newStatus: string) => {
     await supabase.from('jobs').update({ status: newStatus }).eq('id', jobId)
+    const { data: job } = await supabase.from('jobs').select('*').eq('id', jobId).single()
+    if (job) {
+      if (newStatus === 'IN_REVIEW') emailJobInReview(job)
+      if (newStatus === 'READY_TO_PRINT') emailJobReadyToPrint(job)
+      if (newStatus === 'PRINTED') emailJobPrinted(job)
+    }
     fetchJobs()
   }
 
@@ -286,7 +342,7 @@ function App() {
           <div className="flex-1 overflow-auto p-6 min-w-0">
             {activeBoard === 'rfq'
               ? <RFQBoard rfqs={rfqs} loading={loading} error={error} onRefresh={fetchRFQs} onCardClick={setSelectedRFQ} selectedId={selectedRFQ?.id} />
-              : <JobBoard jobs={jobs} loading={jobsLoading} onCardClick={setSelectedJob} selectedId={selectedJob?.id} onStatusChange={handleJobStatusChange} onPrintCard={handlePrintJobCard} onCardClick={setSelectedJob} selectedId={selectedJob?.id} />}
+             : <JobBoard jobs={jobs} loading={jobsLoading} onStatusChange={handleJobStatusChange} onPrintCard={handlePrintJobCard} onCardClick={setSelectedJob} selectedId={selectedJob?.id} />}
           </div>
           {selectedRFQ && <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4"><RFQDetailPanel rfq={selectedRFQ} onClose={() => setSelectedRFQ(null)} onUpdate={handleRFQUpdate} role={currentRole} onJobCreated={fetchJobs} /></div>}
         </div>
@@ -398,6 +454,8 @@ function JobBoard({ jobs, loading, onCardClick, selectedId, onStatusChange, onPr
                       <p className="text-xs font-bold text-green-600">{job.job_number || 'New'}</p>
                       <div className="flex items-center gap-1">
                         {job.entry_type === 'DIRECT' && <span className="text-xs font-bold px-1.5 py-0.5 bg-orange-100 text-orange-600 rounded">DIRECT</span>}
+                        {job.entry_type === 'CHILD' && <span className="text-xs font-bold px-1.5 py-0.5 bg-indigo-100 text-indigo-600 rounded">↳</span>}
+                        {job.is_parent && <span className="text-xs font-bold px-1.5 py-0.5 bg-purple-100 text-purple-600 rounded">P</span>}
                         {job.is_emergency && <span className="text-xs font-bold px-1.5 py-0.5 bg-red-100 text-red-600 rounded">!</span>}
                       </div>
                     </div>
@@ -444,15 +502,66 @@ function JobDetailPanel({ job, onClose, onUpdate }: { job: Job; onClose: () => v
   const [assignedSupervisor, setAssignedSupervisor] = React.useState(job.assigned_supervisor_name || '')
   const [notes, setNotes] = React.useState(job.notes || '')
   const [msg, setMsg] = React.useState('')
+  const [spawning, setSpawning] = React.useState<string | null>(null)
   const [lineItems, setLineItems] = React.useState<any[]>([])
+  const [attachments, setAttachments] = React.useState<any[]>([])
 
   React.useEffect(() => {
-    supabase.from('job_line_items').select('*').eq('job_id', job.id).order('sort_order').then(({ data }) => {
-      if (data) setLineItems(data)
-    })
+    supabase.from('job_line_items')
+      .select('*, child_job:jobs!child_job_id(job_number)')
+      .eq('job_id', job.id)
+      .order('sort_order')
+      .then(({ data }) => {
+        if (data) setLineItems(data.map((li: any) => ({
+          ...li,
+          child_job_number: li.child_job?.job_number || null
+        })))
+      })
+    supabase.from('job_attachments')
+      .select('*')
+      .eq('job_id', job.id)
+      .order('created_at')
+      .then(({ data }) => { if (data) setAttachments(data) })
   }, [job.id])
 
   const showMsg = (m: string) => { setMsg(m); setTimeout(() => setMsg(''), 3000) }
+
+  const handleSpawnJob = async (lineItem: any) => {
+    setSpawning(lineItem.id)
+    try {
+      const { data: childJob, error: jobError } = await supabase.from('jobs').insert({
+        parent_job_id: job.id,
+        is_child_job: true,
+        is_parent: false,
+        description: lineItem.description,
+        client_name: job.client_name,
+        site_req: job.site_req || null,
+        due_date: job.due_date || null,
+        priority: job.priority || 'NORMAL',
+        entry_type: 'CHILD',
+        status: 'PENDING',
+        rfq_no: job.rfq_no || null,
+        notes: 'Spawned from ' + (job.job_number || 'parent job') + ' - ' + lineItem.description,
+        date_received: new Date().toISOString().split('T')[0],
+      }).select().single()
+      if (jobError) throw jobError
+      const { error: liError } = await supabase.from('job_line_items').update({ child_job_id: childJob.id }).eq('id', lineItem.id)
+      if (liError) throw liError
+      await supabase.from('jobs').update({ is_parent: true }).eq('id', job.id)
+      const { data: updatedItems } = await supabase
+        .from('job_line_items')
+        .select('*, child_job:jobs!child_job_id(job_number)')
+        .eq('job_id', job.id)
+        .order('sort_order')
+      if (updatedItems) setLineItems(updatedItems.map((li: any) => ({ ...li, child_job_number: li.child_job?.job_number || null })))
+      if (childJob) emailChildJobSpawned(job, childJob)
+      showMsg('Child job ' + (childJob.job_number || '') + ' created!')
+      onUpdate({ ...job, is_parent: true })
+    } catch (err: any) {
+      showMsg('Error: ' + err.message)
+    } finally { setSpawning(null) }
+  }
+
 
   const handleSave = async () => {
     setSaving(true)
@@ -480,6 +589,8 @@ function JobDetailPanel({ job, onClose, onUpdate }: { job: Job; onClose: () => v
           <div className="flex items-center gap-3">
             <h2 className="text-lg font-bold">{job.job_number || 'New Job'}</h2>
             {job.entry_type === 'DIRECT' && <span className="text-xs font-bold px-2 py-0.5 bg-orange-400 text-white rounded">DIRECT</span>}
+            {job.entry_type === 'CHILD' && <span className="text-xs font-bold px-2 py-0.5 bg-indigo-400 text-white rounded">CHILD JOB</span>}
+            {job.is_parent && <span className="text-xs font-bold px-2 py-0.5 bg-purple-500 text-white rounded">PARENT</span>}
             {job.is_emergency && <span className="text-xs font-bold px-2 py-0.5 bg-red-500 text-white rounded">EMERGENCY</span>}
           </div>
           <p className="text-green-200 text-xs mt-0.5">{job.client_name || 'No client'}</p>
@@ -510,6 +621,7 @@ function JobDetailPanel({ job, onClose, onUpdate }: { job: Job; onClose: () => v
           {job.rfq_no && <div><span className="text-xs text-gray-500 block">Work Order No</span><span className="font-medium text-blue-600">{job.rfq_no}</span></div>}
           {job.due_date && <div><span className="text-xs text-gray-500 block">Due Date</span><span className="font-medium">{new Date(job.due_date).toLocaleDateString('en-ZA')}</span></div>}
           {job.created_at && <div><span className="text-xs text-gray-500 block">Created</span><span className="font-medium">{new Date(job.created_at).toLocaleDateString('en-ZA')}</span></div>}
+          {job.parent_job_id && <div><span className="text-xs text-gray-500 block">Parent Job</span><span className="font-medium text-purple-600">{job.rfq_no || job.parent_job_id.slice(0,8)}</span></div>}
         </div>
         {job.description && (
           <div>
@@ -529,7 +641,10 @@ function JobDetailPanel({ job, onClose, onUpdate }: { job: Job; onClose: () => v
         </div>
         {lineItems.length > 0 && (
           <div>
-            <label className="block text-xs font-medium text-gray-500 mb-2">Line Items</label>
+            <div className="flex items-center justify-between mb-2">
+              <label className="block text-xs font-medium text-gray-500">Line Items</label>
+              <span className="text-xs text-gray-400">Click Spawn to create a child job from a line item</span>
+            </div>
             <div className="border border-gray-200 rounded-lg overflow-hidden">
               <table className="w-full text-xs">
                 <thead className="bg-gray-50"><tr>
@@ -537,6 +652,7 @@ function JobDetailPanel({ job, onClose, onUpdate }: { job: Job; onClose: () => v
                   <th className="px-3 py-2 text-left text-gray-500 font-medium">Description</th>
                   <th className="px-3 py-2 text-left text-gray-500 font-medium w-14">Qty</th>
                   <th className="px-3 py-2 text-left text-gray-500 font-medium w-16">UOM</th>
+                  <th className="px-3 py-2 text-left text-gray-500 font-medium w-24">Child Job</th>
                 </tr></thead>
                 <tbody>
                   {lineItems.map((item, i) => (
@@ -545,10 +661,40 @@ function JobDetailPanel({ job, onClose, onUpdate }: { job: Job; onClose: () => v
                       <td className="px-3 py-2 text-gray-800">{item.description}</td>
                       <td className="px-3 py-2 text-gray-600">{item.quantity}</td>
                       <td className="px-3 py-2 text-gray-600">{item.uom}</td>
+                      <td className="px-3 py-2">
+                        {item.child_job_id ? (
+                          <span className="text-xs font-bold text-green-600 bg-green-50 px-2 py-0.5 rounded">
+                            {item.child_job_number || 'Spawned'}
+                          </span>
+                        ) : (
+                          <button
+                            onClick={() => handleSpawnJob(item)}
+                            disabled={spawning === item.id}
+                            className="px-2 py-0.5 text-xs font-semibold text-white bg-indigo-500 hover:bg-indigo-600 disabled:opacity-50 rounded transition-colors"
+                          >
+                            {spawning === item.id ? '...' : 'Spawn'}
+                          </button>
+                        )}
+                      </td>
                     </tr>
                   ))}
                 </tbody>
               </table>
+            </div>
+          </div>
+        )}
+        {attachments.length > 0 && (
+          <div>
+            <label className="block text-xs font-medium text-gray-500 mb-2">Attachments</label>
+            <div className="space-y-1">
+              {attachments.map((att: any) => (
+                <a key={att.id} href={att.file_path} target="_blank" rel="noopener noreferrer"
+                  className="flex items-center gap-2 px-3 py-2 bg-blue-50 hover:bg-blue-100 rounded-lg text-xs text-blue-700 transition-colors">
+                  <span>📎</span>
+                  <span className="flex-1 truncate">{att.file_name}</span>
+                  {att.file_size && <span className="text-gray-400">{(att.file_size/1024).toFixed(0)}KB</span>}
+                </a>
+              ))}
             </div>
           </div>
         )}
@@ -1185,13 +1331,33 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, onJobCreated }: { rfq: R
       onUpdate(data)
 
       // 2. Create job record
+      // 2. Create job record with all RFQ fields
       const { data: jobData, error: jobError } = await supabase.from('jobs').insert({
         rfq_id: rfq.id,
+        rfq_no: rfq.rfq_no || null,
+        rfq_number: rfq.rfq_no || null,
+        enq_number: rfq.enq_number || null,
         client_name: rfq.clients?.company_name || null,
         description: rfq.description,
         po_number: poNumber.trim(),
+        order_number: poNumber.trim(),
         status: 'PENDING',
+        entry_type: 'RFQ',
         priority: rfq.priority || 'NORMAL',
+        site_req: rfq.site_req || null,
+        contact_person: rfq.contact_person || null,
+        contact_email: rfq.contact_email || null,
+        contact_phone: rfq.contact_phone || null,
+        due_date: rfq.required_date || null,
+        date_received: rfq.request_date || new Date().toISOString().split('T')[0],
+        special_requirements: rfq.special_requirements || null,
+        notes: rfq.notes || null,
+        drawing_number: rfq.drawing_number || null,
+        has_drawing: rfq.drawing_number ? true : false,
+        is_contract_work: rfq.is_contract_work || false,
+        operating_entity: rfq.operating_entity || null,
+        is_parent: false,
+        is_child_job: false,
       }).select('id').single()
 
       if (jobError) {
@@ -1224,7 +1390,30 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, onJobCreated }: { rfq: R
           else console.log('Copied', jobLineItems.length, 'line items to job')
         }
 
-        showMsg('Order won - Job created with line items!')
+
+        // 4. Copy attachments from RFQ to job
+        const { data: rfqAttachments } = await supabase
+          .from('rfq_attachments')
+          .select('*')
+          .eq('rfq_id', rfq.id)
+
+        if (rfqAttachments && rfqAttachments.length > 0) {
+          const jobAttachments = rfqAttachments.map((att: any) => ({
+            job_id: jobData.id,
+            rfq_attachment_id: att.id,
+            file_name: att.file_name,
+            file_path: att.file_path,
+            file_size: att.file_size || null,
+            file_type: att.file_type || null,
+            uploaded_by: att.uploaded_by || null,
+          }))
+          const { error: attError } = await supabase.from('job_attachments').insert(jobAttachments)
+          if (attError) console.error('Attachment copy error:', attError.message)
+          else console.log('Copied', jobAttachments.length, 'attachments to job')
+        }
+
+        if (jobData) emailOrderWon(data, jobData.job_number || '')
+        showMsg('Order won! Job created with all RFQ details, line items & attachments.')
         if (onJobCreated) onJobCreated()
       }
     } catch (e: any) { alert('Error: ' + e.message) }
