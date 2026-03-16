@@ -70,6 +70,35 @@ interface Job {
   due_date: string | null
   notes: string | null
   created_at: string
+  entry_type?: string | null
+  is_parent?: boolean | null
+  is_child_job?: boolean | null
+  parent_job_id?: string | null
+  is_contract_work?: boolean | null
+  date_received?: string | null
+  site_req?: string | null
+  contact_person?: string | null
+  contact_phone?: string | null
+  contact_email?: string | null
+  compiled_by?: string | null
+  special_requirements?: string | null
+  assigned_employee_name?: string | null
+  assigned_supervisor_name?: string | null
+  drawing_number?: string | null
+  has_drawing?: boolean | null
+  has_service_schedule?: boolean | null
+  has_internal_order?: boolean | null
+  has_qcp?: boolean | null
+  action_manufacture?: boolean | null
+  action_sandblast?: boolean | null
+  action_prepare_material?: boolean | null
+  action_service?: boolean | null
+  action_paint?: boolean | null
+  action_repair?: boolean | null
+  action_installation?: boolean | null
+  action_cut?: boolean | null
+  action_modify?: boolean | null
+  action_other?: boolean | null
 }
 
 interface LineItem {
@@ -202,52 +231,256 @@ function App() {
   const handlePrintJobCard = async (job: Job) => {
     const { data: lineItems } = await supabase.from('job_line_items').select('*').eq('job_id', job.id).order('sort_order')
     const items = lineItems || []
-    const fmtDate = (d: string | null) => d ? new Date(d).toLocaleDateString('en-ZA') : '—'
-    const chk = (v: any) => v ? '&#10003;' : ''
-    const val = (v: any) => v || '—'
+    const fmtDate = (d: string | null | undefined) => d ? new Date(d).toLocaleDateString('en-ZA') : ''
+    const val = (v: any) => v || ''
+    const chkBox = (checked: boolean) => checked
+      ? '<td style="border:1px solid #000;width:14px;height:14px;text-align:center;font-weight:bold">&#10003;</td>'
+      : '<td style="border:1px solid #000;width:14px;height:14px"></td>'
+
     const lineItemRows = items.length > 0
-      ? items.map((item: any, i: number) => `<tr><td class='no-col'>${i+1}</td><td>${item.description||'—'}</td><td class='qty-col'>${item.quantity||1}</td><td class='uom-col'>${item.uom||'EA'}</td><td class='spawn-col'>${item.child_job_id?'<span style="color:#16a34a;font-weight:bold">&#10003; Spawned</span>':'<div style="width:13px;height:13px;border:1.5px solid #1e3a5f;margin:auto"></div>'}</td></tr>`).join('')
-      : '<tr><td colspan="5" style="text-align:center;color:#aaa;padding:8px">No line items</td></tr>'
-    const logoHtml = '<img src="data:image/png;base64,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" alt="ERHA" style="height:45px">'
-    const css = `*{margin:0;padding:0;box-sizing:border-box}body{font-family:Arial,sans-serif;font-size:10pt;color:#1a1a1a;background:white}.page{width:210mm;min-height:297mm;margin:0 auto;padding:8mm 10mm}.header{display:flex;align-items:center;justify-content:space-between;border-bottom:3px solid #1e3a5f;padding-bottom:6px;margin-bottom:8px}.header-title{text-align:center;flex:1}.header-title h1{font-size:18pt;font-weight:900;color:#1e3a5f;letter-spacing:2px;text-transform:uppercase}.header-title p{font-size:8pt;color:#4a9a4a;font-weight:bold}.job-number{font-size:16pt;font-weight:900;color:#1e3a5f;font-family:'Courier New',monospace;text-align:right}.badge{font-size:9pt;font-weight:900;padding:3px 8px;border-radius:3px;display:inline-block;margin-top:3px}.section{border:1.5px solid #1e3a5f;margin-bottom:5px;border-radius:2px}.section-header{background:#1e3a5f;color:white;font-size:8pt;font-weight:bold;padding:3px 8px;letter-spacing:1px;text-transform:uppercase}.section-body{padding:6px 8px}.info-grid{display:grid;grid-template-columns:1fr 1fr;gap:4px 16px}.info-row{display:flex;gap:4px;align-items:baseline}.info-label{font-size:8pt;color:#555;font-weight:bold;white-space:nowrap;min-width:90px}.info-value{font-size:9pt;font-weight:600;border-bottom:1px solid #ccc;flex:1;padding-bottom:1px}.description-text{font-size:10pt;font-weight:600;line-height:1.4;min-height:20px}.actions-grid{display:grid;grid-template-columns:repeat(5,1fr);gap:4px}.action-item{display:flex;align-items:center;gap:4px;font-size:9pt}.checkbox{width:13px;height:13px;border:1.5px solid #1e3a5f;display:inline-flex;align-items:center;justify-content:center;font-size:9pt;font-weight:900;color:#1e3a5f;flex-shrink:0}.checked{background:#e8f0fe}.line-items-table{width:100%;border-collapse:collapse;font-size:9pt}.line-items-table th{background:#f0f4f8;border:1px solid #cbd5e0;padding:4px 6px;text-align:left;font-size:8pt;color:#1e3a5f;font-weight:bold;text-transform:uppercase}.line-items-table td{border:1px solid #cbd5e0;padding:5px 6px;vertical-align:top}.line-items-table tr:nth-child(even) td{background:#f9fafb}.no-col{text-align:center;width:25px;color:#666}.qty-col{text-align:center;width:40px}.uom-col{text-align:center;width:45px}.spawn-col{text-align:center;width:60px}.assign-grid{display:grid;grid-template-columns:1fr 1fr;gap:8px}.assign-label{font-size:8pt;color:#555;font-weight:bold;text-transform:uppercase;letter-spacing:.5px}.assign-value{font-size:10pt;font-weight:600;border-bottom:1.5px solid #1e3a5f;min-height:18px;padding-bottom:2px}.notes-box{border:1px solid #cbd5e0;min-height:30px;padding:4px;font-size:9pt;background:#fafafa}.sig-grid{display:grid;grid-template-columns:1fr 1fr;border:1.5px solid #1e3a5f;border-radius:2px}.sig-block{padding:8px}.sig-block:first-child{border-right:1.5px solid #1e3a5f}.sig-label{font-size:8pt;font-weight:bold;color:#1e3a5f;text-transform:uppercase;margin-bottom:4px}.sig-line{border-bottom:1.5px solid #1a1a1a;height:35px;margin-bottom:6px}.sig-date{display:flex;align-items:center;gap:6px;font-size:9pt}.sig-date-line{border-bottom:1px solid #1a1a1a;flex:1;height:16px}.footer{margin-top:6px;border-top:1px solid #1e3a5f;padding-top:4px;display:flex;justify-content:space-between;font-size:7pt;color:#888}.print-bar{background:#1e3a5f;color:white;padding:10px 20px;text-align:center;position:sticky;top:0;z-index:100}.print-btn{background:#4a9a4a;color:white;border:none;padding:8px 24px;font-size:11pt;font-weight:bold;border-radius:4px;cursor:pointer}@media print{.print-bar{display:none}@page{size:A4;margin:0}.page{margin:0;padding:8mm 10mm;width:100%}}`
-    const html = `<!DOCTYPE html><html><head><meta charset='UTF-8'><title>Job Card - ${val(job.job_number)}</title><style>${css}</style></head><body>
-<div class='print-bar'><button class='print-btn' onclick='window.print()'>&#128424; Print Job Card</button> <span style='font-size:9pt;opacity:.8'>Ctrl+P → Save as PDF</span></div>
-<div class='page'>
-<div class='header'><div>${logoHtml}</div><div class='header-title'><h1>Job Card</h1><p>ERHA OPERATIONS MANAGEMENT SYSTEM</p></div><div><div class='job-number'>${val(job.job_number)}</div>${job.is_emergency?'<div class="badge" style="background:#dc2626;color:white">&#9888; EMERGENCY</div>':''}${job.is_parent?'<div class="badge" style="background:#7c3aed;color:white">PARENT JOB</div>':''}${job.entry_type==='DIRECT'?'<div class="badge" style="background:#ea7c1e;color:white">DIRECT</div>':''}</div></div>
-<div class='section'><div class='section-header'>Job Information</div><div class='section-body'><div class='info-grid'>
-<div class='info-row'><span class='info-label'>Client:</span><span class='info-value'>${val(job.client_name)}</span></div>
-<div class='info-row'><span class='info-label'>Date Received:</span><span class='info-value'>${fmtDate(job.date_received)}</span></div>
-<div class='info-row'><span class='info-label'>RFQ Reference:</span><span class='info-value'>${val(job.rfq_no)}</span></div>
-<div class='info-row'><span class='info-label'>Due Date:</span><span class='info-value'>${fmtDate(job.due_date)}</span></div>
-<div class='info-row'><span class='info-label'>Site / PO:</span><span class='info-value'>${val(job.site_req)}</span></div>
-<div class='info-row'><span class='info-label'>Priority:</span><span class='info-value'>${val(job.priority)}</span></div>
-<div class='info-row'><span class='info-label'>Contact Person:</span><span class='info-value'>${val(job.contact_person)}</span></div>
-<div class='info-row'><span class='info-label'>Contract Work:</span><span class='info-value'>${job.is_contract_work?'YES':'NO'}</span></div>
-<div class='info-row'><span class='info-label'>Contact Phone:</span><span class='info-value'>${val(job.contact_phone)}</span></div>
-<div class='info-row'><span class='info-label'>Compiled By:</span><span class='info-value'>${val(job.compiled_by)}</span></div>
-</div></div></div>
-<div class='section'><div class='section-header'>Description of Work</div><div class='section-body'><div class='description-text'>${val(job.description)}</div></div></div>
-<div class='section'><div class='section-header'>Actions Required</div><div class='section-body'><div class='actions-grid'>
-<div class='action-item'><div class='checkbox ${job.action_manufacture?'checked':''}'>${chk(job.action_manufacture)}</div> Manufacture</div>
-<div class='action-item'><div class='checkbox ${job.action_sandblast?'checked':''}'>${chk(job.action_sandblast)}</div> Sandblast</div>
-<div class='action-item'><div class='checkbox ${job.action_prepare_material?'checked':''}'>${chk(job.action_prepare_material)}</div> Prepare Material</div>
-<div class='action-item'><div class='checkbox ${job.action_service?'checked':''}'>${chk(job.action_service)}</div> Service</div>
-<div class='action-item'><div class='checkbox ${job.action_paint?'checked':''}'>${chk(job.action_paint)}</div> Paint</div>
-<div class='action-item'><div class='checkbox ${job.action_repair?'checked':''}'>${chk(job.action_repair)}</div> Repair</div>
-<div class='action-item'><div class='checkbox ${job.action_installation?'checked':''}'>${chk(job.action_installation)}</div> Installation</div>
-<div class='action-item'><div class='checkbox ${job.action_cut?'checked':''}'>${chk(job.action_cut)}</div> Cut</div>
-<div class='action-item'><div class='checkbox ${job.action_modify?'checked':''}'>${chk(job.action_modify)}</div> Modify</div>
-<div class='action-item'><div class='checkbox ${job.action_other?'checked':''}'>${chk(job.action_other)}</div> Other</div>
-</div></div></div>
-<div class='section'><div class='section-header'>Scope of Work — Line Items</div><div class='section-body' style='padding:0'><table class='line-items-table'><thead><tr><th class='no-col'>#</th><th>Description</th><th class='qty-col'>Qty</th><th class='uom-col'>UOM</th><th class='spawn-col'>Child Job</th></tr></thead><tbody>${lineItemRows}</tbody></table></div></div>
-<div class='section'><div class='section-header'>Assignment &amp; Instructions</div><div class='section-body'>
-<div class='assign-grid' style='margin-bottom:8px'><div><span class='assign-label'>Assigned Employee</span><div class='assign-value'>${val(job.assigned_employee_name)}</div></div><div><span class='assign-label'>Supervisor</span><div class='assign-value'>${val(job.assigned_supervisor_name)}</div></div></div>
-<div style='margin-bottom:6px'><div class='assign-label' style='margin-bottom:3px'>Special Requirements</div><div class='notes-box'>${val(job.special_requirements)}</div></div>
-<div><div class='assign-label' style='margin-bottom:3px'>Notes</div><div class='notes-box'>${val(job.notes)}</div></div>
-</div></div>
-<div class='sig-grid'><div class='sig-block'><div class='sig-label'>Employee Signature</div><div class='sig-line'></div><div class='sig-date'><span>Date:</span><div class='sig-date-line'></div><span>/</span><div class='sig-date-line'></div><span>/</span><div class='sig-date-line'></div></div></div><div class='sig-block'><div class='sig-label'>Supervisor Signature</div><div class='sig-line'></div><div class='sig-date'><span>Date:</span><div class='sig-date-line'></div><span>/</span><div class='sig-date-line'></div><span>/</span><div class='sig-date-line'></div></div></div></div>
-<div class='footer'><span>ERHA Fabrication &amp; Construction — Confidential</span><span>Printed: ${new Date().toLocaleString('en-ZA')}</span><span>PUSH AI Foundation &copy; 2026</span></div>
+      ? items.map((item: any, i: number) => `<tr>
+          <td style="border:1px solid #000;padding:3px 5px">${item.description||''}</td>
+          <td style="border:1px solid #000;padding:3px 5px;text-align:center">${item.quantity||1}</td>
+        </tr>`).join('')
+      : '<tr><td style="border:1px solid #000;padding:3px 5px" colspan="2">—</td></tr>'
+
+    const logoB64 = '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'
+    const logoHtml = '<img src="data:image/png;base64,' + logoB64 + '" alt="ERHA" style="height:50px">'
+      ? `<img src="data:image/png;base64,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" alt="ERHA" style="height:50px">`
+      : '<div style="font-size:16pt;font-weight:900;color:#1e3a5f">ERHA</div>'
+
+    const html = `<!DOCTYPE html><html><head><meta charset="UTF-8">
+<title>Job Card - ${val(job.job_number)}</title>
+<style>
+* { margin:0; padding:0; box-sizing:border-box; }
+body { font-family:Arial,sans-serif; font-size:9pt; background:white; color:#000; }
+.page { width:210mm; min-height:297mm; margin:0 auto; padding:6mm 8mm; }
+table { border-collapse:collapse; width:100%; }
+td, th { font-size:9pt; }
+.print-bar { background:#1e3a5f; color:white; padding:8px 16px; text-align:center; position:sticky; top:0; z-index:100; }
+.print-btn { background:#4a9a4a; color:white; border:none; padding:6px 20px; font-size:10pt; font-weight:bold; border-radius:4px; cursor:pointer; margin-right:8px; }
+.section-label { font-weight:bold; font-size:8pt; text-decoration:underline; margin:4px 0 2px; }
+.field-line { border-bottom:1px solid #000; min-height:14px; display:inline-block; }
+@media print { .print-bar { display:none } @page { size:A4; margin:8mm } .page { margin:0; padding:0; width:100%; } }
+</style></head><body>
+<div class="print-bar">
+  <button class="print-btn" onclick="window.print()">&#128424; Print Job Card</button>
+  <span style="font-size:9pt;opacity:.8">Ctrl+P → Save as PDF</span>
+</div>
+<div class="page">
+
+<!-- HEADER -->
+<table style="margin-bottom:4px">
+  <tr>
+    <td style="width:35%">${logoHtml}</td>
+    <td style="width:20%;text-align:center;font-weight:bold;font-size:10pt;vertical-align:middle">Q C<br>Department</td>
+    <td style="width:45%;font-size:8pt;border:1px solid #000;padding:4px">
+      <strong>Approved date:</strong> 2022/12/06<br>
+      <strong>Revision:</strong> 1<br>
+      <strong>Next Revision date:</strong> 2023/12/06<br>
+      <strong>Form no:</strong> QCL JC 001
+    </td>
+  </tr>
+</table>
+
+<!-- CONTRACT / QUOTED WORK + COMPILED BY -->
+<table style="border:1px solid #000;margin-bottom:4px">
+  <tr>
+    <td style="border:1px solid #000;padding:3px 6px;width:30%">
+      <strong>Contract Work</strong><br>
+      <span style="font-size:8pt;font-style:italic">Panels, Lances, EBT Devices, Taphole Flanges, Ladle</span>
+      <div style="margin-top:4px">${job.is_contract_work ? '&#10003; YES' : '&#9633; NO'}</div>
+    </td>
+    <td style="border:1px solid #000;padding:3px 6px;width:30%">
+      <strong>Quoted Work</strong>
+      <div style="margin-top:4px">${!job.is_contract_work ? '&#10003; YES' : '&#9633; NO'}</div>
+    </td>
+    <td style="border:1px solid #000;padding:3px 6px;width:40%">
+      <strong>Compiled by:</strong><br>
+      <table><tr>
+        <td style="padding-right:12px"><strong>CHERISE</strong> ${(job as any).compiled_by==='Cherise'?'&#10003;':''}</td>
+        <td><strong>JUANIC</strong> ${(job as any).compiled_by==='Juanic'?'&#10003;':''}</td>
+      </tr></table>
+    </td>
+  </tr>
+</table>
+
+<!-- JOB REFERENCE ROW -->
+<table style="border:1px solid #000;margin-bottom:4px">
+  <tr>
+    <td style="border:1px solid #000;padding:3px 6px;width:40%">
+      <strong><u>Employee:</u></strong> <span style="border-bottom:1px solid #000;display:inline-block;min-width:120px">${val(job.assigned_employee_name)}</span>
+    </td>
+    <td colspan="4" style="padding:0">
+      <table style="width:100%"><tr>
+        <td style="border:1px solid #000;padding:3px 6px"><strong>Job Nr:</strong><br><span style="font-size:10pt;font-weight:900">${val(job.job_number)}</span></td>
+        <td style="border:1px solid #000;padding:3px 6px"><strong>JOB CARD NO:</strong><br><span style="font-size:8pt;color:#999">Workshop</span></td>
+        <td style="border:1px solid #000;padding:3px 6px"><strong>RFQ:</strong><br>${val(job.rfq_no)}</td>
+        <td style="border:1px solid #000;padding:3px 6px"><strong>SITE REQ:</strong><br>${val(job.site_req)}</td>
+      </tr></table>
+    </td>
+  </tr>
+</table>
+
+<!-- ACTIONS REQUIRED -->
+<div class="section-label">ACTIONS REQUIRED</div>
+<table style="border:1px solid #000;margin-bottom:4px">
+  <tr>
+    <td style="border:1px solid #000;padding:3px 8px;width:20%">${job.action_manufacture?'&#10003;':''} <strong>MANUFACTURE</strong></td>
+    <td style="border:1px solid #000;padding:3px 8px;width:20%">${job.action_service?'&#10003;':''} <strong>SERVICE</strong></td>
+    <td style="border:1px solid #000;padding:3px 8px;width:20%">${job.action_repair?'&#10003;':''} <strong>REPAIR</strong></td>
+    <td style="border:1px solid #000;padding:3px 8px;width:20%">${job.action_modify?'&#10003;':''} <strong>MODIFY</strong></td>
+    <td style="border:1px solid #000;padding:3px 8px;width:20%">${job.is_emergency?'&#9888; EMERGENCY':''}</td>
+  </tr>
+  <tr>
+    <td style="border:1px solid #000;padding:3px 8px">${job.action_sandblast?'&#10003;':''} <strong>SANDBLAST</strong></td>
+    <td style="border:1px solid #000;padding:3px 8px">${job.action_paint?'&#10003;':''} <strong>PAINT</strong></td>
+    <td style="border:1px solid #000;padding:3px 8px">${job.action_installation?'&#10003;':''} <strong>INSTALLATION</strong></td>
+    <td style="border:1px solid #000;padding:3px 8px"></td>
+    <td style="border:1px solid #000;padding:3px 8px"></td>
+  </tr>
+  <tr>
+    <td style="border:1px solid #000;padding:3px 8px">${job.action_prepare_material?'&#10003;':''} <strong>PREPARE MATERIAL</strong></td>
+    <td style="border:1px solid #000;padding:3px 8px">${job.action_other?'&#10003;':''} <strong>OTHER</strong></td>
+    <td style="border:1px solid #000;padding:3px 8px">${job.action_cut?'&#10003;':''} <strong>CUT</strong></td>
+    <td style="border:1px solid #000;padding:3px 8px"></td>
+    <td style="border:1px solid #000;padding:3px 8px"></td>
+  </tr>
+</table>
+
+<!-- JOB DESCRIPTION + QTY -->
+<table style="border:1px solid #000;margin-bottom:4px">
+  <tr>
+    <th style="border:1px solid #000;padding:3px 6px;text-align:left;background:#f5f5f5">JOB DESCRIPTION</th>
+    <th style="border:1px solid #000;padding:3px 6px;width:60px;text-align:center;background:#f5f5f5"><u>QTY</u></th>
+  </tr>
+  ${lineItemRows}
+  <tr>
+    <td style="border:1px solid #000;padding:3px 6px"><strong>DRAWING:</strong> ${val(job.drawing_number)}</td>
+    <td style="border:1px solid #000;padding:3px 6px"></td>
+  </tr>
+</table>
+
+<!-- ATTACHED DOCUMENTS -->
+<table style="border:1px solid #000;margin-bottom:4px">
+  <tr>
+    <td colspan="4" style="border:1px solid #000;padding:3px 6px"><strong><u>ATTACHED DOCUMENTS</u></strong></td>
+  </tr>
+  <tr>
+    <td style="border:1px solid #000;padding:3px 8px;width:25%">&#9633; SERVICE SCHEDULE / QCP</td>
+    <td style="border:1px solid #000;padding:3px 8px;width:25%">&#9633; INFO FOR QUOTE</td>
+    <td style="border:1px solid #000;padding:3px 8px;width:25%">&#9633; DRAWING ATTACHED / SKETCHES</td>
+    <td style="border:1px solid #000;padding:3px 8px;width:25%">&#9633; QCP</td>
+  </tr>
+  <tr>
+    <td style="border:1px solid #000;padding:3px 8px">&#9633; INTERNAL ORDER</td>
+    <td style="border:1px solid #000;padding:3px 8px">&#9633; LIST AS QUOTED</td>
+    <td style="border:1px solid #000;padding:3px 8px"></td>
+    <td style="border:1px solid #000;padding:3px 8px"></td>
+  </tr>
+</table>
+
+<!-- ARTISAN NOTICE -->
+<div style="border:1px solid #000;padding:4px 6px;margin-bottom:4px;font-style:italic;font-size:8.5pt">
+  <strong><u>ARTISAN:</u></strong> Make sure you signed the Internal Transmittal to acknowledge the receipt of your job card and the attached documents mentioned above!
+</div>
+
+<!-- SUPERVISOR JOB PLANNING INFO -->
+<table style="border:1px solid #000;margin-bottom:4px">
+  <tr>
+    <td colspan="4" style="border:1px solid #000;padding:3px 6px;background:#f5f5f5"><strong><u>SUPERVISOR JOB PLANNING INFO</u></strong></td>
+  </tr>
+  <tr>
+    <th style="border:1px solid #000;padding:3px 6px;width:25%">Date Received</th>
+    <th style="border:1px solid #000;padding:3px 6px;width:25%">Material Ordered</th>
+    <th style="border:1px solid #000;padding:3px 6px;width:25%">Completion Date<br><span style="font-size:7.5pt;font-weight:normal">(At least 2 days before delivery)</span></th>
+    <th style="border:1px solid #000;padding:3px 6px;width:25%">DUE DATE</th>
+  </tr>
+  <tr>
+    <td style="border:1px solid #000;padding:6px">${fmtDate(job.date_received)}</td>
+    <td style="border:1px solid #000;padding:6px"></td>
+    <td style="border:1px solid #000;padding:6px"></td>
+    <td style="border:1px solid #000;padding:6px;font-weight:bold">${fmtDate(job.due_date)}</td>
+  </tr>
+</table>
+<div style="font-size:8pt;font-style:italic;margin-bottom:6px">(All above is to be completed by the supervisor)</div>
+
+<!-- SIGNATURES -->
+<div style="margin-bottom:4px">
+  SUPERVISOR SIGNATURE: <span style="display:inline-block;border-bottom:1px solid #000;width:300px;margin-left:8px"></span>
+</div>
+<div style="margin-bottom:8px">
+  EMPLOYEE SIGNATURE: &nbsp; <span style="display:inline-block;border-bottom:1px solid #000;width:308px;margin-left:8px"></span>
+</div>
+
+<!-- TIMESHEET (Phase 2 - blank) -->
+<table style="border:1px solid #000;margin-bottom:4px;font-size:8pt">
+  <thead>
+    <tr style="background:#f5f5f5">
+      <th style="border:1px solid #000;padding:2px 4px" rowspan="2">DATE</th>
+      <th style="border:1px solid #000;padding:2px 4px" rowspan="2">DESCRIPTION</th>
+      <th style="border:1px solid #000;padding:2px 4px;text-align:center" colspan="2">MON</th>
+      <th style="border:1px solid #000;padding:2px 4px;text-align:center" colspan="2">TUES</th>
+      <th style="border:1px solid #000;padding:2px 4px;text-align:center" colspan="2">WED</th>
+      <th style="border:1px solid #000;padding:2px 4px;text-align:center" colspan="2">THUR</th>
+      <th style="border:1px solid #000;padding:2px 4px;text-align:center" colspan="2">FRI</th>
+      <th style="border:1px solid #000;padding:2px 4px;text-align:center">SAT</th>
+      <th style="border:1px solid #000;padding:2px 4px;text-align:center">SUN</th>
+      <th style="border:1px solid #000;padding:2px 4px;text-align:center" colspan="2">TOTAL</th>
+    </tr>
+    <tr style="background:#f5f5f5">
+      <th style="border:1px solid #000;padding:1px 3px">NT</th><th style="border:1px solid #000;padding:1px 3px">OT</th>
+      <th style="border:1px solid #000;padding:1px 3px">NT</th><th style="border:1px solid #000;padding:1px 3px">OT</th>
+      <th style="border:1px solid #000;padding:1px 3px">NT</th><th style="border:1px solid #000;padding:1px 3px">OT</th>
+      <th style="border:1px solid #000;padding:1px 3px">NT</th><th style="border:1px solid #000;padding:1px 3px">OT</th>
+      <th style="border:1px solid #000;padding:1px 3px">NT</th><th style="border:1px solid #000;padding:1px 3px">OT</th>
+      <th style="border:1px solid #000;padding:1px 3px">OT</th>
+      <th style="border:1px solid #000;padding:1px 3px">OT</th>
+      <th style="border:1px solid #000;padding:1px 3px">NT</th><th style="border:1px solid #000;padding:1px 3px">OT</th>
+    </tr>
+  </thead>
+  <tbody>
+    ${Array(14).fill('<tr>' + Array(16).fill('<td style="border:1px solid #000;padding:5px 3px">&nbsp;</td>').join('') + '</tr>').join('')}
+  </tbody>
+</table>
+
+<!-- HOLDING POINTS -->
+<table style="border:1px solid #000;font-size:8pt">
+  <tr><td colspan="4" style="border:1px solid #000;padding:3px 6px;background:#ffe066"><strong>HOLDING POINTS</strong></td></tr>
+  <tr style="background:#f5f5f5">
+    <th style="border:1px solid #000;padding:2px 4px;width:5%">No</th>
+    <th style="border:1px solid #000;padding:2px 4px;width:55%">Description</th>
+    <th style="border:1px solid #000;padding:2px 4px;width:15%">Pass / Fail</th>
+    <th style="border:1px solid #000;padding:2px 4px;width:15%">Applicable / Not Applicable</th>
+    <th style="border:1px solid #000;padding:2px 4px;width:10%">QC / Supervisor Signature</th>
+  </tr>
+  <tr><td style="border:1px solid #000;padding:3px 4px">1.</td><td style="border:1px solid #000;padding:3px 4px">Mark out all material &amp; check prior to cutting.</td><td style="border:1px solid #000"></td><td style="border:1px solid #000"></td><td style="border:1px solid #000"></td></tr>
+  <tr><td style="border:1px solid #000;padding:3px 4px">2.</td><td style="border:1px solid #000;padding:3px 4px">Cut all material, deburr holes, dress and remove all sharp edges</td><td style="border:1px solid #000"></td><td style="border:1px solid #000"></td><td style="border:1px solid #000"></td></tr>
+  <tr><td style="border:1px solid #000;padding:3px 4px">3.</td><td style="border:1px solid #000;padding:3px 4px">Assy &amp; inspect prior to welding (Water passes if applicable)</td><td style="border:1px solid #000"></td><td style="border:1px solid #000"></td><td style="border:1px solid #000"></td></tr>
+  <tr><td style="border:1px solid #000;padding:3px 4px">4.</td><td style="border:1px solid #000;padding:3px 4px">Do welding complete as per WPS?</td><td style="border:1px solid #000"></td><td style="border:1px solid #000"></td><td style="border:1px solid #000"></td></tr>
+  <tr><td style="border:1px solid #000;padding:3px 4px">5.</td><td style="border:1px solid #000;padding:3px 4px">Do a pressure test on water cooled unit if applicable?</td><td style="border:1px solid #000"></td><td style="border:1px solid #000"></td><td style="border:1px solid #000"></td></tr>
+  <tr><td style="border:1px solid #000;padding:3px 4px">6.</td><td style="border:1px solid #000;padding:3px 4px">Clean all spatter and ensure NO sharp edges on workpiece</td><td style="border:1px solid #000"></td><td style="border:1px solid #000"></td><td style="border:1px solid #000"></td></tr>
+  <tr><td style="border:1px solid #000;padding:3px 4px">7.</td><td style="border:1px solid #000;padding:3px 4px">Do 100% dimensional &amp; visual inspection prior to painting</td><td style="border:1px solid #000"></td><td style="border:1px solid #000"></td><td style="border:1px solid #000"></td></tr>
+  <tr><td style="border:1px solid #000;padding:3px 4px">8.</td><td style="border:1px solid #000;padding:3px 4px">Stamp and paint as required</td><td style="border:1px solid #000"></td><td style="border:1px solid #000"></td><td style="border:1px solid #000"></td></tr>
+  <tr><td style="border:1px solid #000;padding:3px 4px">9.</td><td colspan="4" style="border:1px solid #000;padding:3px 4px">Final Inspection – Sticker – Sign – Paperwork – Ready for delivery</td></tr>
+  <tr><td colspan="5" style="border:1px solid #000;padding:4px 6px;font-size:8pt">
+    <strong>Take Note!!! Final Inspection must ALWAYS be at least 2 days before delivery date!!!!!</strong><br>
+    <strong>ALL WELDING RODS MUST BE BAKED PRIOR TO WELDING!!!!!!</strong>
+  </td></tr>
+  <tr><td colspan="5" style="border:1px solid #000;padding:4px 6px;font-size:8pt;background:#ffe066">
+    <strong>Please follow the above procedure.</strong> See "holding points" —
+    Under no circumstances should work be continued to the next holding point if the previous holding point is not signed and work completed where applicable.
+  </td></tr>
+</table>
+
+<div style="margin-top:6px;font-size:7pt;color:#888;display:flex;justify-content:space-between">
+  <span>ERHA Fabrication &amp; Construction — Confidential</span>
+  <span>Printed: ${new Date().toLocaleString('en-ZA')}</span>
+  <span>PUSH AI Foundation &copy; 2026</span>
+</div>
+
 </div></body></html>`
+
     const win = window.open('', '_blank')
     if (win) { win.document.write(html); win.document.close() }
   }
@@ -303,7 +536,7 @@ function App() {
         </div>
         <nav className="flex-1 px-3 py-4 space-y-1">
           <p className="text-gray-500 text-xs font-semibold uppercase tracking-widest px-3 mb-3">Boards</p>
-          <NavItem icon={<ClipboardList size={18} />} label="Work Order Board" description="Work Order pipeline" active={activeBoard === 'rfq'} accentColor="text-blue-400" onClick={() => setActiveBoard('rfq')} />
+          <NavItem icon={<ClipboardList size={18} />} label="RFQ Board" description="RFQ pipeline" active={activeBoard === 'rfq'} accentColor="text-blue-400" onClick={() => setActiveBoard('rfq')} />
           <NavItem icon={<Briefcase size={18} />} label="Job Board" description="Project tracking" active={activeBoard === 'job'} accentColor="text-green-400" onClick={() => setActiveBoard('job')} />
         </nav>
         <div className="px-6 py-4 border-t border-gray-700">
@@ -315,8 +548,8 @@ function App() {
       <main className="flex-1 flex flex-col overflow-hidden">
         <header className="bg-white border-b border-gray-200 px-8 py-4 flex items-center justify-between shrink-0">
           <div>
-            <h1 className="text-xl font-bold text-gray-900">{activeBoard === 'rfq' ? 'Work Order Board' : 'Job Board'}</h1>
-            <p className="text-sm text-gray-500 mt-0.5">{activeBoard === 'rfq' ? 'Work Order to job creation - sales pipeline' : 'Job created to paid - project tracking'}</p>
+            <h1 className="text-xl font-bold text-gray-900">{activeBoard === 'rfq' ? 'RFQ Board' : 'Job Board'}</h1>
+            <p className="text-sm text-gray-500 mt-0.5">{activeBoard === 'rfq' ? 'RFQ to job creation - sales pipeline' : 'Job created to paid - project tracking'}</p>
           </div>
           <div className="flex items-center gap-3">
             <button onClick={() => { fetchRFQs(); fetchJobs() }} className="flex items-center gap-2 px-3 py-1.5 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors">
@@ -324,7 +557,7 @@ function App() {
             </button>
             {activeBoard === 'rfq' && (
               <button onClick={() => setShowCreateModal(true)} className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg transition-colors">
-                <Plus size={15} />New Work Order
+                <Plus size={15} />New RFQ
               </button>
             )}
             {activeBoard === 'job' && (
@@ -333,7 +566,7 @@ function App() {
               </button>
             )}
             <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold ${activeBoard === 'rfq' ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-700'}`}>
-              {activeBoard === 'rfq' ? 'Work Order Board' : 'Job Board'}
+              {activeBoard === 'rfq' ? 'RFQ Board' : 'Job Board'}
             </span>
           </div>
         </header>
@@ -386,7 +619,7 @@ function RFQBoard({ rfqs, loading, error, onRefresh, onCardClick, selectedId }: 
 function RFQCard({ rfq, hoverColor, onClick, isSelected }: { rfq: RFQ; hoverColor: string; onClick: () => void; isSelected: boolean }) {
   const priority = rfq.priority?.toUpperCase() || 'NORMAL'
   const direction = rfq.rfq_direction?.toUpperCase()
-  const enqNo = rfq.enq_number || rfq.rfq_no || '-'
+  const enqNo = rfq.client_rfq_number || rfq.enq_number || rfq.rfq_no || '-'
   return (
     <div onClick={onClick} className={`bg-white rounded-lg shadow-sm border-2 p-3 cursor-pointer hover:shadow-md ${hoverColor} transition-all ${isSelected ? 'border-blue-400 shadow-md' : 'border-transparent'}`}>
       <div className="flex items-center gap-1.5 mb-2 flex-wrap">
@@ -500,6 +733,7 @@ function JobDetailPanel({ job, onClose, onUpdate }: { job: Job; onClose: () => v
   const [priority, setPriority] = React.useState(job.priority || 'NORMAL')
   const [assignedEmployee, setAssignedEmployee] = React.useState(job.assigned_employee_name || '')
   const [assignedSupervisor, setAssignedSupervisor] = React.useState(job.assigned_supervisor_name || '')
+  const [compiledBy, setCompiledBy] = React.useState((job as any).compiled_by || '')
   const [notes, setNotes] = React.useState(job.notes || '')
   const [msg, setMsg] = React.useState('')
   const [spawning, setSpawning] = React.useState<string | null>(null)
@@ -529,10 +763,18 @@ function JobDetailPanel({ job, onClose, onUpdate }: { job: Job; onClose: () => v
   const handleSpawnJob = async (lineItem: any) => {
     setSpawning(lineItem.id)
     try {
+      // Count existing children to determine suffix (A, B, C...)
+      const { data: existingChildren } = await supabase
+        .from('jobs')
+        .select('id')
+        .eq('parent_job_id', job.id)
+      const suffix = String.fromCharCode(65 + (existingChildren?.length || 0)) // A, B, C...
+      const childJobNumber = (job.job_number || 'JOB') + '-' + suffix
       const { data: childJob, error: jobError } = await supabase.from('jobs').insert({
         parent_job_id: job.id,
         is_child_job: true,
         is_parent: false,
+        job_number: childJobNumber,
         description: lineItem.description,
         client_name: job.client_name,
         site_req: job.site_req || null,
@@ -570,6 +812,7 @@ function JobDetailPanel({ job, onClose, onUpdate }: { job: Job; onClose: () => v
         status, priority,
         assigned_employee_name: assignedEmployee || null,
         assigned_supervisor_name: assignedSupervisor || null,
+        compiled_by: compiledBy || null,
         notes: notes || null,
       }).eq('id', job.id).select().single()
       if (error) throw error
@@ -618,7 +861,7 @@ function JobDetailPanel({ job, onClose, onUpdate }: { job: Job; onClose: () => v
         </div>
         <div className="grid grid-cols-2 gap-4 text-sm">
           {job.site_req && <div><span className="text-xs text-gray-500 block">Site Req / PO</span><span className="font-medium">{job.site_req}</span></div>}
-          {job.rfq_no && <div><span className="text-xs text-gray-500 block">Work Order No</span><span className="font-medium text-blue-600">{job.rfq_no}</span></div>}
+          {job.rfq_no && <div><span className="text-xs text-gray-500 block">RFQ No</span><span className="font-medium text-blue-600">{job.rfq_no}</span></div>}
           {job.due_date && <div><span className="text-xs text-gray-500 block">Due Date</span><span className="font-medium">{new Date(job.due_date).toLocaleDateString('en-ZA')}</span></div>}
           {job.created_at && <div><span className="text-xs text-gray-500 block">Created</span><span className="font-medium">{new Date(job.created_at).toLocaleDateString('en-ZA')}</span></div>}
           {job.parent_job_id && <div><span className="text-xs text-gray-500 block">Parent Job</span><span className="font-medium text-purple-600">{job.rfq_no || job.parent_job_id.slice(0,8)}</span></div>}
@@ -629,15 +872,13 @@ function JobDetailPanel({ job, onClose, onUpdate }: { job: Job; onClose: () => v
             <p className="text-sm text-gray-800 bg-gray-50 rounded-lg px-3 py-2">{job.description}</p>
           </div>
         )}
-        <div className="grid grid-cols-2 gap-4">
-          <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">Assigned Employee</label>
-            <input value={assignedEmployee} onChange={e => setAssignedEmployee(e.target.value)} placeholder="Employee name..." className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
-          </div>
-          <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">Supervisor</label>
-            <input value={assignedSupervisor} onChange={e => setAssignedSupervisor(e.target.value)} placeholder="Supervisor..." className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
-          </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-500 mb-1">Compiled By</label>
+          <select value={compiledBy} onChange={e => setCompiledBy(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500">
+            <option value="">Select...</option>
+            <option value="Cherise">Cherise</option>
+            <option value="Juanic">Juanic</option>
+          </select>
         </div>
         {lineItems.length > 0 && (
           <div>
@@ -786,7 +1027,7 @@ function CreateDirectJobModal({ onClose, onCreated }: { onClose: () => void; onC
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl flex flex-col max-h-[90vh]">
         <div className="bg-indigo-600 text-white px-6 py-4 rounded-t-xl flex items-center justify-between shrink-0">
-          <div><h2 className="text-lg font-bold">Create New Job</h2><p className="text-indigo-200 text-xs mt-0.5">Direct Work Order (No RFQ)</p></div>
+          <div><h2 className="text-lg font-bold">Create New Job</h2><p className="text-indigo-200 text-xs mt-0.5">Direct Job (No RFQ)</p></div>
           <button onClick={onClose} className="text-indigo-200 hover:text-white"><X size={20} /></button>
         </div>
         <div className="overflow-y-auto flex-1 p-6 space-y-5">
@@ -869,6 +1110,7 @@ function CreateRFQModal({ onClose, onCreated }: { onClose: () => void; onCreated
   const [form, setForm] = React.useState({
     rfq_direction: 'INCOMING',
     operating_entity: 'ERHA FC',
+    rfq_no: '',
     client_rfq_number: '',
     priority: 'MEDIUM',
     request_date: new Date().toISOString().split('T')[0],
@@ -957,7 +1199,7 @@ function CreateRFQModal({ onClose, onCreated }: { onClose: () => void; onCreated
       }
 
       const { count } = await supabase.from('rfqs').select('*', { count: 'exact', head: true })
-      const enqNumber = `WO-26-${String((count || 0) + 1).padStart(4, '0')}`
+      const enqNumber = form.rfq_no
 
       const { data: rfq, error: rfqError } = await supabase.from('rfqs').insert({
         enq_number: enqNumber,
@@ -980,7 +1222,7 @@ function CreateRFQModal({ onClose, onCreated }: { onClose: () => void; onCreated
         special_requirements: form.special_requirements || null,
         notes: form.notes || null,
         status: 'NEW',
-      }).select('id').single()
+      }).select('id, job_number').single()
 
       if (rfqError) throw rfqError
 
@@ -1028,7 +1270,7 @@ function CreateRFQModal({ onClose, onCreated }: { onClose: () => void; onCreated
     <div className="fixed inset-0 bg-black/50 z-50 flex items-start justify-center overflow-y-auto py-8">
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl mx-4">
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
-          <h2 className="text-lg font-bold text-gray-900">New Work Order</h2>
+          <h2 className="text-lg font-bold text-gray-900">New RFQ</h2>
           <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl font-bold leading-none"><X size={18} /></button>
         </div>
 
@@ -1201,7 +1443,7 @@ function CreateRFQModal({ onClose, onCreated }: { onClose: () => void; onCreated
         <div className="flex justify-end gap-3 px-6 py-4 border-t border-gray-200 bg-gray-50 rounded-b-xl">
           <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800 font-medium">Cancel</button>
           <button type="button" onClick={handleSave} disabled={saving || uploadingFiles} className="px-6 py-2 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
-            {saving ? 'Creating...' : 'Create Work Order'}
+            {saving ? 'Creating...' : 'Create RFQ'}
           </button>
         </div>
       </div>
@@ -1412,7 +1654,7 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, onJobCreated }: { rfq: R
           else console.log('Copied', jobAttachments.length, 'attachments to job')
         }
 
-        if (jobData) emailOrderWon(data, jobData.job_number || '')
+        if (jobData) emailOrderWon(data, (jobData as any).job_number || '')
         showMsg('Order won! Job created with all RFQ details, line items & attachments.')
         if (onJobCreated) onJobCreated()
       }
@@ -1432,7 +1674,7 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, onJobCreated }: { rfq: R
     finally { setSaving(false) }
   }
 
-  const enqNo = rfq.enq_number || rfq.rfq_no || '-'
+  const enqNo = rfq.client_rfq_number || rfq.enq_number || rfq.rfq_no || '-'
   const priority = rfq.priority?.toUpperCase() || 'NORMAL'
   const direction = rfq.rfq_direction?.toUpperCase()
   const status = rfq.status || 'NEW'
@@ -1525,7 +1767,7 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, onJobCreated }: { rfq: R
 
           <div className="px-5 py-4 border-b border-gray-100">
             <div className="flex items-center justify-between mb-3">
-              <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest">Work Order Details</p>
+              <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest">RFQ Details</p>
               <button onClick={handleSaveRFQDetails} disabled={saving} className="px-3 py-1 text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white rounded-lg disabled:opacity-50">{saving ? 'Saving...' : 'Save Changes'}</button>
             </div>
             <p className="text-xs font-medium text-gray-500 mb-2">Client Information</p>
@@ -1675,7 +1917,7 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, onJobCreated }: { rfq: R
 
 function EmailModal({ rfq, onClose }: { rfq: RFQ; onClose: () => void }) {
   const template = EMAIL_TEMPLATES[rfq.status] || EMAIL_TEMPLATES['NEW']
-  const enqNo = rfq.enq_number || rfq.rfq_no || '-'
+  const enqNo = rfq.client_rfq_number || rfq.enq_number || rfq.rfq_no || '-'
   const contactName = rfq.contact_person || 'Sir/Madam'
   const [to, setTo] = useState(rfq.contact_email || '')
   const [subject, setSubject] = useState(template.subject.replace('{enq}', enqNo))
