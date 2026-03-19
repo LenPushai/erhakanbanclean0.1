@@ -1,4 +1,4 @@
-import React from 'react';
+﻿import React from 'react';
 import { useState, useEffect } from 'react'
 import { ClipboardList, Briefcase, ChevronRight, Factory, Building2, Calendar, Hash, RefreshCw, ArrowDownToLine, ArrowUpFromLine, X, Mail, FileText, Paperclip, Send, Plus, Check, Printer } from 'lucide-react'
 import { supabase } from './lib/supabase'
@@ -231,6 +231,17 @@ function App() {
   const handlePrintJobCard = async (job: Job) => {
     const { data: lineItems } = await supabase.from('job_line_items').select('*').eq('job_id', job.id).order('sort_order')
     const items = lineItems || []
+    const { data: childJobsData } = job.is_parent
+      ? await supabase.from('jobs').select('*').eq('parent_job_id', job.id).order('job_number')
+      : { data: null }
+    const childJobs = (childJobsData || []) as Job[]
+    const childrenHtml = childJobs.length > 0
+      ? '<div style="margin-top:8px;page-break-inside:avoid"><table style="border:1px solid #000;font-size:8pt;width:100%;border-collapse:collapse">' +
+        '<tr><td colspan="3" style="border:1px solid #000;padding:3px 6px;background:#e8eaf6;font-weight:bold">CHILD JOBS</td></tr>' +
+        '<tr style="background:#f5f5f5"><th style="border:1px solid #000;padding:2px 6px;text-align:left">Job Number</th><th style="border:1px solid #000;padding:2px 6px;text-align:left">Description</th><th style="border:1px solid #000;padding:2px 6px;text-align:left">Status</th></tr>' +
+        childJobs.map((ch: any) => '<tr><td style="border:1px solid #000;padding:2px 6px;font-weight:bold">' + (ch.job_number||'') + '</td><td style="border:1px solid #000;padding:2px 6px">' + (ch.description||'') + '</td><td style="border:1px solid #000;padding:2px 6px">' + ((ch.status||'').replace(/_/g,' ')) + '</td></tr>').join('') +
+        '</table><p style="font-size:8pt;font-style:italic;margin-top:4px">Child job cards print on separate pages.</p></div>'
+      : ''
     const fmtDate = (d: string | null | undefined) => d ? new Date(d).toLocaleDateString('en-ZA') : ''
     const val = (v: any) => v || ''
     const chkBox = (checked: boolean) => checked
@@ -261,7 +272,16 @@ td, th { font-size:9pt; }
 .print-btn { background:#4a9a4a; color:white; border:none; padding:6px 20px; font-size:10pt; font-weight:bold; border-radius:4px; cursor:pointer; margin-right:8px; }
 .section-label { font-weight:bold; font-size:8pt; text-decoration:underline; margin:4px 0 2px; }
 .field-line { border-bottom:1px solid #000; min-height:14px; display:inline-block; }
-@media print { .print-bar { display:none } @page { size:A4; margin:8mm } .page { margin:0; padding:0; width:100%; } }
+@media print {
+  .print-bar { display:none }
+  @page { size:A4; margin:8mm }
+  .page { margin:0; padding:6mm 8mm; width:210mm; border: 1px solid #000; }
+  table { page-break-inside: auto; border-collapse: collapse; }
+  tr { page-break-inside: avoid; page-break-after: auto; }
+  thead { display: table-header-group; }
+  tfoot { display: table-footer-group; }
+  .no-break { page-break-inside: avoid; }
+}
 </style></head><body>
 <div class="print-bar">
   <button class="print-btn" onclick="window.print()">&#128424; Print Job Card</button>
@@ -314,7 +334,7 @@ td, th { font-size:9pt; }
     <td colspan="4" style="padding:0">
       <table style="width:100%"><tr>
         <td style="border:1px solid #000;padding:3px 6px"><strong>Job Nr:</strong><br><span style="font-size:10pt;font-weight:900">${val(job.job_number)}</span></td>
-        <td style="border:1px solid #000;padding:3px 6px"><strong>JOB CARD NO:</strong><br><span style="font-size:8pt;color:#999">Workshop</span></td>
+        <td style="border:1px solid #000;padding:3px 6px"><strong>JOB CARD NO:</strong><br><span style="font-size:10pt;font-weight:900">${val(job.job_number)}</span></td>
         <td style="border:1px solid #000;padding:3px 6px"><strong>RFQ:</strong><br>${val(job.rfq_no)}</td>
         <td style="border:1px solid #000;padding:3px 6px"><strong>SITE REQ:</strong><br>${val(job.site_req)}</td>
       </tr></table>
@@ -473,6 +493,7 @@ td, th { font-size:9pt; }
   </td></tr>
 </table>
 
+${childrenHtml}
 <div style="margin-top:6px;font-size:7pt;color:#888;display:flex;justify-content:space-between">
   <span>ERHA Fabrication &amp; Construction — Confidential</span>
   <span>Printed: ${new Date().toLocaleString('en-ZA')}</span>
@@ -483,6 +504,11 @@ td, th { font-size:9pt; }
 
     const win = window.open('', '_blank')
     if (win) { win.document.write(html); win.document.close() }
+    if (childJobs.length > 0) {
+      childJobs.forEach((child: any, i: number) => {
+        setTimeout(() => handlePrintJobCard(child as Job), (i + 1) * 900)
+      })
+    }
   }
 
   const handleJobStatusChange = async (jobId: string, newStatus: string) => {
@@ -624,6 +650,7 @@ function RFQCard({ rfq, hoverColor, onClick, isSelected }: { rfq: RFQ; hoverColo
     <div onClick={onClick} className={`bg-white rounded-lg shadow-sm border-2 p-3 cursor-pointer hover:shadow-md ${hoverColor} transition-all ${isSelected ? 'border-blue-400 shadow-md' : 'border-transparent'}`}>
       <div className="flex items-center gap-1.5 mb-2 flex-wrap">
         <span className="text-xs font-bold text-blue-600 tracking-wide">{enqNo}</span>
+        {rfq.quote_number && <span className="text-xs font-bold text-purple-600 tracking-wide ml-1">| Q: {rfq.quote_number}</span>}
         {direction && (
           <span className={`inline-flex items-center gap-0.5 text-xs font-semibold px-1.5 py-0.5 rounded ${direction === 'OUTGOING' ? 'bg-blue-50 text-blue-600' : 'bg-green-50 text-green-600'}`}>
             {direction === 'OUTGOING' ? <ArrowUpFromLine size={10} /> : <ArrowDownToLine size={10} />}
@@ -643,6 +670,8 @@ function RFQCard({ rfq, hoverColor, onClick, isSelected }: { rfq: RFQ; hoverColo
 // JOB BOARD
 
 function JobBoard({ jobs, loading, onCardClick, selectedId, onStatusChange, onPrintCard }: { jobs: Job[]; loading: boolean; onCardClick: (job: Job) => void; selectedId?: string; onStatusChange: (jobId: string, newStatus: string) => void; onPrintCard: (job: Job) => void }) {
+  const [expandedParents, setExpandedParents] = React.useState<Set<string>>(new Set())
+  const toggleParent = (id: string) => setExpandedParents(p => { const s = new Set(p); s.has(id) ? s.delete(id) : s.add(id); return s })
   const columns = [
     { key: 'PENDING',        label: 'Pending',        color: 'bg-gray-500'  },
     { key: 'IN_REVIEW',      label: 'In Review',      color: 'bg-blue-500'  },
@@ -671,7 +700,9 @@ function JobBoard({ jobs, loading, onCardClick, selectedId, onStatusChange, onPr
                   <p className="text-gray-400 text-xs">No jobs</p>
                 </div>
               )}
-              {cards.map(job => {
+              {cards.filter(j => !j.is_child_job).map(job => {
+                const children = jobs.filter(jj => jj.parent_job_id === job.id)
+                const isExpanded = expandedParents.has(job.id)
                 const nextMap: Record<string, {label: string; next: string; color: string}[]> = {
                   PENDING:        [{ label: 'Review', next: 'IN_REVIEW',      color: 'bg-blue-500 hover:bg-blue-600' }],
                   IN_REVIEW:      [{ label: 'Ready',  next: 'READY_TO_PRINT', color: 'bg-amber-500 hover:bg-amber-600' }],
@@ -681,7 +712,7 @@ function JobBoard({ jobs, loading, onCardClick, selectedId, onStatusChange, onPr
                 const nextActions = nextMap[job.status] || []
                 const canPrint = job.status === 'READY_TO_PRINT' || job.status === 'PRINTED'
                 return (
-                  <div key={job.id} onClick={() => onCardClick(job)}
+                  <React.Fragment key={job.id}><div onClick={() => onCardClick(job)}
                     className={`bg-white rounded-lg shadow-sm border-2 p-3 cursor-pointer hover:shadow-md transition-all ${job.id === selectedId ? 'border-green-400 shadow-md' : 'border-transparent hover:border-green-300'}`}>
                     <div className="flex items-center justify-between gap-1">
                       <p className="text-xs font-bold text-green-600">{job.job_number || 'New'}</p>
@@ -713,7 +744,36 @@ function JobBoard({ jobs, loading, onCardClick, selectedId, onStatusChange, onPr
                         )}
                       </div>
                     )}
+                    {job.is_parent && children.length > 0 && (
+                      <button onClick={e => { e.stopPropagation(); toggleParent(job.id) }}
+                        className="mt-2 w-full flex items-center justify-center gap-1 py-1 text-xs font-medium text-purple-600 bg-purple-50 hover:bg-purple-100 rounded transition-colors">
+                        {isExpanded ? "▲" : "▼"} {children.length} child{children.length > 1 ? " jobs" : " job"}
+                      </button>
+                    )}
                   </div>
+                  {job.is_parent && isExpanded && children.map(child => {
+                    const cNext = (({"PENDING":[{label:"Review",next:"IN_REVIEW",color:"bg-blue-500 hover:bg-blue-600"}],"IN_REVIEW":[{label:"Ready",next:"READY_TO_PRINT",color:"bg-amber-500 hover:bg-amber-600"}],"READY_TO_PRINT":[{label:"Back",next:"IN_REVIEW",color:"bg-gray-400 hover:bg-gray-500"}],"PRINTED":[]} as Record<string,{label:string;next:string;color:string}[]>)[child.status] || [])
+                    const cPrint = child.status === "READY_TO_PRINT" || child.status === "PRINTED"
+                    return (
+                      <div key={child.id} className="ml-3 mt-1 border-l-2 border-purple-200 pl-2">
+                        <div onClick={() => onCardClick(child)} className={`bg-white rounded-lg shadow-sm border-2 p-2 cursor-pointer transition-all ${child.id === selectedId ? "border-green-400" : "border-transparent hover:border-purple-300"}`}>
+                          <div className="flex items-center justify-between gap-1">
+                            <p className="text-xs font-bold text-purple-600">{child.job_number}</p>
+                            <span className="text-xs font-bold px-1.5 py-0.5 bg-indigo-100 text-indigo-600 rounded">↳</span>
+                          </div>
+                          <p className="text-xs text-gray-700 mt-0.5 line-clamp-2">{child.description || ''}</p>
+                          <span className={`text-xs px-1.5 py-0.5 rounded mt-1 inline-block font-medium ${child.status==="PENDING"?"bg-gray-100 text-gray-600":child.status==="IN_REVIEW"?"bg-blue-100 text-blue-600":child.status==="READY_TO_PRINT"?"bg-amber-100 text-amber-600":"bg-green-100 text-green-600"}`}>{child.status.replace(/_/g,' ')}</span>
+                          {(cNext.length > 0 || cPrint) && (
+                            <div className="flex gap-1 mt-1.5" onClick={e => e.stopPropagation()}>
+                              {cNext.map(a => (<button key={a.next} onClick={() => onStatusChange(child.id, a.next)} className={`flex-1 py-0.5 text-xs font-semibold text-white rounded ${a.color}`}>{a.label}</button>))}
+                              {cPrint && (<button onClick={() => onPrintCard(child)} className="flex items-center gap-1 flex-1 py-0.5 text-xs font-semibold text-white rounded bg-green-600 hover:bg-green-700 justify-center"><Printer size={10}/>Print</button>)}
+                            </div>
+                          )}
+                        </div>
+                      </div>
+                    )
+                  })}
+                  </React.Fragment>
                 )
               })}
             </div>
@@ -737,8 +797,33 @@ function JobDetailPanel({ job, onClose, onUpdate }: { job: Job; onClose: () => v
   const [notes, setNotes] = React.useState(job.notes || '')
   const [msg, setMsg] = React.useState('')
   const [spawning, setSpawning] = React.useState<string | null>(null)
+  const [spawnTarget, setSpawnTarget] = React.useState<any | null>(null)
   const [lineItems, setLineItems] = React.useState<any[]>([])
   const [attachments, setAttachments] = React.useState<any[]>([])
+  const [newLineItems, setNewLineItems] = React.useState<{description:string;quantity:number;uom:string;item_type:string}[]>([])
+  const [savingLines, setSavingLines] = React.useState(false)
+  const addNewLine = () => setNewLineItems(p => [...p, {description:'',quantity:1,uom:'EA',item_type:'MATERIAL'}])
+  const removeNewLine = (i:number) => setNewLineItems(p => p.filter((_,idx)=>idx!==i))
+  const updateNewLine = (i:number,field:string,val:any) => setNewLineItems(p => p.map((x,idx)=>idx===i?{...x,[field]:val}:x))
+  const saveNewLines = async () => {
+    const valid = newLineItems.filter(l => l.description.trim())
+    if (!valid.length) return
+    setSavingLines(true)
+    try {
+      const { data: ex } = await supabase.from('job_line_items').select('sort_order').eq('job_id', job.id).order('sort_order',{ascending:false}).limit(1)
+      const next = ((ex?.[0]?.sort_order)||0)+1
+      await supabase.from('job_line_items').insert(valid.map((x,i)=>({
+        job_id:x.description&&job.id, description:x.description.trim(), quantity:x.quantity,
+        uom:x.uom, item_type:x.item_type, cost_price:0, sell_price:0, line_total:0,
+        status:'PENDING', sort_order:next+i, can_spawn_job:true,
+      })))
+      const {data:r} = await supabase.from('job_line_items').select('*, child_job:jobs!child_job_id(job_number)').eq('job_id',job.id).order('sort_order')
+      if (r) setLineItems(r.map((li:any)=>({...li,child_job_number:li.child_job?.job_number||null})))
+      setNewLineItems([])
+      showMsg('Line items saved')
+    } catch(err:any){ showMsg('Error: '+err.message) }
+    finally{ setSavingLines(false) }
+  }
 
   React.useEffect(() => {
     supabase.from('job_line_items')
@@ -880,12 +965,32 @@ function JobDetailPanel({ job, onClose, onUpdate }: { job: Job; onClose: () => v
             <option value="Juanic">Juanic</option>
           </select>
         </div>
-        {lineItems.length > 0 && (
-          <div>
-            <div className="flex items-center justify-between mb-2">
-              <label className="block text-xs font-medium text-gray-500">Line Items</label>
-              <span className="text-xs text-gray-400">Click Spawn to create a child job from a line item</span>
+        <div>
+          <label className="block text-xs font-medium text-gray-500 mb-2">Actions Required</label>
+          <div className="grid grid-cols-3 gap-2 mb-3">
+            {([
+              ['action_manufacture','Manufacture'],['action_service','Service'],['action_repair','Repair'],
+              ['action_sandblast','Sandblast'],['action_paint','Paint'],['action_installation','Installation'],
+              ['action_cut','Cut'],['action_modify','Modify'],['action_other','Other'],
+            ] as [string, string][]).map(([key, label]) => (
+              <label key={key} className="flex items-center gap-2 text-xs cursor-pointer">
+                <input type="checkbox" defaultChecked={!!(job as any)[key]}
+                  onChange={async (e) => { await supabase.from('jobs').update({ [key]: e.target.checked }).eq('id', job.id) }}
+                  className="w-3.5 h-3.5 text-green-600 rounded" />
+                <span className="text-gray-700">{label}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+        <div>
+          <div className="flex items-center justify-between mb-2">
+            <label className="block text-xs font-medium text-gray-500">Line Items</label>
+            <div className="flex items-center gap-2">
+              <span className="text-xs text-gray-400">Spawn creates a child job</span>
+              <button onClick={addNewLine} className="text-xs font-semibold text-green-600 bg-green-50 hover:bg-green-100 px-2 py-0.5 rounded">+ Add Line</button>
             </div>
+          </div>
+          {lineItems.length > 0 && (
             <div className="border border-gray-200 rounded-lg overflow-hidden">
               <table className="w-full text-xs">
                 <thead className="bg-gray-50"><tr>
@@ -909,7 +1014,7 @@ function JobDetailPanel({ job, onClose, onUpdate }: { job: Job; onClose: () => v
                           </span>
                         ) : (
                           <button
-                            onClick={() => handleSpawnJob(item)}
+                            onClick={() => setSpawnTarget(item)}
                             disabled={spawning === item.id}
                             className="px-2 py-0.5 text-xs font-semibold text-white bg-indigo-500 hover:bg-indigo-600 disabled:opacity-50 rounded transition-colors"
                           >
@@ -929,7 +1034,7 @@ function JobDetailPanel({ job, onClose, onUpdate }: { job: Job; onClose: () => v
             <label className="block text-xs font-medium text-gray-500 mb-2">Attachments</label>
             <div className="space-y-1">
               {attachments.map((att: any) => (
-                <a key={att.id} href={att.file_path} target="_blank" rel="noopener noreferrer"
+                <a key={att.id} href={supabase.storage.from('rfq-attachments').getPublicUrl(att.file_path).data.publicUrl} target="_blank" rel="noopener noreferrer"
                   className="flex items-center gap-2 px-3 py-2 bg-blue-50 hover:bg-blue-100 rounded-lg text-xs text-blue-700 transition-colors">
                   <span>📎</span>
                   <span className="flex-1 truncate">{att.file_name}</span>
@@ -950,6 +1055,24 @@ function JobDetailPanel({ job, onClose, onUpdate }: { job: Job; onClose: () => v
           <Check size={14} />{saving ? 'Saving...' : 'Save Changes'}
         </button>
       </div>
+      {spawnTarget && (
+        <SpawnJobModal
+          lineItem={spawnTarget}
+          parentJob={job}
+          onClose={() => setSpawnTarget(null)}
+          onSpawned={async (childJob) => {
+            setSpawnTarget(null)
+            const { data: updatedItems } = await supabase
+              .from('job_line_items')
+              .select('*, child_job:jobs!child_job_id(job_number)')
+              .eq('job_id', job.id)
+              .order('sort_order')
+            if (updatedItems) setLineItems(updatedItems.map((li: any) => ({ ...li, child_job_number: li.child_job?.job_number || null })))
+            onUpdate({ ...job, is_parent: true })
+            showMsg('Child job ' + childJob.job_number + ' created!')
+          }}
+        />
+      )}
     </div>
   )
 }
@@ -983,7 +1106,13 @@ function CreateDirectJobModal({ onClose, onCreated }: { onClose: () => void; onC
     if (!dueDate) { alert('Due date is required'); return }
     setSaving(true)
     try {
+      const yr = new Date().getFullYear().toString().slice(-2)
+      const { count: jc } = await supabase.from('jobs').select('*', { count: 'exact', head: true })
+      const jseq = String((jc || 0) + 1).padStart(3, '0')
+      const directJobNumber = `JOB-${yr}-${jseq}`
+
       const { data: job, error } = await supabase.from('jobs').insert({
+        job_number: directJobNumber,
         client_name: clientName.trim(), site_req: siteReq.trim() || null,
         is_contract_work: workType === 'contract', is_quoted_work: workType === 'quoted',
         priority, compiled_by: compiledBy.trim() || null, is_emergency: isEmergency,
@@ -1577,7 +1706,13 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, onJobCreated }: { rfq: R
 
       // 2. Create job record
       // 2. Create job record with all RFQ fields
+      const year = new Date().getFullYear().toString().slice(-2)
+      const { count: jobCount } = await supabase.from('jobs').select('*', { count: 'exact', head: true })
+      const seq = String((jobCount || 0) + 1).padStart(3, '0')
+      const newJobNumber = `JOB-${year}-${seq}`
+
       const { data: jobData, error: jobError } = await supabase.from('jobs').insert({
+        job_number: newJobNumber,
         rfq_id: rfq.id,
         rfq_no: rfq.rfq_no || null,
         rfq_number: rfq.rfq_no || null,
@@ -1617,23 +1752,23 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, onJobCreated }: { rfq: R
           .order('line_number')
 
         if (rfqItems && rfqItems.length > 0) {
-          const jobLineItems = rfqItems.map((item, idx) => ({
-            job_id: jobData.id,
-            description: item.description,
-            quantity: item.quantity || 1,
-            uom: item.unit_of_measure || 'EA',
-            item_type: item.item_type || 'MATERIAL',
-            cost_price: 0,
-            sell_price: 0,
-            line_total: 0,
-            status: 'PENDING',
-            sort_order: idx + 1,
+          const jobLineItems = rfqItems.map((item: any, idx: number) => ({
+            job_id:        jobData.id,
+            description:   item.description || '',
+            quantity:      Number(item.quantity) || 1,
+            uom:           item.unit_of_measure || 'EA',
+            item_type:     item.item_type || 'MATERIAL',
+            cost_price:    0,
+            sell_price:    0,
+            line_total:    0,
+            status:        'PENDING',
+            sort_order:    idx + 1,
             can_spawn_job: true,
           }))
           const { error: liError } = await supabase.from('job_line_items').insert(jobLineItems)
-          if (liError) console.error('Line items copy error:', liError.message)
-          else console.log('Copied', jobLineItems.length, 'line items to job')
-        }
+          if (liError) { console.error('Line items copy error:', liError.message) }
+          else { console.log('Copied', jobLineItems.length, 'line items to job') }
+        } else { console.warn('No RFQ line items found for rfq_id:', rfq.id) }
 
 
         // 4. Copy attachments from RFQ to job
@@ -2004,6 +2139,140 @@ function NavItem({ icon, label, description, active, accentColor, onClick }: Nav
       <div className="flex-1 min-w-0"><p className="text-sm font-semibold leading-tight">{label}</p><p className="text-xs text-gray-500 leading-tight mt-0.5">{description}</p></div>
       {active && <ChevronRight size={14} className={accentColor} />}
     </button>
+  )
+}
+
+// SPAWN JOB MODAL
+function SpawnJobModal({ lineItem, parentJob, onClose, onSpawned }: {
+  lineItem: any; parentJob: Job; onClose: () => void; onSpawned: (child: any) => void
+}) {
+  const [saving, setSaving] = React.useState(false)
+  const [description, setDescription] = React.useState(lineItem.description || '')
+  const [assignedEmployee, setAssignedEmployee] = React.useState(parentJob.assigned_employee_name || '')
+  const [supervisor, setSupervisor] = React.useState(parentJob.assigned_supervisor_name || '')
+  const [priority, setPriority] = React.useState(parentJob.priority || 'NORMAL')
+  const [dueDate, setDueDate] = React.useState(parentJob.due_date || '')
+  const [notes, setNotes] = React.useState('')
+  const [actions, setActions] = React.useState({
+    manufacture: false, service: false, repair: false,
+    sandblast: false, paint: false, installation: false,
+    cut: false, modify: false, other: false
+  })
+  const toggleAction = (key: keyof typeof actions) => setActions(a => ({ ...a, [key]: !a[key] }))
+  const actionList: [keyof typeof actions, string][] = [
+    ['manufacture','Manufacture'],['service','Service'],['repair','Repair'],
+    ['sandblast','Sandblast'],['paint','Paint'],['installation','Installation'],
+    ['cut','Cut'],['modify','Modify'],['other','Other']
+  ]
+
+  const handleCreate = async () => {
+    if (!description.trim()) { alert('Description is required'); return }
+    setSaving(true)
+    try {
+      const { data: existingChildren } = await supabase.from('jobs').select('id').eq('parent_job_id', parentJob.id)
+      const suffix = String.fromCharCode(65 + (existingChildren?.length || 0))
+      const childJobNumber = (parentJob.job_number || 'JOB') + '-' + suffix
+      const { data: childJob, error } = await supabase.from('jobs').insert({
+        parent_job_id:            parentJob.id,
+        is_child_job:             true,
+        is_parent:                false,
+        job_number:               childJobNumber,
+        description:              description.trim(),
+        client_name:              parentJob.client_name,
+        site_req:                 parentJob.site_req || null,
+        rfq_no:                   parentJob.rfq_no || null,
+        due_date:                 dueDate || null,
+        priority:                 priority,
+        entry_type:               'CHILD',
+        status:                   'PENDING',
+        assigned_employee_name:   assignedEmployee || null,
+        assigned_supervisor_name: supervisor || null,
+        notes:                    notes || null,
+        date_received:            new Date().toISOString().split('T')[0],
+        is_contract_work:         parentJob.is_contract_work || false,
+        action_manufacture:       actions.manufacture,
+        action_service:           actions.service,
+        action_repair:            actions.repair,
+        action_sandblast:         actions.sandblast,
+        action_paint:             actions.paint,
+        action_installation:      actions.installation,
+        action_cut:               actions.cut,
+        action_modify:            actions.modify,
+        action_other:             actions.other,
+      }).select().single()
+      if (error) throw error
+      await supabase.from('job_line_items').update({ child_job_id: childJob.id }).eq('id', lineItem.id)
+      await supabase.from('jobs').update({ is_parent: true }).eq('id', parentJob.id)
+      emailChildJobSpawned(parentJob, childJob)
+      onSpawned(childJob)
+    } catch (err: any) { alert('Error: ' + err.message) }
+    finally { setSaving(false) }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg flex flex-col max-h-[90vh]">
+        <div className="bg-indigo-600 text-white px-6 py-4 rounded-t-xl flex items-center justify-between shrink-0">
+          <div>
+            <h2 className="text-base font-bold">Spawn Child Job</h2>
+            <p className="text-indigo-200 text-xs mt-0.5">From: {parentJob.job_number} — {lineItem.description}</p>
+          </div>
+          <button onClick={onClose} className="text-indigo-200 hover:text-white"><X size={18}/></button>
+        </div>
+        <div className="overflow-y-auto flex-1 p-5 space-y-4">
+          <div className="bg-indigo-50 border border-indigo-100 rounded-lg px-3 py-2 text-xs text-indigo-700">
+            Child job number will be: <strong>{(parentJob.job_number||'JOB') + '-A/B/C...'}</strong>
+          </div>
+          <div><label className="block text-xs font-medium text-gray-600 mb-1">Description *</label>
+            <textarea value={description} onChange={e => setDescription(e.target.value)} rows={2}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none"/>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div><label className="block text-xs font-medium text-gray-600 mb-1">Assigned Employee</label>
+              <input value={assignedEmployee} onChange={e => setAssignedEmployee(e.target.value)}
+                placeholder="Employee name..." className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
+            </div>
+            <div><label className="block text-xs font-medium text-gray-600 mb-1">Supervisor</label>
+              <input value={supervisor} onChange={e => setSupervisor(e.target.value)}
+                placeholder="Supervisor name..." className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
+            </div>
+            <div><label className="block text-xs font-medium text-gray-600 mb-1">Priority</label>
+              <select value={priority} onChange={e => setPriority(e.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                {['LOW','NORMAL','HIGH','URGENT'].map(p => <option key={p}>{p}</option>)}
+              </select>
+            </div>
+            <div><label className="block text-xs font-medium text-gray-600 mb-1">Due Date</label>
+              <input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
+            </div>
+          </div>
+          <div><label className="block text-xs font-medium text-gray-600 mb-2">Actions Required</label>
+            <div className="grid grid-cols-3 gap-2">
+              {actionList.map(([key, label]) => (
+                <label key={key} className="flex items-center gap-2 text-xs cursor-pointer">
+                  <input type="checkbox" checked={actions[key]} onChange={() => toggleAction(key)}
+                    className="w-3.5 h-3.5 text-indigo-600 rounded"/>
+                  <span className="text-gray-700">{label}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+          <div><label className="block text-xs font-medium text-gray-600 mb-1">Notes</label>
+            <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2}
+              placeholder="Additional notes for this child job..."
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none"/>
+          </div>
+        </div>
+        <div className="flex items-center justify-end gap-3 px-5 py-4 border-t border-gray-100 shrink-0">
+          <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
+          <button onClick={handleCreate} disabled={saving}
+            className="flex items-center gap-2 px-5 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-sm font-semibold rounded-lg transition-colors">
+            <Plus size={14}/>{saving ? 'Creating...' : 'Create Child Job'}
+          </button>
+        </div>
+      </div>
+    </div>
   )
 }
 
