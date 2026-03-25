@@ -5,7 +5,7 @@ import { supabase } from './lib/supabase'
 import { emailRFQCreated, emailQuoterAssigned, emailQuoteReady, emailOrderWon, emailJobInReview, emailJobReadyToPrint, emailJobPrinted, emailChildJobSpawned } from './emailService'
 import { format } from 'date-fns'
 
-type Board = 'rfq' | 'job'
+type Board = 'rfq' | 'job' | 'workshop'
 
 interface RFQ {
   id: string
@@ -99,6 +99,11 @@ interface Job {
   action_cut?: boolean | null
   action_modify?: boolean | null
   action_other?: boolean | null
+  client_rfq_number?: string | null
+  workshop_status?: string | null
+  workshop_notes?: string | null
+  time_started_at?: string | null
+  time_total_minutes?: number | null
 }
 
 interface LineItem {
@@ -208,6 +213,8 @@ function RoleSelector({ onSelect }: any) {
 function App() {
   const [currentRole, setCurrentRole] = useState<string | null>(null)
   const [activeBoard, setActiveBoard] = useState<Board>('rfq')
+  const [workshopJobs, setWorkshopJobs] = useState<Job[]>([])
+  const [workshopLoading, setWorkshopLoading] = useState(false)
   const [rfqs, setRfqs] = useState<RFQ[]>([])
   const [loading, setLoading] = useState(true)
   const [error, setError] = useState<string | null>(null)
@@ -229,6 +236,8 @@ function App() {
   }
 
   const handlePrintJobCard = async (job: Job) => {
+    await supabase.from('jobs').update({ status: 'PRINTED', workshop_status: 'NOT_STARTED' }).eq('id', job.id)
+    fetchJobs()
     const { data: lineItems } = await supabase.from('job_line_items').select('*').eq('job_id', job.id).order('sort_order')
     const items = lineItems || []
     const { data: childJobsData } = job.is_parent
@@ -285,7 +294,7 @@ td, th { font-size:9pt; }
 </style></head><body>
 <div class="print-bar">
   <button class="print-btn" onclick="window.print()">&#128424; Print Job Card</button>
-  <span style="font-size:9pt;opacity:.8">Ctrl+P → Save as PDF</span>
+  <span style="font-size:9pt;opacity:.8">Ctrl+P → Save as PDF</span><button onclick="window.close()" style="background:#e53e3e;color:white;border:none;padding:6px 20px;font-size:10pt;font-weight:bold;border-radius:4px;cursor:pointer;margin-left:12px">✕ Close & Return to Board</button</span>
 </div>
 <div class="page">
 
@@ -518,6 +527,7 @@ ${childrenHtml}
       if (newStatus === 'IN_REVIEW') emailJobInReview(job)
       if (newStatus === 'READY_TO_PRINT') emailJobReadyToPrint(job)
       if (newStatus === 'PRINTED') emailJobPrinted(job)
+      if (newStatus === 'PRINTED') await supabase.from('jobs').update({ workshop_status: 'NOT_STARTED' }).eq('id', jobId)
     }
     fetchJobs()
   }
@@ -530,6 +540,13 @@ ${childrenHtml}
       setJobs(data || [])
     } catch (e: any) { console.error('Jobs error:', e.message) }
     finally { setJobsLoading(false) }
+  }
+  const fetchWorkshopJobs = async () => {
+    setWorkshopLoading(true)
+    try {
+      const { data } = await supabase.from('jobs').select('*').not('workshop_status','is',null).order('created_at',{ascending:false})
+      setWorkshopJobs(data || [])
+    } finally { setWorkshopLoading(false) }
   }
 
   useEffect(() => { fetchRFQs(); fetchJobs() }, [])
@@ -545,6 +562,22 @@ ${childrenHtml}
   }
 
   if (!currentRole) return <RoleSelector onSelect={setCurrentRole} />
+
+  const handleWorkshopStatusChange = async (jobId: string, newStatus: string) => {
+    try {
+      const updates: any = { workshop_status: newStatus }
+      if (newStatus === 'IN_PROGRESS') updates.time_started_at = new Date().toISOString()
+      await supabase.from('jobs').update(updates).eq('id', jobId)
+      if (newStatus === 'DISPATCHED') {
+        const job = workshopJobs.find((j:any) => j.id === jobId)
+        if (job?.rfq_id) {
+          await supabase.from('rfqs').update({ status: 'JOB_CREATED' }).eq('id', job.rfq_id)
+          emailOrderWon({ id: job.rfq_id, description: job.description || '' } as any, job.job_number || '')
+        }
+      }
+      fetchWorkshopJobs()
+    } catch (e: any) { alert('Error: ' + e.message) }
+  }
 
   return (
     <div className="flex h-screen bg-gray-100">
@@ -564,6 +597,7 @@ ${childrenHtml}
           <p className="text-gray-500 text-xs font-semibold uppercase tracking-widest px-3 mb-3">Boards</p>
           <NavItem icon={<ClipboardList size={18} />} label="RFQ Board" description="RFQ pipeline" active={activeBoard === 'rfq'} accentColor="text-blue-400" onClick={() => setActiveBoard('rfq')} />
           <NavItem icon={<Briefcase size={18} />} label="Job Board" description="Project tracking" active={activeBoard === 'job'} accentColor="text-green-400" onClick={() => setActiveBoard('job')} />
+          <NavItem icon={<Factory size={18} />} label="Workshop Board" description="Floor execution" active={activeBoard === 'workshop'} accentColor="text-orange-400" onClick={() => { setActiveBoard('workshop'); fetchWorkshopJobs() }} />
         </nav>
         <div className="px-6 py-4 border-t border-gray-700">
           <p className="text-gray-500 text-xs">PUSH AI Foundation</p>
@@ -574,8 +608,8 @@ ${childrenHtml}
       <main className="flex-1 flex flex-col overflow-hidden">
         <header className="bg-white border-b border-gray-200 px-8 py-4 flex items-center justify-between shrink-0">
           <div>
-            <h1 className="text-xl font-bold text-gray-900">{activeBoard === 'rfq' ? 'RFQ Board' : 'Job Board'}</h1>
-            <p className="text-sm text-gray-500 mt-0.5">{activeBoard === 'rfq' ? 'RFQ to job creation - sales pipeline' : 'Job created to paid - project tracking'}</p>
+            <h1 className="text-xl font-bold text-gray-900">{activeBoard === 'rfq' ? 'RFQ Board' : activeBoard === 'job' ? 'Job Board' : 'Workshop Board'}</h1>
+            <p className="text-sm text-gray-500 mt-0.5">{activeBoard === 'rfq' ? 'RFQ to job creation - sales pipeline' : activeBoard === 'job' ? 'Job created to paid - project tracking' : 'Workshop floor execution tracking'}</p>
           </div>
           <div className="flex items-center gap-3">
             <button onClick={() => { fetchRFQs(); fetchJobs() }} className="flex items-center gap-2 px-3 py-1.5 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors">
@@ -591,8 +625,8 @@ ${childrenHtml}
                 <Plus size={15} />New Job
               </button>
             )}
-            <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold ${activeBoard === 'rfq' ? 'bg-blue-100 text-blue-700' : 'bg-green-100 text-green-700'}`}>
-              {activeBoard === 'rfq' ? 'RFQ Board' : 'Job Board'}
+            <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold ${activeBoard === 'rfq' ? 'bg-blue-100 text-blue-700' : activeBoard === 'job' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>
+              {activeBoard === 'rfq' ? 'RFQ Board' : activeBoard === 'job' ? 'Job Board' : 'Workshop Board'}
             </span>
           </div>
         </header>
@@ -601,7 +635,9 @@ ${childrenHtml}
           <div className="flex-1 overflow-auto p-6 min-w-0">
             {activeBoard === 'rfq'
               ? <RFQBoard rfqs={rfqs} loading={loading} error={error} onRefresh={fetchRFQs} onCardClick={setSelectedRFQ} selectedId={selectedRFQ?.id} />
-             : <JobBoard jobs={jobs} loading={jobsLoading} onStatusChange={handleJobStatusChange} onPrintCard={handlePrintJobCard} onCardClick={setSelectedJob} selectedId={selectedJob?.id} />}
+              : activeBoard === 'job'
+              ? <JobBoard jobs={jobs} loading={jobsLoading} onStatusChange={handleJobStatusChange} onPrintCard={handlePrintJobCard} onCardClick={setSelectedJob} selectedId={selectedJob?.id} />
+              : <WorkshopBoard jobs={workshopJobs} loading={workshopLoading} onRefresh={fetchWorkshopJobs} onStatusChange={handleWorkshopStatusChange} />}
           </div>
           {selectedRFQ && <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4"><RFQDetailPanel rfq={selectedRFQ} onClose={() => setSelectedRFQ(null)} onUpdate={handleRFQUpdate} role={currentRole} onJobCreated={fetchJobs} /></div>}
         </div>
@@ -800,11 +836,11 @@ function JobDetailPanel({ job, onClose, onUpdate }: { job: Job; onClose: () => v
   const [spawnTarget, setSpawnTarget] = React.useState<any | null>(null)
   const [lineItems, setLineItems] = React.useState<any[]>([])
   const [attachments, setAttachments] = React.useState<any[]>([])
-  const [newLineItems, setNewLineItems] = React.useState([])
+  const [newLineItems, setNewLineItems] = React.useState<{description:string;quantity:number;uom:string;item_type:string}[]>([])
   const [savingLines, setSavingLines] = React.useState(false)
   const addNewLine = () => setNewLineItems(p => [...p, {description:'',quantity:1,uom:'EA',item_type:'MATERIAL'}])
-  const removeNewLine = (i) => setNewLineItems(p => p.filter((_,idx)=>idx!==i))
-  const updateNewLine = (i,field,val) => setNewLineItems(p => p.map((x,idx)=>idx===i?{...x,[field]:val}:x))
+  const removeNewLine = (i:number) => setNewLineItems(p => p.filter((_,idx)=>idx!==i))
+  const updateNewLine = (i:number,field:string,val:any) => setNewLineItems(p => p.map((x,idx)=>idx===i?{...x,[field]:val}:x))
   const saveNewLines = async () => {
     const valid = newLineItems.filter(l => l.description.trim())
     if (!valid.length) return
@@ -817,7 +853,7 @@ function JobDetailPanel({ job, onClose, onUpdate }: { job: Job; onClose: () => v
       if (r) setLineItems(r.map((li)=>({...li,child_job_number:li.child_job?.job_number||null})))
       setNewLineItems([])
       showMsg('Line items saved')
-    } catch(err){ showMsg('Error: '+err.message) }
+    } catch(err:any){ showMsg('Error: '+err.message) }
     finally{ setSavingLines(false) }
   }
 
@@ -2302,4 +2338,105 @@ function SpawnJobModal({ lineItem, parentJob, onClose, onSpawned }: {
   )
 }
 
-export default App
+
+
+// WORKSHOP BOARD
+function WorkshopBoard({ jobs, loading, onRefresh, onStatusChange }: {
+  jobs: Job[]; loading: boolean; onRefresh: () => void; onStatusChange: (jobId: string, status: string) => void
+}) {
+  const [selectedJob, setSelectedJob] = React.useState<Job | null>(null)
+  const [notes, setNotes] = React.useState<Record<string,string>>({})
+  const COLS = [
+    { key: 'NOT_STARTED',   label: 'Not Started',   color: 'bg-gray-500'   },
+    { key: 'IN_PROGRESS',   label: 'In Progress',   color: 'bg-orange-500' },
+    { key: 'ON_HOLD',       label: 'On Hold',       color: 'bg-red-400'    },
+    { key: 'QUALITY_CHECK', label: 'Quality Check', color: 'bg-purple-500' },
+    { key: 'COMPLETE',      label: 'Complete',      color: 'bg-teal-500'   },
+    { key: 'DISPATCHED',    label: 'Dispatched',    color: 'bg-green-600'  },
+  ]
+  const nextStatus: Record<string,string> = {
+    NOT_STARTED:'IN_PROGRESS', IN_PROGRESS:'QUALITY_CHECK',
+    ON_HOLD:'IN_PROGRESS', QUALITY_CHECK:'COMPLETE', COMPLETE:'DISPATCHED',
+  }
+  const nextLabel: Record<string,string> = {
+    NOT_STARTED:'Start', IN_PROGRESS:'QC Check',
+    ON_HOLD:'Resume', QUALITY_CHECK:'Complete', COMPLETE:'Dispatch',
+  }
+  if (loading) return <div className="flex items-center justify-center h-64"><p className="text-gray-400">Loading workshop jobs...</p></div>
+  return (
+    <div className="flex gap-4 h-full overflow-x-auto pb-4">
+      {COLS.map(col => {
+        const cards = jobs.filter(j => j.workshop_status === col.key)
+        return (
+          <div key={col.key} className="flex flex-col min-w-64 w-64 shrink-0">
+            <div className={`${col.color} rounded-t-lg px-3 py-2 flex items-center justify-between`}>
+              <span className="text-white text-sm font-bold">{col.label}</span>
+              <span className="bg-white bg-opacity-25 text-white text-xs font-bold px-2 py-0.5 rounded-full">{cards.length}</span>
+            </div>
+            <div className="flex-1 bg-gray-200 rounded-b-lg p-2 min-h-96 space-y-2">
+              {cards.length === 0 && <div className="flex items-center justify-center h-20"><p className="text-gray-400 text-xs">No jobs</p></div>}
+              {cards.map(job => (
+                <div key={job.id} onClick={() => setSelectedJob(job)}
+                  className="bg-white rounded-lg shadow-sm border-2 border-transparent hover:border-orange-300 p-3 cursor-pointer hover:shadow-md transition-all">
+                  <div className="flex items-center justify-between gap-1 mb-1">
+                    <p className="text-xs font-bold text-orange-600">{job.job_number}</p>
+                    <span className={`text-xs font-semibold px-1.5 py-0.5 rounded ${job.priority==='URGENT'?'bg-red-100 text-red-700':job.priority==='HIGH'?'bg-orange-100 text-orange-700':'bg-gray-100 text-gray-600'}`}>{job.priority}</span>
+                  </div>
+                  <p className="text-sm font-medium text-gray-800 line-clamp-2 mb-1">{job.description||'No description'}</p>
+                  <p className="text-xs text-gray-500 truncate mb-2">{job.client_name||'-'}</p>
+                  {job.due_date && <p className="text-xs text-red-500 mb-2">Due: {new Date(job.due_date).toLocaleDateString('en-ZA')}</p>}
+                  <div className="flex gap-1" onClick={e => e.stopPropagation()}>
+                    {nextStatus[col.key] && (
+                      <button onClick={() => onStatusChange(job.id, nextStatus[col.key])}
+                        className="flex-1 py-1 text-xs font-semibold text-white rounded bg-orange-500 hover:bg-orange-600 transition-colors">
+                        {nextLabel[col.key]}
+                      </button>
+                    )}
+                    {col.key === 'IN_PROGRESS' && (
+                      <button onClick={() => onStatusChange(job.id, 'ON_HOLD')}
+                        className="px-2 py-1 text-xs font-semibold text-white rounded bg-red-400 hover:bg-red-500 transition-colors">
+                        Hold
+                      </button>
+                    )}
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )
+      })}
+      {selectedJob && (
+        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
+          <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg">
+            <div className="bg-orange-500 text-white px-6 py-4 rounded-t-xl flex items-center justify-between">
+              <div>
+                <h2 className="text-lg font-bold">{selectedJob.job_number}</h2>
+                <p className="text-orange-200 text-xs mt-0.5">{selectedJob.client_name}</p>
+              </div>
+              <button onClick={() => setSelectedJob(null)} className="text-orange-200 hover:text-white"><X size={20} /></button>
+            </div>
+            <div className="p-6 space-y-4">
+              <div className="bg-orange-50 border border-orange-200 rounded-lg p-4 grid grid-cols-2 gap-3 text-sm">
+                <div><span className="text-xs text-gray-500 block">Status</span><span className="font-semibold">{selectedJob.workshop_status?.replace(/_/g,' ')}</span></div>
+                <div><span className="text-xs text-gray-500 block">Priority</span><span className="font-semibold">{selectedJob.priority}</span></div>
+                <div><span className="text-xs text-gray-500 block">Due Date</span><span className="font-semibold text-red-600">{selectedJob.due_date?new Date(selectedJob.due_date).toLocaleDateString('en-ZA'):'-'}</span></div>
+                <div><span className="text-xs text-gray-500 block">PO Number</span><span className="font-semibold">{(selectedJob as any).po_number||'-'}</span></div>
+                {selectedJob.time_started_at && <div className="col-span-2"><span className="text-xs text-gray-500 block">Started</span><span className="font-semibold">{new Date(selectedJob.time_started_at).toLocaleString('en-ZA')}</span></div>}
+              </div>
+              {selectedJob.description && <div><label className="block text-xs font-medium text-gray-500 mb-1">Description</label><p className="text-sm text-gray-800 bg-gray-50 rounded-lg px-3 py-2">{selectedJob.description}</p></div>}
+              <div>
+                <label className="block text-xs font-medium text-gray-500 mb-1">Workshop Notes</label>
+                <textarea value={notes[selectedJob.id] ?? (selectedJob.workshop_notes||'')} onChange={e => setNotes(n => ({...n,[selectedJob.id]:e.target.value}))} rows={3}
+                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400 resize-none" placeholder="Add workshop notes..." />
+                <button onClick={async () => { await supabase.from('jobs').update({workshop_notes:notes[selectedJob.id]}).eq('id',selectedJob.id); setSelectedJob(null); onRefresh() }}
+                  className="mt-2 w-full py-2 text-sm font-semibold text-white bg-orange-500 hover:bg-orange-600 rounded-lg transition-colors">Save Notes</button>
+              </div>
+            </div>
+          </div>
+        </div>
+      )}
+    </div>
+  )
+}
+
+export default App
