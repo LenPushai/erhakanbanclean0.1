@@ -561,7 +561,6 @@ ${childrenHtml}
     fetchRFQs()
   }
 
-  if (!currentRole) return <RoleSelector onSelect={setCurrentRole} />
 
   const handleWorkshopStatusChange = async (jobId: string, newStatus: string) => {
     try {
@@ -579,6 +578,7 @@ ${childrenHtml}
     } catch (e: any) { alert('Error: ' + e.message) }
   }
 
+  if (!currentRole) return <RoleSelector onSelect={setCurrentRole} />
   return (
     <div className="flex h-screen bg-gray-100">
       <aside className="w-64 bg-gray-900 flex flex-col shrink-0">
@@ -2439,4 +2439,4 @@ function WorkshopBoard({ jobs, loading, onRefresh, onStatusChange }: {
   )
 }
 
-export default App
+export default App
