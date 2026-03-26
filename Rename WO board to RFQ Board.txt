@@ -1,0 +1,70 @@
+Rename WO board to RFQ Board
+
+------------------------------
+
+Remove WO 26 0008 RFQ -
+
+-----------------------------
+
+RFQ number to be displayed on the CARD not the WO number
+
+-------------------------------------------------------------------------
+
+Assign a quoter - E mail to client Remove ( Remove WO 26 with RFQ number)
+
+
+Quotation attachment - Create job number only when a quote is won 
+
+----------------------------------------------------------------------
+
+Remove assigned to from Job Card 
+
+
+
+
+------------------------------------------------------------------------
+Remove send e mail 
+Add e mail notification
+
+Remove send e mail to client 
+
+
+Attached quote send for signature and send back to Juanic
+
+RFQ number Quote Number
+
+RFQ DAshboard Attachments to pull through. 
+
+Redy to print new fix job numbers 
+
+Job Card No 
+
+Mamufacture, Service and Repair. The lines dont split with new job numbers
+
+Capability to select 
+
+Print border 
+
+Line dont split 
+
+Attachemets are not pulling through 
+
+Spawning of jobs 
+
+
+Attachement not pulling tjroujg
+
+CAr move to job board, we need a job number 
+
+Spawn and multiple lines not working 
+
+Job card cutting 
+
+Route to confirm the communication feedback loop 
+
+PDF mailing 
+
+
+
+
+
