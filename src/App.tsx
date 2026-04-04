@@ -1,8 +1,8 @@
 ﻿import React from 'react';
 import { useState, useEffect } from 'react'
-import { ClipboardList, Briefcase, ChevronRight, Factory, Building2, Calendar, Hash, RefreshCw, ArrowDownToLine, ArrowUpFromLine, X, Mail, FileText, Paperclip, Send, Plus, Check, Printer } from 'lucide-react'
+import { ClipboardList, Briefcase, ChevronRight, Factory, Building2, Calendar, Hash, RefreshCw, ArrowDownToLine, ArrowUpFromLine, X, Mail, FileText, Paperclip, Send, Plus, Check, Printer, Upload }  from 'lucide-react'
 import { supabase } from './lib/supabase'
-import { emailRFQCreated, emailQuoterAssigned, emailQuoteReady, emailOrderWon, emailJobInReview, emailJobReadyToPrint, emailJobPrinted, emailChildJobSpawned } from './emailService'
+import { emailRFQCreated, emailQuoterAssigned, emailQuoteReady, emailOrderWon, emailJobInReview, emailJobReadyToPrint, emailJobPrinted, emailChildJobSpawned, emailJobStarted, emailJobQCCheck, emailJobComplete, emailJobDispatched } from './emailService'
 import { format } from 'date-fns'
 
 type Board = 'rfq' | 'job' | 'workshop'
@@ -221,6 +221,7 @@ function App() {
   const [selectedRFQ, setSelectedRFQ] = useState<RFQ | null>(null)
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [showCreateDirectJob, setShowCreateDirectJob] = useState(false)
+  const [showJarisonImport, setShowJarisonImport] = useState(false)
   const [selectedJob, setSelectedJob] = useState<Job | null>(null)
   const [jobs, setJobs] = useState<Job[]>([])
   const [jobsLoading, setJobsLoading] = useState(false)
@@ -304,10 +305,9 @@ td, th { font-size:9pt; }
     <td style="width:35%">${logoHtml}</td>
     <td style="width:20%;text-align:center;font-weight:bold;font-size:10pt;vertical-align:middle">Q C<br>Department</td>
     <td style="width:45%;font-size:8pt;border:1px solid #000;padding:4px">
-      <strong>Approved date:</strong> 2022/12/06<br>
-      <strong>Revision:</strong> 1<br>
-      <strong>Next Revision date:</strong> 2023/12/06<br>
-      <strong>Form no:</strong> QCL JC 001
+      <strong>Client:</strong> ${val(job.client_name)}<br>
+      <strong>Date Received:</strong> ${val(job.date_received)}<br>
+      <strong>Due Date:</strong> ${val(job.due_date)}
     </td>
   </tr>
 </table>
@@ -344,8 +344,12 @@ td, th { font-size:9pt; }
       <table style="width:100%"><tr>
         <td style="border:1px solid #000;padding:3px 6px"><strong>Job Nr:</strong><br><span style="font-size:10pt;font-weight:900">${val(job.job_number)}</span></td>
         <td style="border:1px solid #000;padding:3px 6px"><strong>JOB CARD NO:</strong><br><span style="font-size:10pt;font-weight:900">${val(job.job_number)}</span></td>
-        <td style="border:1px solid #000;padding:3px 6px"><strong>RFQ:</strong><br>${val(job.rfq_no)}</td>
+        <td style="border:1px solid #000;padding:3px 6px"><strong>Client RFQ:</strong><br>${val(job.client_rfq_number || job.rfq_no)}</td>
         <td style="border:1px solid #000;padding:3px 6px"><strong>SITE REQ:</strong><br>${val(job.site_req)}</td>
+      </tr>
+      <tr>
+        <td colspan="2" style="border:1px solid #000;padding:3px 6px"><strong>ORDER / PO NUMBER:</strong><br><span style="font-size:10pt;font-weight:900">${val(job.po_number)}</span></td>
+        <td colspan="2" style="border:1px solid #000;padding:3px 6px"><strong>DESCRIPTION:</strong><br>${val(job.description)}</td>
       </tr></table>
     </td>
   </tr>
@@ -544,7 +548,7 @@ ${childrenHtml}
   const fetchWorkshopJobs = async () => {
     setWorkshopLoading(true)
     try {
-      const { data } = await supabase.from('jobs').select('*').not('workshop_status','is',null).order('created_at',{ascending:false})
+      const { data } = await supabase.from('jobs').select('*').or('workshop_status.not.is.null,is_child_job.eq.true').order('created_at',{ascending:false})
       setWorkshopJobs(data || [])
     } finally { setWorkshopLoading(false) }
   }
@@ -575,6 +579,14 @@ ${childrenHtml}
         }
       }
       fetchWorkshopJobs()
+      // Email triggers
+      const updatedJob = workshopJobs.find((j:any) => j.id === jobId)
+      if (updatedJob) {
+        if (newStatus === 'IN_PROGRESS') emailJobStarted(updatedJob)
+        if (newStatus === 'QUALITY_CHECK') emailJobQCCheck(updatedJob)
+        if (newStatus === 'COMPLETE') emailJobComplete(updatedJob)
+        if (newStatus === 'DISPATCHED') emailJobDispatched(updatedJob)
+      }
     } catch (e: any) { alert('Error: ' + e.message) }
   }
 
@@ -620,11 +632,14 @@ ${childrenHtml}
                 <Plus size={15} />New RFQ
               </button>
             )}
-            {activeBoard === 'job' && (
+            {activeBoard === 'job' && (<>
+              <button onClick={() => setShowJarisonImport(true)} className="flex items-center gap-2 px-3 py-2 bg-amber-500 hover:bg-amber-600 text-white text-sm font-semibold rounded-lg transition-colors">
+                <Upload size={15} />Import Jarison
+              </button>
               <button onClick={() => setShowCreateDirectJob(true)} className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-lg transition-colors">
                 <Plus size={15} />New Job
               </button>
-            )}
+            </>)}
             <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold ${activeBoard === 'rfq' ? 'bg-blue-100 text-blue-700' : activeBoard === 'job' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>
               {activeBoard === 'rfq' ? 'RFQ Board' : activeBoard === 'job' ? 'Job Board' : 'Workshop Board'}
             </span>
@@ -645,7 +660,8 @@ ${childrenHtml}
 
       {showCreateModal && <CreateRFQModal onClose={() => setShowCreateModal(false)} onCreated={handleRFQCreated} />}
       {showCreateDirectJob && <CreateDirectJobModal onClose={() => setShowCreateDirectJob(false)} onCreated={fetchJobs} />}
-      {selectedJob && <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4"><JobDetailPanel job={selectedJob} onClose={() => setSelectedJob(null)} onUpdate={(j) => { setSelectedJob(j); fetchJobs() }} /></div>}
+      {showJarisonImport && <JarisonImportModal onClose={() => setShowJarisonImport(false)} onImported={fetchJobs} />}
+      {selectedJob && <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4"><JobDetailPanel job={selectedJob} parentJobNumber={jobs.find(j=>j.id===selectedJob?.parent_job_id)?.job_number} onClose={() => setSelectedJob(null)} onUpdate={(j) => { setSelectedJob(j); fetchJobs() }} /></div>}
     </div>
   )
 }
@@ -705,6 +721,162 @@ function RFQCard({ rfq, hoverColor, onClick, isSelected }: { rfq: RFQ; hoverColo
 
 // JOB BOARD
 
+
+function JarisonImportModal({ onClose, onImported }: { onClose: () => void; onImported: () => void }) {
+  const [csvRows, setCsvRows] = React.useState<any[]>([])
+  const [fileName, setFileName] = React.useState('')
+  const [importing, setImporting] = React.useState(false)
+  const [importResult, setImportResult] = React.useState<{ success: number; errors: number } | null>(null)
+  const fileRef = React.useRef<HTMLInputElement>(null)
+
+  const parseCSV = (text: string) => {
+    const lines = text.trim().split('\n')
+    if (lines.length < 2) return []
+    const headers = lines[0].split(',').map(h => h.trim().replace(/^"|"$/g, ''))
+    return lines.slice(1).map(line => {
+      const vals = line.split(',').map(v => v.trim().replace(/^"|"$/g, ''))
+      const row: any = {}
+      headers.forEach((h, i) => { row[h] = vals[i] || '' })
+      return row
+    }).filter(r => r.JobNumber || r.Description || r.ClientName)
+  }
+
+  const handleFile = (e: React.ChangeEvent<HTMLInputElement>) => {
+    const file = e.target.files?.[0]
+    if (!file) return
+    setFileName(file.name)
+    setImportResult(null)
+    const reader = new FileReader()
+    reader.onload = (ev) => {
+      const text = ev.target?.result as string
+      const rows = parseCSV(text)
+      setCsvRows(rows)
+    }
+    reader.readAsText(file)
+  }
+
+  const handleImport = async () => {
+    if (csvRows.length === 0) return
+    setImporting(true)
+    let success = 0, errors = 0
+    const yr = new Date().getFullYear().toString().slice(-2)
+    const { default: { createClient } } = await import('@supabase/supabase-js') as any
+    const sb = (await import('./lib/supabase')).supabase
+
+    // Get current job count for numbering
+    const { count: jc } = await sb.from('jobs').select('*', { count: 'exact', head: true })
+    let seq = (jc || 0) + 1
+
+    for (const row of csvRows) {
+      try {
+        const jobNumber = row.JobNumber || `JOB-${yr}-${String(seq).padStart(3, '0')}`
+        const { error } = await sb.from('jobs').insert({
+          job_number: jobNumber,
+          description: row.Description || 'Imported from Jarison',
+          client_name: row.ClientName || 'Unknown Client',
+          due_date: row.DueDate || null,
+          date_received: row.StartDate || new Date().toISOString().slice(0, 10),
+          notes: `Imported from Jarison CSV (${fileName}) on ${new Date().toLocaleDateString('en-ZA')}`,
+          entry_type: 'IMPORT',
+          status: 'PENDING',
+          priority: 'MEDIUM',
+        })
+        if (error) { errors++; console.error('Import row error:', error) }
+        else { success++; seq++ }
+      } catch (err) { errors++; console.error('Import exception:', err) }
+    }
+
+    // ML Event Log: log the import event for future analysis
+    try {
+      await sb.from('import_events').insert({
+        source: 'jarison_csv',
+        file_name: fileName,
+        rows_attempted: csvRows.length,
+        rows_imported: success,
+        rows_failed: errors,
+        imported_at: new Date().toISOString(),
+        imported_by: 'system',
+      })
+    } catch (e) { console.log('ML event log skipped (table may not exist yet):', e) }
+
+    setImportResult({ success, errors })
+    setImporting(false)
+    if (success > 0) onImported()
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-2xl max-h-[80vh] flex flex-col">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+          <div>
+            <h2 className="text-lg font-bold text-gray-900">Import from Jarison</h2>
+            <p className="text-sm text-gray-500 mt-0.5">Upload a Jarison CSV export to create jobs</p>
+          </div>
+          <button onClick={onClose} className="p-2 hover:bg-gray-100 rounded-lg"><X size={18} /></button>
+        </div>
+
+        <div className="flex-1 overflow-auto p-6 space-y-4">
+          {/* File picker */}
+          <div className="border-2 border-dashed border-gray-300 rounded-lg p-6 text-center hover:border-amber-400 transition-colors cursor-pointer" onClick={() => fileRef.current?.click()}>
+            <Upload size={32} className="mx-auto text-gray-400 mb-2" />
+            <p className="text-sm text-gray-600">{fileName || 'Click to select CSV file'}</p>
+            <p className="text-xs text-gray-400 mt-1">Expected columns: JobNumber, Description, ClientName, StartDate, DueDate</p>
+            <input ref={fileRef} type="file" accept=".csv" onChange={handleFile} className="hidden" />
+          </div>
+
+          {/* Preview table */}
+          {csvRows.length > 0 && (
+            <div className="border border-gray-200 rounded-lg overflow-hidden">
+              <div className="bg-gray-50 px-4 py-2 border-b border-gray-200">
+                <p className="text-sm font-semibold text-gray-700">{csvRows.length} rows found</p>
+              </div>
+              <div className="overflow-auto max-h-64">
+                <table className="w-full text-sm">
+                  <thead className="bg-gray-50 sticky top-0">
+                    <tr>
+                      <th className="text-left px-3 py-2 text-xs font-semibold text-gray-500">#</th>
+                      <th className="text-left px-3 py-2 text-xs font-semibold text-gray-500">Job Number</th>
+                      <th className="text-left px-3 py-2 text-xs font-semibold text-gray-500">Description</th>
+                      <th className="text-left px-3 py-2 text-xs font-semibold text-gray-500">Client</th>
+                      <th className="text-left px-3 py-2 text-xs font-semibold text-gray-500">Due Date</th>
+                    </tr>
+                  </thead>
+                  <tbody>
+                    {csvRows.map((row, i) => (
+                      <tr key={i} className={i % 2 === 0 ? 'bg-white' : 'bg-gray-50'}>
+                        <td className="px-3 py-1.5 text-gray-400">{i + 1}</td>
+                        <td className="px-3 py-1.5 font-mono text-xs">{row.JobNumber || '-'}</td>
+                        <td className="px-3 py-1.5 truncate max-w-48">{row.Description || '-'}</td>
+                        <td className="px-3 py-1.5">{row.ClientName || '-'}</td>
+                        <td className="px-3 py-1.5 text-xs">{row.DueDate || '-'}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
+            </div>
+          )}
+
+          {/* Import result */}
+          {importResult && (
+            <div className={`rounded-lg p-4 ${importResult.errors > 0 ? 'bg-amber-50 border border-amber-200' : 'bg-green-50 border border-green-200'}`}>
+              <p className="text-sm font-semibold">{importResult.success} jobs imported successfully{importResult.errors > 0 ? `, ${importResult.errors} failed` : ''}</p>
+            </div>
+          )}
+        </div>
+
+        <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-gray-200">
+          <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
+          <button onClick={handleImport} disabled={csvRows.length === 0 || importing || !!importResult}
+            className="px-4 py-2 bg-amber-500 hover:bg-amber-600 disabled:bg-gray-300 text-white text-sm font-semibold rounded-lg transition-colors">
+            {importing ? 'Importing...' : importResult ? 'Done' : `Import ${csvRows.length} Jobs`}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
 function JobBoard({ jobs, loading, onCardClick, selectedId, onStatusChange, onPrintCard }: { jobs: Job[]; loading: boolean; onCardClick: (job: Job) => void; selectedId?: string; onStatusChange: (jobId: string, newStatus: string) => void; onPrintCard: (job: Job) => void }) {
   const [expandedParents, setExpandedParents] = React.useState<Set<string>>(new Set())
   const toggleParent = (id: string) => setExpandedParents(p => { const s = new Set(p); s.has(id) ? s.delete(id) : s.add(id); return s })
@@ -754,6 +926,7 @@ function JobBoard({ jobs, loading, onCardClick, selectedId, onStatusChange, onPr
                       <p className="text-xs font-bold text-green-600">{job.job_number || 'New'}</p>
                       <div className="flex items-center gap-1">
                         {job.entry_type === 'DIRECT' && <span className="text-xs font-bold px-1.5 py-0.5 bg-orange-100 text-orange-600 rounded">DIRECT</span>}
+                        {job.entry_type === 'IMPORT' && <span className="text-xs font-bold px-1.5 py-0.5 bg-teal-100 text-teal-600 rounded">IMPORT</span>}
                         {job.entry_type === 'CHILD' && <span className="text-xs font-bold px-1.5 py-0.5 bg-indigo-100 text-indigo-600 rounded">↳</span>}
                         {job.is_parent && <span className="text-xs font-bold px-1.5 py-0.5 bg-purple-100 text-purple-600 rounded">P</span>}
                         {job.is_emergency && <span className="text-xs font-bold px-1.5 py-0.5 bg-red-100 text-red-600 rounded">!</span>}
@@ -823,7 +996,7 @@ function JobBoard({ jobs, loading, onCardClick, selectedId, onStatusChange, onPr
 
 // JOB DETAIL PANEL
 
-function JobDetailPanel({ job, onClose, onUpdate }: { job: Job; onClose: () => void; onUpdate: (j: Job) => void }) {
+function JobDetailPanel({ job, parentJobNumber, onClose, onUpdate }: { job: Job; parentJobNumber?: string; onClose: () => void; onUpdate: (j: Job) => void }) {
   const [saving, setSaving] = React.useState(false)
   const [status, setStatus] = React.useState(job.status)
   const [priority, setPriority] = React.useState(job.priority || 'NORMAL')
@@ -978,10 +1151,10 @@ function JobDetailPanel({ job, onClose, onUpdate }: { job: Job; onClose: () => v
         </div>
         <div className="grid grid-cols-2 gap-4 text-sm">
           {job.site_req && <div><span className="text-xs text-gray-500 block">Site Req / PO</span><span className="font-medium">{job.site_req}</span></div>}
-          {job.rfq_no && <div><span className="text-xs text-gray-500 block">RFQ No</span><span className="font-medium text-blue-600">{job.rfq_no}</span></div>}
+          {(job.client_rfq_number || job.rfq_no) && <div><span className="text-xs text-gray-500 block">Client RFQ No</span><span className="font-medium text-blue-600">{job.client_rfq_number || job.rfq_no}</span></div>}
           {job.due_date && <div><span className="text-xs text-gray-500 block">Due Date</span><span className="font-medium">{new Date(job.due_date).toLocaleDateString('en-ZA')}</span></div>}
           {job.created_at && <div><span className="text-xs text-gray-500 block">Created</span><span className="font-medium">{new Date(job.created_at).toLocaleDateString('en-ZA')}</span></div>}
-          {job.parent_job_id && <div><span className="text-xs text-gray-500 block">Parent Job</span><span className="font-medium text-purple-600">{job.rfq_no || job.parent_job_id.slice(0,8)}</span></div>}
+          {job.parent_job_id && <div><span className="text-xs text-gray-500 block">Parent Job</span><span className="font-medium text-purple-600">{parentJobNumber || job.parent_job_id.slice(0,8)}</span></div>}
         </div>
         {job.description && (
           <div>
@@ -989,6 +1162,10 @@ function JobDetailPanel({ job, onClose, onUpdate }: { job: Job; onClose: () => v
             <p className="text-sm text-gray-800 bg-gray-50 rounded-lg px-3 py-2">{job.description}</p>
           </div>
         )}
+        <div>
+          <label className="block text-xs font-medium text-gray-500 mb-1">Drawing Number</label>
+          <input type="text" defaultValue={job.drawing_number || ''} onBlur={async (e) => { await supabase.from('jobs').update({ drawing_number: e.target.value || null }).eq('id', job.id) }} placeholder="DWG-001" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
+        </div>
         <div>
           <label className="block text-xs font-medium text-gray-500 mb-1">Compiled By</label>
           <select value={compiledBy} onChange={e => setCompiledBy(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500">
@@ -1155,6 +1332,10 @@ function CreateDirectJobModal({ onClose, onCreated }: { onClose: () => void; onC
   const [dateReceived] = React.useState(new Date().toISOString().split('T')[0])
   const [dueDate, setDueDate] = React.useState('')
   const [hasDrawing, setHasDrawing] = React.useState(false)
+  const [drawingNumber, setDrawingNumber] = React.useState('')
+  const [rfqReference, setRfqReference] = React.useState('')
+  const [directAttachments, setDirectAttachments] = React.useState<Array<{name:string;path:string;size:number}>>( [])
+  const [uploadingDirect, setUploadingDirect] = React.useState(false)
   const [actions, setActions] = React.useState({ manufacture: false, sandblast: false, prepare_material: false, service: false, paint: false, other: false, repair: false, installation: false, cut: false, modify: false })
   const [lineItems, setLineItems] = React.useState([{ description: '', quantity: 1, uom: 'Each', notes: '' }])
 
@@ -1182,6 +1363,8 @@ function CreateDirectJobModal({ onClose, onCreated }: { onClose: () => void; onC
         assigned_supervisor_name: assignedSupervisor.trim() || null,
         notes: notes.trim() || null, date_received: dateReceived, due_date: dueDate,
         has_drawing: hasDrawing,
+        drawing_number: drawingNumber.trim() || null,
+        client_rfq_number: rfqReference.trim() || null,
         action_manufacture: actions.manufacture, action_sandblast: actions.sandblast,
         action_prepare_material: actions.prepare_material, action_service: actions.service,
         action_paint: actions.paint, action_other: actions.other, action_repair: actions.repair,
@@ -1276,6 +1459,30 @@ function CreateDirectJobModal({ onClose, onCreated }: { onClose: () => void; onC
             </div>
           </div>
           <div className="flex items-center gap-2"><input type="checkbox" id="djDrawing" checked={hasDrawing} onChange={e => setHasDrawing(e.target.checked)} className="w-4 h-4" /><label htmlFor="djDrawing" className="text-sm text-gray-700">Drawing / Sketches Attached</label></div>
+          <div className="grid grid-cols-2 gap-4">
+            <div><label className="block text-xs font-medium text-gray-600 mb-1">Drawing Number</label><input value={drawingNumber} onChange={e => setDrawingNumber(e.target.value)} placeholder="DWG-001" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" /></div>
+            <div><label className="block text-xs font-medium text-gray-600 mb-1">RFQ Reference (optional)</label><input value={rfqReference} onChange={e => setRfqReference(e.target.value)} placeholder="Client RFQ number..." className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" /></div>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-2">Attachments</label>
+            <div className="border-2 border-dashed border-gray-200 rounded-lg p-4 text-center">
+              <input type="file" multiple id="directFileUpload" className="hidden" onChange={async (e) => {
+                const files = Array.from(e.target.files || [])
+                if (!files.length) return
+                setUploadingDirect(true)
+                const uploaded: Array<{name:string;path:string;size:number}> = []
+                for (const file of files) {
+                  const path = `direct/${Date.now()}_${file.name}`
+                  const { error } = await supabase.storage.from('rfq-attachments').upload(path, file)
+                  if (!error) uploaded.push({ name: file.name, path, size: file.size })
+                }
+                setDirectAttachments(a => [...a, ...uploaded])
+                setUploadingDirect(false)
+              }} />
+              <label htmlFor="directFileUpload" className="cursor-pointer text-sm text-indigo-600 hover:underline">{uploadingDirect ? 'Uploading...' : '+ Add files'}</label>
+            </div>
+            {directAttachments.length > 0 && <div className="mt-2 space-y-1">{directAttachments.map((a,i) => <div key={i} className="flex items-center justify-between text-xs bg-gray-50 rounded px-2 py-1"><span>{a.name}</span><button onClick={() => setDirectAttachments(x => x.filter((_,idx)=>idx!==i))} className="text-red-400 hover:text-red-600 ml-2">x</button></div>)}</div>}
+          </div>
           <div><label className="block text-xs font-medium text-gray-600 mb-1">Notes</label><textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2} placeholder="Additional notes..." className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none" /></div>
         </div>
         <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-gray-100 shrink-0">
@@ -1798,6 +2005,7 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, onJobCreated }: { rfq: R
         has_drawing: rfq.drawing_number ? true : false,
         is_contract_work: rfq.is_contract_work || false,
         operating_entity: rfq.operating_entity || null,
+        client_rfq_number: rfq.client_rfq_number || null,
         is_parent: false,
         is_child_job: false,
       }).select('id').single()
@@ -1939,7 +2147,25 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, onJobCreated }: { rfq: R
 
                 <div><label className="text-xs font-medium text-gray-600 block mb-1">Order Date</label><input type="date" value={orderDate} onChange={e => setOrderDate(e.target.value)} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400" /></div>
               </div>
-              {(status === 'QUOTED' || status === 'SENT_TO_CUSTOMER') && <button onClick={handleSaveOrder} disabled={saving} className="w-full py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-lg disabled:opacity-50">{saving ? 'Saving...' : 'Save Order - Move to Order Won'}</button>}
+        {status === 'QUOTED' && (
+          <button onClick={async () => {
+            setSaving(true)
+            try {
+              const { data, error } = await supabase.from('rfqs').update({ status: 'SENT_TO_CUSTOMER' }).eq('id', rfq.id).select('*, clients(company_name)').single()
+              if (error) throw error
+              onUpdate(data)
+              import('./emailService').then(({ emailQuoteReady }) => emailQuoteReady(data))
+            } catch (err: any) { console.error(err) }
+            finally { setSaving(false) }
+          }} disabled={saving} className="w-full py-2 bg-cyan-600 hover:bg-cyan-700 text-white text-sm font-semibold rounded-lg disabled:opacity-50">
+            {saving ? 'Saving...' : 'Send Quote to Customer - Move to Sent'}
+          </button>
+        )}
+        {status === 'SENT_TO_CUSTOMER' && (
+          <button onClick={handleSaveOrder} disabled={saving} className="w-full py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-lg disabled:opacity-50">
+            {saving ? 'Saving...' : 'Save Order - Move to Order Won'}
+          </button>
+        )}
               {status === 'ACCEPTED' && poNumber && <div className="flex items-center gap-2 text-sm text-green-700 bg-green-50 px-3 py-2 rounded-lg"><FileText size={14} /> PO: {poNumber}</div>}
             </div>
           )}
@@ -2366,7 +2592,13 @@ function WorkshopBoard({ jobs, loading, onRefresh, onStatusChange }: {
   return (
     <div className="flex gap-4 h-full overflow-x-auto pb-4">
       {COLS.map(col => {
-        const cards = jobs.filter(j => j.workshop_status === col.key)
+        const allCards = jobs.filter(j => j.workshop_status === col.key)
+        const cards = allCards.filter(j => !j.is_child_job)
+        const childMap: Record<string, Job[]> = {}
+        jobs.filter(j => j.is_child_job && j.parent_job_id).forEach(child => {
+          if (!childMap[child.parent_job_id!]) childMap[child.parent_job_id!] = []
+          childMap[child.parent_job_id!].push(child)
+        })
         return (
           <div key={col.key} className="flex flex-col min-w-64 w-64 shrink-0">
             <div className={`${col.color} rounded-t-lg px-3 py-2 flex items-center justify-between`}>
@@ -2375,66 +2607,724 @@ function WorkshopBoard({ jobs, loading, onRefresh, onStatusChange }: {
             </div>
             <div className="flex-1 bg-gray-200 rounded-b-lg p-2 min-h-96 space-y-2">
               {cards.length === 0 && <div className="flex items-center justify-center h-20"><p className="text-gray-400 text-xs">No jobs</p></div>}
-              {cards.map(job => (
-                <div key={job.id} onClick={() => setSelectedJob(job)}
-                  className="bg-white rounded-lg shadow-sm border-2 border-transparent hover:border-orange-300 p-3 cursor-pointer hover:shadow-md transition-all">
-                  <div className="flex items-center justify-between gap-1 mb-1">
-                    <p className="text-xs font-bold text-orange-600">{job.job_number}</p>
-                    <span className={`text-xs font-semibold px-1.5 py-0.5 rounded ${job.priority==='URGENT'?'bg-red-100 text-red-700':job.priority==='HIGH'?'bg-orange-100 text-orange-700':'bg-gray-100 text-gray-600'}`}>{job.priority}</span>
+              {cards.map(job => {
+                const children = childMap[job.id] || []
+                const [expanded, setExpanded] = [notes[job.id+'_exp'] === '1', (v: boolean) => setNotes(n => ({...n, [job.id+'_exp']: v?'1':'0'}))]
+                return (
+                  <div key={job.id}>
+                    <div onClick={() => setSelectedJob(job)}
+                      className="bg-white rounded-lg shadow-sm border-2 border-transparent hover:border-orange-300 p-3 cursor-pointer hover:shadow-md transition-all">
+                      <div className="flex items-center justify-between gap-1 mb-1">
+                        <p className="text-xs font-bold text-orange-600">{job.job_number}</p>
+                        <div className="flex items-center gap-1">
+                          {job.is_parent && <span className="text-xs font-bold px-1.5 py-0.5 bg-purple-100 text-purple-600 rounded">P</span>}
+                          <span className={`text-xs font-semibold px-1.5 py-0.5 rounded ${job.priority==='URGENT'?'bg-red-100 text-red-700':job.priority==='HIGH'?'bg-orange-100 text-orange-700':'bg-gray-100 text-gray-600'}`}>{job.priority}</span>
+                        </div>
+                      </div>
+                      <p className="text-sm font-medium text-gray-800 line-clamp-2 mb-1">{job.description||'No description'}</p>
+                      <p className="text-xs text-gray-500 truncate mb-2">{job.client_name||'-'}</p>
+                      {job.due_date && <p className="text-xs text-red-500 mb-2">Due: {new Date(job.due_date).toLocaleDateString('en-ZA')}</p>}
+                      <div className="flex gap-1" onClick={e => e.stopPropagation()}>
+                        {nextStatus[col.key] && (
+                          <button onClick={() => onStatusChange(job.id, nextStatus[col.key])}
+                            className="flex-1 py-1 text-xs font-semibold text-white rounded bg-orange-500 hover:bg-orange-600 transition-colors">
+                            {nextLabel[col.key]}
+                          </button>
+                        )}
+                        {col.key === 'IN_PROGRESS' && (
+                          <button onClick={() => onStatusChange(job.id, 'ON_HOLD')}
+                            className="px-2 py-1 text-xs font-semibold text-white rounded bg-red-400 hover:bg-red-500 transition-colors">
+                            Hold
+                          </button>
+                        )}
+                      </div>
+                      {children.length > 0 && (
+                        <button onClick={e => { e.stopPropagation(); setExpanded(!expanded) }}
+                          className="mt-2 w-full flex items-center justify-center gap-1 py-1 text-xs font-medium text-purple-600 bg-purple-50 hover:bg-purple-100 rounded transition-colors">
+                          {expanded ? '▲' : '▼'} {children.length} child{children.length > 1 ? ' jobs' : ' job'}
+                        </button>
+                      )}
+                    </div>
+                    {expanded && children.map(child => (
+                      <div key={child.id} className="ml-3 mt-1 border-l-2 border-purple-200 pl-2">
+                        <div onClick={() => setSelectedJob(child)} className="bg-white rounded-lg shadow-sm border border-purple-100 p-2 cursor-pointer hover:border-purple-300 transition-all">
+                          <div className="flex items-center justify-between gap-1">
+                            <p className="text-xs font-bold text-purple-600">{child.job_number}</p>
+                            <span className="text-xs px-1.5 py-0.5 bg-indigo-100 text-indigo-600 rounded">↳</span>
+                          </div>
+                          <p className="text-xs text-gray-700 mt-0.5 line-clamp-1">{child.description||''}</p>
+                          <div className="flex gap-1 mt-1" onClick={e => e.stopPropagation()}>
+                            {nextStatus[child.workshop_status||''] && (
+                              <button onClick={() => onStatusChange(child.id, nextStatus[child.workshop_status||''])}
+                                className="flex-1 py-0.5 text-xs font-semibold text-white rounded bg-orange-500 hover:bg-orange-600">
+                                {nextLabel[child.workshop_status||'']}
+                              </button>
+                            )}
+                          </div>
+                        </div>
+                      </div>
+                    ))}
                   </div>
-                  <p className="text-sm font-medium text-gray-800 line-clamp-2 mb-1">{job.description||'No description'}</p>
-                  <p className="text-xs text-gray-500 truncate mb-2">{job.client_name||'-'}</p>
-                  {job.due_date && <p className="text-xs text-red-500 mb-2">Due: {new Date(job.due_date).toLocaleDateString('en-ZA')}</p>}
-                  <div className="flex gap-1" onClick={e => e.stopPropagation()}>
-                    {nextStatus[col.key] && (
-                      <button onClick={() => onStatusChange(job.id, nextStatus[col.key])}
-                        className="flex-1 py-1 text-xs font-semibold text-white rounded bg-orange-500 hover:bg-orange-600 transition-colors">
-                        {nextLabel[col.key]}
-                      </button>
-                    )}
-                    {col.key === 'IN_PROGRESS' && (
-                      <button onClick={() => onStatusChange(job.id, 'ON_HOLD')}
-                        className="px-2 py-1 text-xs font-semibold text-white rounded bg-red-400 hover:bg-red-500 transition-colors">
-                        Hold
-                      </button>
-                    )}
-                  </div>
-                </div>
-              ))}
+                )
+              })}
             </div>
           </div>
         )
       })}
       {selectedJob && (
-        <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4">
-          <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg">
-            <div className="bg-orange-500 text-white px-6 py-4 rounded-t-xl flex items-center justify-between">
-              <div>
-                <h2 className="text-lg font-bold">{selectedJob.job_number}</h2>
-                <p className="text-orange-200 text-xs mt-0.5">{selectedJob.client_name}</p>
-              </div>
-              <button onClick={() => setSelectedJob(null)} className="text-orange-200 hover:text-white"><X size={20} /></button>
-            </div>
-            <div className="p-6 space-y-4">
-              <div className="bg-orange-50 border border-orange-200 rounded-lg p-4 grid grid-cols-2 gap-3 text-sm">
-                <div><span className="text-xs text-gray-500 block">Status</span><span className="font-semibold">{selectedJob.workshop_status?.replace(/_/g,' ')}</span></div>
-                <div><span className="text-xs text-gray-500 block">Priority</span><span className="font-semibold">{selectedJob.priority}</span></div>
-                <div><span className="text-xs text-gray-500 block">Due Date</span><span className="font-semibold text-red-600">{selectedJob.due_date?new Date(selectedJob.due_date).toLocaleDateString('en-ZA'):'-'}</span></div>
-                <div><span className="text-xs text-gray-500 block">PO Number</span><span className="font-semibold">{(selectedJob as any).po_number||'-'}</span></div>
-                {selectedJob.time_started_at && <div className="col-span-2"><span className="text-xs text-gray-500 block">Started</span><span className="font-semibold">{new Date(selectedJob.time_started_at).toLocaleString('en-ZA')}</span></div>}
-              </div>
-              {selectedJob.description && <div><label className="block text-xs font-medium text-gray-500 mb-1">Description</label><p className="text-sm text-gray-800 bg-gray-50 rounded-lg px-3 py-2">{selectedJob.description}</p></div>}
-              <div>
-                <label className="block text-xs font-medium text-gray-500 mb-1">Workshop Notes</label>
-                <textarea value={notes[selectedJob.id] ?? (selectedJob.workshop_notes||'')} onChange={e => setNotes(n => ({...n,[selectedJob.id]:e.target.value}))} rows={3}
-                  className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-orange-400 resize-none" placeholder="Add workshop notes..." />
-                <button onClick={async () => { await supabase.from('jobs').update({workshop_notes:notes[selectedJob.id]}).eq('id',selectedJob.id); setSelectedJob(null); onRefresh() }}
-                  className="mt-2 w-full py-2 text-sm font-semibold text-white bg-orange-500 hover:bg-orange-600 rounded-lg transition-colors">Save Notes</button>
-              </div>
-            </div>
+        <JobExecutionPanel
+          job={selectedJob}
+          onClose={() => setSelectedJob(null)}
+          onStatusChange={onStatusChange}
+          onRefresh={onRefresh}
+        />
+      )}
+    </div>
+  )
+}
+
+// â”€â”€ JOB EXECUTION PANEL â€” E6 â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
+function JobExecutionPanel({ job, onClose, onStatusChange, onRefresh }: {
+  job: any; onClose: () => void; onStatusChange: (id: string, status: string) => void; onRefresh: () => void
+}) {
+  const [activeTab, setActiveTab] = React.useState<'workers'|'time'|'qc'|'materials'|'reconcile'>('workers')
+  const [workshopStatus, setWorkshopStatus] = React.useState(job.workshop_status || 'NOT_STARTED')
+  const [notes, setNotes] = React.useState(job.workshop_notes || '')
+  const [savingNotes, setSavingNotes] = React.useState(false)
+  const [showAssignModal, setShowAssignModal] = React.useState(false)
+  const [jobWorkers, setJobWorkers] = React.useState<any[]>([])
+  const [loadingWorkers, setLoadingWorkers] = React.useState(false)
+  const [wSearch, setWSearch] = React.useState('')
+  const [wForm, setWForm] = React.useState({ workerName: '', clockNumber: '', payMethod: 'EFT', paymentAmount: '', payDate: '' })
+  const [savingWorker, setSavingWorker] = React.useState(false)
+  const [qcCheckpoints, setQcCheckpoints] = React.useState<any[]>([])
+  const [loadingQC, setLoadingQC] = React.useState(false)
+  const [showSignModal, setShowSignModal] = React.useState<number|null>(null)
+  const [signerName, setSignerName] = React.useState('')
+  const [savingSign, setSavingSign] = React.useState(false)
+  const [jobMaterials, setJobMaterials] = React.useState<any[]>([])
+  const [loadingMaterials, setLoadingMaterials] = React.useState(false)
+  const [reconcileData, setReconcileData] = React.useState<any[]>([])
+  const [reconcileFileName, setReconcileFileName] = React.useState('')
+  const [reconciling, setReconciling] = React.useState(false)
+  const reconcileFileRef = React.useRef<HTMLInputElement>(null)
+  const [showMatModal, setShowMatModal] = React.useState(false)
+  const [matForm, setMatForm] = React.useState({ description: '', quantity: '', unit: 'EA', logged_by: '' })
+  const [savingMat, setSavingMat] = React.useState(false)
+
+  const MAT_UNITS = ['EA', 'M', 'KG', 'L', 'M2', 'M3', 'SET', 'HR', 'PCS']
+
+  const loadMaterials = React.useCallback(async () => {
+    setLoadingMaterials(true)
+    const sb = (await import('./lib/supabase')).supabase
+    const { data } = await sb.from('job_materials').select('*').eq('job_id', job.id).order('created_at', { ascending: false })
+    if (data) setJobMaterials(data)
+    setLoadingMaterials(false)
+  }, [job.id])
+
+  const handleLogMaterial = async () => {
+    if (!matForm.description.trim() || !matForm.quantity) return
+    setSavingMat(true)
+    const sb = (await import('./lib/supabase')).supabase
+    const { data } = await sb.from('job_materials').insert({
+      job_id: job.id,
+      description: matForm.description.trim(),
+      quantity: parseFloat(matForm.quantity),
+      unit: matForm.unit,
+      notes: matForm.logged_by.trim() || null,
+    }).select().single()
+    if (data) setJobMaterials(prev => [data, ...prev])
+    setSavingMat(false)
+    setShowMatModal(false)
+    setMatForm({ description: '', quantity: '', unit: 'EA', logged_by: '' })
+  }
+
+  const handleDeleteMaterial = async (id: string) => {
+    const sb = (await import('./lib/supabase')).supabase
+    await sb.from('job_materials').delete().eq('id', id)
+    setJobMaterials(prev => prev.filter((m: any) => m.id !== id))
+  }
+
+
+  const QC_DESCRIPTIONS = [
+    'Mark out all material and check prior to cutting',
+    'Cut all material, deburr holes, dress and remove all sharp edges',
+    'Assy and inspect prior to welding (water passes if applicable)',
+    'Do welding complete as per WPS?',
+    'Do a pressure test on water cooled unit if applicable?',
+    'Clean all spatter and ensure NO sharp edges on workpiece',
+    'Do 100% dimensional and visual inspection prior to painting',
+    'Stamp and paint as required',
+    'Final inspection - Sticker, Sign, Paperwork, Ready for delivery',
+  ]
+
+  const loadQCCheckpoints = React.useCallback(async () => {
+    setLoadingQC(true)
+    const sb = (await import('./lib/supabase')).supabase
+    const { data } = await sb.from('job_qc_checkpoints').select('*').eq('job_id', job.id).order('checkpoint_number')
+    if (data && data.length > 0) {
+      setQcCheckpoints(data)
+    } else {
+      const inserts = QC_DESCRIPTIONS.map((desc, i) => ({
+        job_id: job.id,
+        checkpoint_number: i + 1,
+        description: desc,
+        signed_off: false,
+      }))
+      const { data: created } = await sb.from('job_qc_checkpoints').insert(inserts).select()
+      if (created) setQcCheckpoints(created)
+    }
+    setLoadingQC(false)
+  }, [job.id])
+
+  const handleSignOff = async (checkpointId: string) => {
+    if (!signerName.trim()) return
+    setSavingSign(true)
+    const sb = (await import('./lib/supabase')).supabase
+    const { data } = await sb.from('job_qc_checkpoints').update({
+      signed_off: true,
+      signed_off_by: signerName.trim(),
+      signed_off_at: new Date().toISOString(),
+    }).eq('id', checkpointId).select().single()
+    if (data) {
+      setQcCheckpoints(prev => prev.map(c => c.id === checkpointId ? data : c))
+    }
+    setSavingSign(false)
+    setShowSignModal(null)
+    setSignerName('')
+  }
+
+  const CASUAL_WORKERS = [
+    { name: 'MM MODISE', clock: 'C001' },
+    { name: 'LC MATHANG', clock: 'C002' },
+    { name: 'K NYIDE', clock: 'C003' },
+    { name: 'TI NTSHALA', clock: 'C004' },
+    { name: 'LE MOLEFE', clock: 'C005' },
+    { name: 'TIMOTHY SMITH', clock: 'C006' },
+    { name: 'GEORGE HUMAN', clock: 'C007' },
+    { name: 'TN TLALI', clock: 'C008' },
+    { name: 'KE RAMPONE', clock: 'C009' },
+    { name: 'MW RAMONYALUOE', clock: 'C010' },
+  ]
+
+  const loadWorkers = async () => {
+    setLoadingWorkers(true)
+    const { supabase: sb } = await import('./lib/supabase')
+    const { data } = await sb.from('job_workers').select('*').eq('job_id', job.id).order('created_at')
+    setJobWorkers(data || [])
+    setLoadingWorkers(false)
+  }
+
+  const handleAssignWorker = async () => {
+    if (!wForm.workerName) return
+    setSavingWorker(true)
+    const { supabase: sb } = await import('./lib/supabase')
+    await sb.from('job_workers').insert({
+      job_id: job.id,
+      worker_name: wForm.workerName,
+      clock_number: wForm.clockNumber,
+      pay_method: wForm.payMethod,
+      payment_amount: wForm.paymentAmount ? parseFloat(wForm.paymentAmount) : null,
+      pay_date: wForm.payDate || null
+    })
+    setWForm({ workerName: '', clockNumber: '', payMethod: 'EFT', paymentAmount: '', payDate: '' })
+    setWSearch('')
+    setShowAssignModal(false)
+    setSavingWorker(false)
+    await loadWorkers()
+  }
+
+  const handleClockIn = async (workerId: string) => {
+    const { supabase: sb } = await import('./lib/supabase')
+    await sb.from('job_workers').update({ clocked_in_at: new Date().toISOString() }).eq('id', workerId)
+    await loadWorkers()
+  }
+
+  const handleClockOut = async (worker: any) => {
+    const now = new Date()
+    const mins = Math.round((now.getTime() - new Date(worker.clocked_in_at).getTime()) / 60000)
+    const { supabase: sb } = await import('./lib/supabase')
+    await sb.from('job_workers').update({ clocked_out_at: now.toISOString(), total_minutes: mins }).eq('id', worker.id)
+    await loadWorkers()
+  }
+
+  React.useEffect(() => { loadWorkers() }, [job.id])
+  React.useEffect(() => { if (activeTab === 'qc') loadQCCheckpoints() }, [activeTab, loadQCCheckpoints])
+  React.useEffect(() => { if (activeTab === 'materials') loadMaterials() }, [activeTab, loadMaterials])
+
+  const STATUSES = [
+    { key: 'NOT_STARTED',   label: 'Not Started'   },
+    { key: 'IN_PROGRESS',   label: 'In Progress'   },
+    { key: 'ON_HOLD',       label: 'On Hold'       },
+    { key: 'QUALITY_CHECK', label: 'Quality Check' },
+    { key: 'COMPLETE',      label: 'Complete'      },
+    { key: 'DISPATCHED',    label: 'Dispatched'    },
+  ]
+
+  const handleStatusChange = async (newStatus: string) => {
+    setWorkshopStatus(newStatus)
+    await onStatusChange(job.id, newStatus)
+  }
+
+  const handleSaveNotes = async () => {
+    setSavingNotes(true)
+    const { supabase: sb } = await import('./lib/supabase')
+    await sb.from('jobs').update({ workshop_notes: notes }).eq('id', job.id)
+    setSavingNotes(false)
+    onRefresh()
+  }
+
+  const tabs = [
+    { key: 'workers',   label: 'Workers'   },
+    { key: 'time',      label: 'Time'      },
+    { key: 'qc',        label: 'QC'        },
+    { key: 'materials', label: 'Materials' },
+    { key: 'reconcile', label: 'Reconcile' },
+  ]
+
+  return (
+    <div className="fixed inset-0 z-50 flex flex-col" style={{ background: '#f7f8fb' }}>
+
+      {/* â”€â”€ HEADER â”€â”€ */}
+      <div style={{ background: '#1d3461', padding: '0 24px' }} className="flex items-center justify-between shrink-0">
+        <div className="flex items-center gap-4 py-4">
+          <button onClick={onClose}
+            style={{ background: 'rgba(255,255,255,0.12)', border: 'none', borderRadius: '6px', padding: '6px 14px', color: 'white', cursor: 'pointer', fontSize: '13px', fontWeight: 600 }}>
+            ← Back
+          </button>
+          <div>
+            <div style={{ color: '#4db848', fontSize: '11px', fontWeight: 700, letterSpacing: '0.08em', textTransform: 'uppercase' }}>Job Execution Panel</div>
+            <div style={{ color: 'white', fontSize: '18px', fontWeight: 700, lineHeight: 1.2 }}>{job.job_number}</div>
+            <div style={{ color: 'rgba(255,255,255,0.6)', fontSize: '12px', marginTop: '2px' }}>{job.client_name} · {job.description}</div>
           </div>
         </div>
-      )}
+        <div className="flex items-center gap-3 py-4">
+          <div>
+            <div style={{ color: 'rgba(255,255,255,0.5)', fontSize: '10px', fontWeight: 600, textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '4px' }}>Workshop Status</div>
+            <select
+              value={workshopStatus}
+              onChange={e => handleStatusChange(e.target.value)}
+              style={{ background: 'rgba(255,255,255,0.12)', border: '1px solid rgba(255,255,255,0.25)', borderRadius: '6px', color: 'white', padding: '7px 12px', fontSize: '13px', fontWeight: 600, cursor: 'pointer', outline: 'none' }}>
+              {STATUSES.map(s => <option key={s.key} value={s.key} style={{ background: '#1d3461', color: 'white' }}>{s.label}</option>)}
+            </select>
+          </div>
+          {job.priority && (
+            <div style={{ background: job.priority === 'URGENT' ? '#e05c5c' : job.priority === 'HIGH' ? '#e8a020' : 'rgba(255,255,255,0.12)', borderRadius: '6px', padding: '6px 14px', color: 'white', fontSize: '12px', fontWeight: 700 }}>
+              {job.priority}
+            </div>
+          )}
+        </div>
+      </div>
+
+      {/* â”€â”€ TABS â”€â”€ */}
+      <div style={{ background: '#162850', padding: '0 24px', display: 'flex', gap: '4px', borderBottom: '2px solid #4db848' }} className="shrink-0">
+        {tabs.map(tab => (
+          <button
+            key={tab.key}
+            onClick={() => setActiveTab(tab.key as any)}
+            style={{
+              padding: '14px 28px', border: 'none', cursor: 'pointer', fontSize: '13px', fontWeight: 600,
+              background: activeTab === tab.key ? '#4db848' : 'transparent',
+              color: activeTab === tab.key ? 'white' : 'rgba(255,255,255,0.5)',
+              borderRadius: '6px 6px 0 0', transition: 'all .15s'
+            }}>
+            {tab.label}
+          </button>
+        ))}
+      </div>
+
+      {/* â”€â”€ TAB CONTENT â”€â”€ */}
+      <div className="flex-1 overflow-y-auto" style={{ padding: '32px 32px' }}>
+
+        {/* WORKERS TAB */}
+            {/* WORKERS TAB */}
+            {activeTab === 'workers' && (
+              <div>
+                <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px' }}>
+                  <div>
+                    <div style={{ fontSize: '16px', fontWeight: 700, color: '#1d3461' }}>Worker Assignment</div>
+                    <div style={{ fontSize: '12px', color: '#8896a8', marginTop: '2px' }}>Assign casual workers from Casuals_2025 to this job</div>
+                  </div>
+                  <button onClick={() => setShowAssignModal(true)} style={{ background: '#4db848', color: 'white', border: 'none', borderRadius: '6px', padding: '10px 20px', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>
+                    + Assign Worker
+                  </button>
+                </div>
+                {loadingWorkers ? (
+                  <div style={{ textAlign: 'center', padding: '48px', color: '#8896a8' }}>Loading workers...</div>
+                ) : jobWorkers.length === 0 ? (
+                  <div style={{ background: 'white', border: '1px solid #dde3ec', borderRadius: '8px', padding: '48px', textAlign: 'center' }}>
+                    <div style={{ fontSize: '14px', fontWeight: 600, color: '#1d3461', marginBottom: '4px' }}>No workers assigned yet</div>
+                    <div style={{ fontSize: '12px', color: '#8896a8' }}>Click '+ Assign Worker' to add casual workers to this job</div>
+                  </div>
+                ) : (
+                  <div style={{ display: 'flex', flexDirection: 'column', gap: '10px' }}>
+                    {jobWorkers.map(w => (
+                      <div key={w.id} style={{ background: 'white', border: '1px solid #dde3ec', borderRadius: '8px', padding: '16px 20px', display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+                        <div>
+                          <div style={{ fontSize: '14px', fontWeight: 700, color: '#1d3461' }}>{w.worker_name}</div>
+                          <div style={{ fontSize: '11px', color: '#8896a8', marginTop: '2px' }}>Clock: {w.clock_number || 'N/A'} | {w.pay_method || 'EFT'} | R{w.payment_amount || '0'}</div>
+                        </div>
+                        <div style={{ display: 'flex', alignItems: 'center', gap: '12px' }}>
+                          {!w.clocked_in_at && <span style={{ fontSize: '11px', color: '#8896a8', background: '#f0f2f7', padding: '4px 10px', borderRadius: '12px' }}>Not Started</span>}
+                          {w.clocked_in_at && !w.clocked_out_at && <span style={{ fontSize: '11px', color: '#4db848', background: '#edf9ea', padding: '4px 10px', borderRadius: '12px' }}>Clocked In</span>}
+                          {w.clocked_out_at && <span style={{ fontSize: '11px', color: '#1d3461', background: '#e8ecf4', padding: '4px 10px', borderRadius: '12px' }}>{Math.floor(w.total_minutes/60)}h {w.total_minutes%60}m</span>}
+                          {!w.clocked_in_at && <button onClick={() => handleClockIn(w.id)} style={{ background: '#4db848', color: 'white', border: 'none', borderRadius: '6px', padding: '8px 14px', fontSize: '12px', fontWeight: 700, cursor: 'pointer' }}>Clock In</button>}
+                          {w.clocked_in_at && !w.clocked_out_at && <button onClick={() => handleClockOut(w)} style={{ background: '#e53e3e', color: 'white', border: 'none', borderRadius: '6px', padding: '8px 14px', fontSize: '12px', fontWeight: 700, cursor: 'pointer' }}>Clock Out</button>}
+                        </div>
+                      </div>
+                    ))}
+                  </div>
+                )}
+                {showAssignModal && (
+                  <div style={{ position: 'fixed', inset: 0, background: 'rgba(0,0,0,0.5)', zIndex: 1000, display: 'flex', alignItems: 'center', justifyContent: 'center' }}>
+                    <div style={{ background: 'white', borderRadius: '12px', padding: '32px', width: '480px', maxWidth: '90vw' }}>
+                      <div style={{ fontSize: '16px', fontWeight: 700, color: '#1d3461', marginBottom: '20px' }}>Assign Worker</div>
+                      <div style={{ marginBottom: '16px' }}>
+                        <div style={{ fontSize: '12px', fontWeight: 600, color: '#1d3461', marginBottom: '6px' }}>Worker Name</div>
+                        <input list="worker-list" value={wSearch} onChange={e => { setWSearch(e.target.value); const match = CASUAL_WORKERS.find(w => w.name === e.target.value); if (match) setWForm(f => ({ ...f, workerName: match.name, clockNumber: match.clock })) }} style={{ width: '100%', border: '1px solid #dde3ec', borderRadius: '6px', padding: '10px 12px', fontSize: '13px', boxSizing: 'border-box' as const }} placeholder="Search worker name..." />
+                        <datalist id="worker-list">{CASUAL_WORKERS.filter(w => w.name.toLowerCase().includes(wSearch.toLowerCase())).map(w => <option key={w.name} value={w.name} />)}</datalist>
+                      </div>
+                      <div style={{ marginBottom: '16px' }}>
+                        <div style={{ fontSize: '12px', fontWeight: 600, color: '#1d3461', marginBottom: '6px' }}>Clock Number</div>
+                        <input value={wForm.clockNumber} onChange={e => setWForm(f => ({ ...f, clockNumber: e.target.value }))} style={{ width: '100%', border: '1px solid #dde3ec', borderRadius: '6px', padding: '10px 12px', fontSize: '13px', boxSizing: 'border-box' as const }} placeholder="Auto-fills from worker list" />
+                      </div>
+                      <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '12px', marginBottom: '16px' }}>
+                        <div>
+                          <div style={{ fontSize: '12px', fontWeight: 600, color: '#1d3461', marginBottom: '6px' }}>Pay Method</div>
+                          <select value={wForm.payMethod} onChange={e => setWForm(f => ({ ...f, payMethod: e.target.value }))} style={{ width: '100%', border: '1px solid #dde3ec', borderRadius: '6px', padding: '10px 12px', fontSize: '13px' }}>
+                            <option value="EFT">EFT</option>
+                            <option value="Cash">Cash</option>
+                          </select>
+                        </div>
+                        <div>
+                          <div style={{ fontSize: '12px', fontWeight: 600, color: '#1d3461', marginBottom: '6px' }}>Payment Amount (R)</div>
+                          <input type="number" value={wForm.paymentAmount} onChange={e => setWForm(f => ({ ...f, paymentAmount: e.target.value }))} style={{ width: '100%', border: '1px solid #dde3ec', borderRadius: '6px', padding: '10px 12px', fontSize: '13px', boxSizing: 'border-box' as const }} placeholder="0.00" />
+                        </div>
+                      </div>
+                      <div style={{ marginBottom: '24px' }}>
+                        <div style={{ fontSize: '12px', fontWeight: 600, color: '#1d3461', marginBottom: '6px' }}>Pay Date</div>
+                        <input type="date" value={wForm.payDate} onChange={e => setWForm(f => ({ ...f, payDate: e.target.value }))} style={{ width: '100%', border: '1px solid #dde3ec', borderRadius: '6px', padding: '10px 12px', fontSize: '13px', boxSizing: 'border-box' as const }} />
+                      </div>
+                      <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
+                        <button onClick={() => { setShowAssignModal(false); setWSearch('') }} style={{ border: '1px solid #dde3ec', background: 'white', borderRadius: '6px', padding: '10px 20px', fontSize: '13px', cursor: 'pointer' }}>Cancel</button>
+                        <button onClick={handleAssignWorker} disabled={savingWorker || !wForm.workerName} style={{ background: (savingWorker || !wForm.workerName) ? '#ccc' : '#4db848', color: 'white', border: 'none', borderRadius: '6px', padding: '10px 20px', fontSize: '13px', fontWeight: 700, cursor: (savingWorker || !wForm.workerName) ? 'not-allowed' : 'pointer' }}>{savingWorker ? 'Saving...' : 'Assign Worker'}</button>
+                      </div>
+                    </div>
+                  </div>
+                )}
+              </div>
+            )}
+
+        {/* TIME TAB */}
+        {activeTab === 'time' && (
+          <div>
+            <div style={{ marginBottom: '20px' }}>
+              <div style={{ fontSize: '16px', fontWeight: 700, color: '#1d3461' }}>Time Tracking</div>
+              <div style={{ fontSize: '12px', color: '#8896a8', marginTop: '2px' }}>Actual hours per worker per job</div>
+            </div>
+            {(() => {
+              const totalMinutes = jobWorkers.reduce((sum, w) => sum + (w.total_minutes || 0), 0)
+              const clockedIn = jobWorkers.filter(w => w.clocked_in_at && !w.clocked_out_at)
+              const totalH = Math.floor(totalMinutes / 60)
+              const totalM = totalMinutes % 60
+              return (
+                <>
+                  <div style={{ display: 'grid', gridTemplateColumns: 'repeat(3, 1fr)', gap: '12px', marginBottom: '24px' }}>
+                    {[
+                      { l: 'Total Workers', v: jobWorkers.length.toString() },
+                      { l: 'Currently Clocked In', v: clockedIn.length.toString() },
+                      { l: 'Total Hours', v: totalMinutes > 0 ? totalH + 'h ' + totalM + 'm' : '0h 0m' }
+                    ].map((s, i) => (
+                      <div key={i} style={{ background: 'white', border: '1px solid #dde3ec', borderRadius: '8px', padding: '16px', textAlign: 'center' }}>
+                        <div style={{ fontSize: '10px', fontWeight: 700, color: '#8896a8', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '6px' }}>{s.l}</div>
+                        <div style={{ fontSize: '18px', fontWeight: 700, color: '#1d3461' }}>{s.v}</div>
+                      </div>
+                    ))}
+                  </div>
+                  {jobWorkers.length === 0 ? (
+                    <div style={{ background: 'white', border: '1px solid #dde3ec', borderRadius: '8px', padding: '48px', textAlign: 'center' }}>
+                      <div style={{ fontSize: '14px', fontWeight: 600, color: '#1d3461', marginBottom: '4px' }}>No workers assigned yet</div>
+                      <div style={{ fontSize: '12px', color: '#8896a8' }}>Assign workers from the Workers tab to start tracking time</div>
+                    </div>
+                  ) : (
+                    <div style={{ background: 'white', border: '1px solid #dde3ec', borderRadius: '8px', overflow: 'hidden' }}>
+                      <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                        <thead><tr style={{ background: '#f8fafc' }}>
+                          <th style={{ padding: '10px 14px', textAlign: 'left', fontSize: '11px', fontWeight: 700, color: '#8896a8', textTransform: 'uppercase' }}>Worker</th>
+                          <th style={{ padding: '10px 14px', textAlign: 'left', fontSize: '11px', fontWeight: 700, color: '#8896a8', textTransform: 'uppercase' }}>Clock No</th>
+                          <th style={{ padding: '10px 14px', textAlign: 'left', fontSize: '11px', fontWeight: 700, color: '#8896a8', textTransform: 'uppercase' }}>Clocked In</th>
+                          <th style={{ padding: '10px 14px', textAlign: 'left', fontSize: '11px', fontWeight: 700, color: '#8896a8', textTransform: 'uppercase' }}>Clocked Out</th>
+                          <th style={{ padding: '10px 14px', textAlign: 'right', fontSize: '11px', fontWeight: 700, color: '#8896a8', textTransform: 'uppercase' }}>Hours</th>
+                          <th style={{ padding: '10px 14px', textAlign: 'right', fontSize: '11px', fontWeight: 700, color: '#8896a8', textTransform: 'uppercase' }}>Amount</th>
+                          <th style={{ padding: '10px 14px', textAlign: 'center', fontSize: '11px', fontWeight: 700, color: '#8896a8', textTransform: 'uppercase' }}>Status</th>
+                        </tr></thead>
+                        <tbody>
+                          {jobWorkers.map((w, i) => {
+                            const mins = w.total_minutes || 0
+                            const h = Math.floor(mins / 60)
+                            const m = mins % 60
+                            const isIn = w.clocked_in_at && !w.clocked_out_at
+                            return (
+                              <tr key={w.id} style={{ borderTop: i > 0 ? '1px solid #f1f5f9' : 'none' }}>
+                                <td style={{ padding: '12px 14px', fontWeight: 600, color: '#1d3461' }}>{w.worker_name}</td>
+                                <td style={{ padding: '12px 14px', color: '#64748b', fontSize: '12px' }}>{w.clock_number || '-'}</td>
+                                <td style={{ padding: '12px 14px', color: '#64748b', fontSize: '12px' }}>{w.clocked_in_at ? new Date(w.clocked_in_at).toLocaleString('en-ZA', { dateStyle: 'short', timeStyle: 'short' }) : '-'}</td>
+                                <td style={{ padding: '12px 14px', color: '#64748b', fontSize: '12px' }}>{w.clocked_out_at ? new Date(w.clocked_out_at).toLocaleString('en-ZA', { dateStyle: 'short', timeStyle: 'short' }) : '-'}</td>
+                                <td style={{ padding: '12px 14px', textAlign: 'right', fontWeight: 600, color: '#1d3461' }}>{mins > 0 ? h + 'h ' + m + 'm' : '-'}</td>
+                                <td style={{ padding: '12px 14px', textAlign: 'right', color: '#64748b', fontSize: '12px' }}>{w.payment_amount ? 'R ' + parseFloat(w.payment_amount).toLocaleString('en-ZA', { minimumFractionDigits: 2 }) : '-'}</td>
+                                <td style={{ padding: '12px 14px', textAlign: 'center' }}>
+                                  <span style={{ display: 'inline-block', padding: '2px 8px', borderRadius: '10px', fontSize: '11px', fontWeight: 700, background: isIn ? '#dcfce7' : '#f1f5f9', color: isIn ? '#16a34a' : '#64748b' }}>
+                                    {isIn ? 'CLOCKED IN' : w.clocked_out_at ? 'COMPLETE' : 'ASSIGNED'}
+                                  </span>
+                                </td>
+                              </tr>
+                            )
+                          })}
+                        </tbody>
+                        <tfoot><tr style={{ borderTop: '2px solid #e2e8f0', background: '#f8fafc' }}>
+                          <td colSpan={4} style={{ padding: '10px 14px', fontWeight: 700, color: '#1d3461', fontSize: '12px' }}>TOTALS</td>
+                          <td style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 700, color: '#1d3461' }}>{totalH}h {totalM}m</td>
+                          <td style={{ padding: '10px 14px', textAlign: 'right', fontWeight: 700, color: '#1d3461' }}>R {jobWorkers.reduce((s, w) => s + (parseFloat(w.payment_amount) || 0), 0).toLocaleString('en-ZA', { minimumFractionDigits: 2 })}</td>
+                          <td></td>
+                        </tr></tfoot>
+                      </table>
+                    </div>
+                  )}
+                </>
+              )
+            })()}
+          </div>
+        )}
+
+        {/* QC TAB */}
+        {activeTab === 'qc' && (
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px' }}>
+              <div>
+                <div style={{ fontSize: '16px', fontWeight: 700, color: '#1d3461' }}>QC Holding Points</div>
+                <div style={{ fontSize: '12px', color: '#8896a8', marginTop: '2px' }}>9 checkpoints - digital replacement for paper signature</div>
+              </div>
+              <div style={{ background: qcCheckpoints.filter(c=>c.signed_off).length === 9 ? '#dcfce7' : '#e8ecf4', borderRadius: '6px', padding: '8px 16px', fontSize: '13px', fontWeight: 700, color: qcCheckpoints.filter(c=>c.signed_off).length === 9 ? '#16a34a' : '#1d3461' }}>
+                {qcCheckpoints.filter(c=>c.signed_off).length} of 9 complete
+              </div>
+            </div>
+            {loadingQC ? (
+              <div style={{ textAlign: 'center', padding: '40px', color: '#8896a8', fontSize: '13px' }}>Loading checkpoints...</div>
+            ) : (
+              <div style={{ display: 'flex', flexDirection: 'column', gap: '8px' }}>
+                {(qcCheckpoints.length > 0 ? qcCheckpoints : QC_DESCRIPTIONS.map((d,i)=>({ id: String(i), checkpoint_number: i+1, description: d, signed_off: false }))).map((cp: any) => (
+                  <div key={cp.id} style={{ background: 'white', border: cp.signed_off ? '1px solid #4db848' : '1px solid #dde3ec', borderRadius: '8px', padding: '14px 18px', display: 'flex', alignItems: 'center', gap: '14px' }}>
+                    <div style={{ width: '32px', height: '32px', borderRadius: '50%', background: cp.signed_off ? '#4db848' : '#e8ecf4', display: 'flex', alignItems: 'center', justifyContent: 'center', fontSize: '13px', fontWeight: 700, color: cp.signed_off ? 'white' : '#1d3461', flexShrink: 0 }}>{cp.checkpoint_number}</div>
+                    <div style={{ flex: 1 }}>
+                      <div style={{ fontSize: '13px', fontWeight: 600, color: '#1d3461', lineHeight: 1.4 }}>{cp.description}</div>
+                      {cp.signed_off ? (
+                        <div style={{ fontSize: '11px', color: '#4db848', marginTop: '4px', fontWeight: 600 }}>
+                          Signed by {cp.signed_off_by} &bull; {cp.signed_off_at ? new Date(cp.signed_off_at).toLocaleString('en-ZA', { dateStyle: 'short', timeStyle: 'short' }) : ''}
+                        </div>
+                      ) : (
+                        <div style={{ fontSize: '11px', color: '#8896a8', marginTop: '3px' }}>Awaiting sign-off</div>
+                      )}
+                    </div>
+                    {!cp.signed_off && (
+                      <button onClick={() => setShowSignModal(cp.id)} style={{ background: '#4db848', color: 'white', border: 'none', borderRadius: '6px', padding: '8px 16px', fontSize: '12px', fontWeight: 700, cursor: 'pointer', flexShrink: 0 }}>Sign Off</button>
+                    )}
+                    {cp.signed_off && (
+                      <div style={{ background: '#dcfce7', borderRadius: '6px', padding: '6px 12px', fontSize: '11px', fontWeight: 700, color: '#16a34a', flexShrink: 0 }}>Signed</div>
+                    )}
+                  </div>
+                ))}
+              </div>
+            )}
+            {showSignModal !== null && (
+              <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100, borderRadius: '12px' }}>
+                <div style={{ background: 'white', borderRadius: '10px', padding: '28px', width: '320px', boxShadow: '0 8px 32px rgba(0,0,0,0.18)' }}>
+                  <div style={{ fontSize: '15px', fontWeight: 700, color: '#1d3461', marginBottom: '6px' }}>Sign Off Checkpoint</div>
+                  <div style={{ fontSize: '12px', color: '#8896a8', marginBottom: '18px' }}>Enter your full name to confirm this checkpoint is complete.</div>
+                  <input
+                    type='text'
+                    value={signerName}
+                    onChange={e => setSignerName(e.target.value)}
+                    placeholder='Your full name...'
+                    style={{ width: '100%', border: '1px solid #dde3ec', borderRadius: '6px', padding: '10px 12px', fontSize: '13px', marginBottom: '16px', boxSizing: 'border-box' }}
+                    autoFocus
+                  />
+                  <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+                    <button onClick={() => { setShowSignModal(null); setSignerName('') }} style={{ border: '1px solid #dde3ec', background: 'white', borderRadius: '6px', padding: '9px 18px', fontSize: '13px', cursor: 'pointer' }}>Cancel</button>
+                    <button onClick={() => handleSignOff(showSignModal as unknown as string)} disabled={savingSign || !signerName.trim()} style={{ background: savingSign || !signerName.trim() ? '#ccc' : '#4db848', color: 'white', border: 'none', borderRadius: '6px', padding: '9px 18px', fontSize: '13px', fontWeight: 700, cursor: savingSign || !signerName.trim() ? 'not-allowed' : 'pointer' }}>{savingSign ? 'Saving...' : 'Confirm Sign-Off'}</button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        {/* MATERIALS TAB */}
+        {activeTab === 'materials' && (
+          <div style={{ position: 'relative' }}>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px' }}>
+              <div><div style={{ fontSize: '16px', fontWeight: 700, color: '#1d3461' }}>Materials Used</div><div style={{ fontSize: '12px', color: '#8896a8', marginTop: '2px' }}>Log materials consumed against this job</div></div>
+              <button onClick={() => setShowMatModal(true)} style={{ background: '#1d3461', color: 'white', border: 'none', borderRadius: '6px', padding: '10px 20px', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>+ Log Material</button>
+            </div>
+            {loadingMaterials ? (<div style={{ textAlign: 'center', padding: '40px', color: '#8896a8', fontSize: '13px' }}>Loading...</div>) : jobMaterials.length === 0 ? (
+              <div style={{ background: 'white', border: '1px solid #dde3ec', borderRadius: '8px', padding: '48px', textAlign: 'center' }}><div style={{ fontSize: '14px', fontWeight: 600, color: '#1d3461', marginBottom: '4px' }}>No materials logged yet</div><div style={{ fontSize: '12px', color: '#8896a8' }}>Click Log Material to record materials consumed on this job</div></div>
+            ) : (
+              <div style={{ background: 'white', border: '1px solid #dde3ec', borderRadius: '8px', overflow: 'hidden' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                  <thead><tr style={{ background: '#f8fafc' }}>
+                    <th style={{ padding: '10px 14px', textAlign: 'left', fontSize: '11px', fontWeight: 700, color: '#8896a8', textTransform: 'uppercase' }}>Description</th>
+                    <th style={{ padding: '10px 14px', textAlign: 'center', fontSize: '11px', fontWeight: 700, color: '#8896a8', textTransform: 'uppercase' }}>Qty</th>
+                    <th style={{ padding: '10px 14px', textAlign: 'center', fontSize: '11px', fontWeight: 700, color: '#8896a8', textTransform: 'uppercase' }}>Unit</th>
+                    <th style={{ padding: '10px 14px', textAlign: 'left', fontSize: '11px', fontWeight: 700, color: '#8896a8', textTransform: 'uppercase' }}>Logged by</th>
+                    <th style={{ padding: '10px 14px', textAlign: 'left', fontSize: '11px', fontWeight: 700, color: '#8896a8', textTransform: 'uppercase' }}>Date</th>
+                    <th style={{ padding: '10px 14px', width: '40px' }}></th>
+                  </tr></thead>
+                  <tbody>{jobMaterials.map((m, i) => (
+                    <tr key={m.id} style={{ borderTop: i > 0 ? '1px solid #f1f5f9' : 'none' }}>
+                      <td style={{ padding: '12px 14px', fontWeight: 600, color: '#1d3461' }}>{m.description}</td>
+                      <td style={{ padding: '12px 14px', textAlign: 'center', fontWeight: 700, color: '#1d3461' }}>{m.quantity}</td>
+                      <td style={{ padding: '12px 14px', textAlign: 'center', color: '#64748b', fontSize: '12px' }}>{m.unit}</td>
+                      <td style={{ padding: '12px 14px', color: '#64748b', fontSize: '12px' }}>{m.notes || '-'}</td>
+                      <td style={{ padding: '12px 14px', color: '#64748b', fontSize: '12px' }}>{m.created_at ? new Date(m.created_at).toLocaleString('en-ZA', { dateStyle: 'short', timeStyle: 'short' }) : '-'}</td>
+                      <td style={{ padding: '12px 14px', textAlign: 'center' }}><button onClick={() => handleDeleteMaterial(m.id)} style={{ background: 'none', border: 'none', color: '#e24b4a', cursor: 'pointer', fontSize: '14px', fontWeight: 700 }}>x</button></td>
+                    </tr>
+                  ))}</tbody>
+                  <tfoot><tr style={{ borderTop: '2px solid #e2e8f0', background: '#f8fafc' }}><td colSpan={5} style={{ padding: '10px 14px', fontWeight: 700, color: '#1d3461', fontSize: '12px' }}>Total items: {jobMaterials.length}</td><td></td></tr></tfoot>
+                </table>
+              </div>
+            )}
+            {showMatModal && (
+              <div style={{ position: 'absolute', inset: 0, background: 'rgba(0,0,0,0.4)', display: 'flex', alignItems: 'center', justifyContent: 'center', zIndex: 100, borderRadius: '12px' }}>
+                <div style={{ background: 'white', borderRadius: '10px', padding: '28px', width: '360px' }}>
+                  <div style={{ fontSize: '15px', fontWeight: 700, color: '#1d3461', marginBottom: '18px' }}>Log Material</div>
+                  <div style={{ marginBottom: '12px' }}><label style={{ fontSize: '11px', fontWeight: 700, color: '#8896a8', textTransform: 'uppercase', display: 'block', marginBottom: '5px' }}>Description *</label><input type='text' value={matForm.description} onChange={e => setMatForm(f => ({...f, description: e.target.value}))} placeholder='e.g. 50x50x3 SHS Steel' style={{ width: '100%', border: '1px solid #dde3ec', borderRadius: '6px', padding: '9px 12px', fontSize: '13px', boxSizing: 'border-box' }} autoFocus /></div>
+                  <div style={{ display: 'grid', gridTemplateColumns: '1fr 1fr', gap: '10px', marginBottom: '12px' }}>
+                    <div><label style={{ fontSize: '11px', fontWeight: 700, color: '#8896a8', textTransform: 'uppercase', display: 'block', marginBottom: '5px' }}>Quantity *</label><input type='number' value={matForm.quantity} onChange={e => setMatForm(f => ({...f, quantity: e.target.value}))} placeholder='0' min='0' step='0.01' style={{ width: '100%', border: '1px solid #dde3ec', borderRadius: '6px', padding: '9px 12px', fontSize: '13px', boxSizing: 'border-box' }} /></div>
+                    <div><label style={{ fontSize: '11px', fontWeight: 700, color: '#8896a8', textTransform: 'uppercase', display: 'block', marginBottom: '5px' }}>Unit</label><select value={matForm.unit} onChange={e => setMatForm(f => ({...f, unit: e.target.value}))} style={{ width: '100%', border: '1px solid #dde3ec', borderRadius: '6px', padding: '9px 12px', fontSize: '13px', boxSizing: 'border-box' }}>{MAT_UNITS.map(u => <option key={u} value={u}>{u}</option>)}</select></div>
+                  </div>
+                  <div style={{ marginBottom: '20px' }}><label style={{ fontSize: '11px', fontWeight: 700, color: '#8896a8', textTransform: 'uppercase', display: 'block', marginBottom: '5px' }}>Logged by</label><input type='text' value={matForm.logged_by} onChange={e => setMatForm(f => ({...f, logged_by: e.target.value}))} placeholder='Your name...' style={{ width: '100%', border: '1px solid #dde3ec', borderRadius: '6px', padding: '9px 12px', fontSize: '13px', boxSizing: 'border-box' }} /></div>
+                  <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
+                    <button onClick={() => { setShowMatModal(false); setMatForm({ description: '', quantity: '', unit: 'EA', logged_by: '' }) }} style={{ border: '1px solid #dde3ec', background: 'white', borderRadius: '6px', padding: '9px 18px', fontSize: '13px', cursor: 'pointer' }}>Cancel</button>
+                    <button onClick={handleLogMaterial} disabled={savingMat || !matForm.description.trim() || !matForm.quantity} style={{ background: savingMat || !matForm.description.trim() || !matForm.quantity ? '#ccc' : '#1d3461', color: 'white', border: 'none', borderRadius: '6px', padding: '9px 18px', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>{savingMat ? 'Saving...' : 'Log Material'}</button>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
+        
+        {/* RECONCILE TAB */}
+        {activeTab === 'reconcile' && (
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px' }}>
+              <div>
+                <div style={{ fontSize: '16px', fontWeight: 700, color: '#1d3461' }}>Quote Reconciliation</div>
+                <div style={{ fontSize: '12px', color: '#8896a8', marginTop: '2px' }}>Compare Pastel quoted values against actual execution</div>
+              </div>
+              <button onClick={() => reconcileFileRef.current?.click()}
+                style={{ padding: '10px 20px', background: '#7c3aed', color: 'white', border: 'none', borderRadius: '6px', fontSize: '13px', fontWeight: 600, cursor: 'pointer' }}>
+                Upload Pastel Export
+              </button>
+              <input ref={reconcileFileRef} type="file" accept=".csv,.xlsx,.xls" style={{ display: 'none' }}
+                onChange={(e) => {
+                  const file = e.target.files?.[0]
+                  if (!file) return
+                  setReconcileFileName(file.name)
+                  const reader = new FileReader()
+                  reader.onload = (ev) => {
+                    const text = ev.target?.result as string
+                    const lines = text.trim().split('\n')
+                    if (lines.length < 2) return
+                    const headers = lines[0].split(',').map((h: string) => h.trim().replace(/^"|"$/g, ''))
+                    const rows = lines.slice(1).map((line: string) => {
+                      const vals = line.split(',').map((v: string) => v.trim().replace(/^"|"$/g, ''))
+                      const row: any = {}
+                      headers.forEach((h: string, i: number) => { row[h] = vals[i] || '' })
+                      return row
+                    }).filter((r: any) => r.LineItem || r.Description)
+                    setReconcileData(rows)
+                  }
+                  reader.readAsText(file)
+                }} />
+            </div>
+
+            {reconcileFileName && (
+              <div style={{ padding: '10px 16px', background: '#f5f3ff', border: '1px solid #ddd6fe', borderRadius: '8px', marginBottom: '16px', fontSize: '13px', color: '#7c3aed' }}>
+                Loaded: <strong>{reconcileFileName}</strong> — {reconcileData.length} line items
+              </div>
+            )}
+
+            {reconcileData.length > 0 ? (
+              <div style={{ background: 'white', border: '1px solid #dde3ec', borderRadius: '8px', overflow: 'hidden' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px' }}>
+                  <thead><tr style={{ background: '#f8fafc' }}>
+                    <th style={{ padding: '10px 14px', textAlign: 'left', fontSize: '11px', fontWeight: 700, color: '#8896a8', textTransform: 'uppercase' }}>Line Item</th>
+                    <th style={{ padding: '10px 14px', textAlign: 'center', fontSize: '11px', fontWeight: 700, color: '#8896a8', textTransform: 'uppercase' }}>Quoted Qty</th>
+                    <th style={{ padding: '10px 14px', textAlign: 'right', fontSize: '11px', fontWeight: 700, color: '#8896a8', textTransform: 'uppercase' }}>Quoted Price</th>
+                    <th style={{ padding: '10px 14px', textAlign: 'right', fontSize: '11px', fontWeight: 700, color: '#8896a8', textTransform: 'uppercase' }}>Quoted Total</th>
+                    <th style={{ padding: '10px 14px', textAlign: 'center', fontSize: '11px', fontWeight: 700, color: '#8896a8', textTransform: 'uppercase' }}>Actual Qty</th>
+                    <th style={{ padding: '10px 14px', textAlign: 'right', fontSize: '11px', fontWeight: 700, color: '#7c3aed', textTransform: 'uppercase' }}>Variance</th>
+                  </tr></thead>
+                  <tbody>{reconcileData.map((row: any, i: number) => {
+                    const quotedQty = parseFloat(row.Quantity || row.Qty || '0')
+                    const quotedPrice = parseFloat(row.UnitPrice || row.Price || '0')
+                    const quotedTotal = quotedQty * quotedPrice
+                    // Match against actual materials logged in E4
+                    const actualMat = jobMaterials.find((m: any) => m.description?.toLowerCase().includes((row.Description || row.LineItem || '').toLowerCase().slice(0, 10)))
+                    const actualQty = actualMat ? actualMat.quantity : 0
+                    const actualTotal = actualQty * quotedPrice
+                    const variance = actualTotal - quotedTotal
+                    const varianceColor = variance > 0 ? '#dc2626' : variance < 0 ? '#16a34a' : '#64748b'
+                    return (
+                      <tr key={i} style={{ borderTop: i > 0 ? '1px solid #f1f5f9' : 'none' }}>
+                        <td style={{ padding: '12px 14px', fontWeight: 600, color: '#1d3461' }}>{row.Description || row.LineItem || '-'}</td>
+                        <td style={{ padding: '12px 14px', textAlign: 'center', color: '#64748b' }}>{quotedQty}</td>
+                        <td style={{ padding: '12px 14px', textAlign: 'right', color: '#64748b' }}>R {quotedPrice.toFixed(2)}</td>
+                        <td style={{ padding: '12px 14px', textAlign: 'right', fontWeight: 600, color: '#1d3461' }}>R {quotedTotal.toFixed(2)}</td>
+                        <td style={{ padding: '12px 14px', textAlign: 'center', fontWeight: 700, color: actualMat ? '#1d3461' : '#cbd5e1' }}>{actualMat ? actualQty : '—'}</td>
+                        <td style={{ padding: '12px 14px', textAlign: 'right', fontWeight: 700, color: varianceColor }}>
+                          {actualMat ? (variance > 0 ? '+' : '') + 'R ' + variance.toFixed(2) : '—'}
+                        </td>
+                      </tr>
+                    )
+                  })}</tbody>
+                </table>
+                <div style={{ padding: '14px', background: '#f8fafc', borderTop: '1px solid #dde3ec', display: 'flex', justifyContent: 'space-between', alignItems: 'center' }}>
+                  <span style={{ fontSize: '12px', color: '#8896a8' }}>
+                    Quoted Total: <strong style={{ color: '#1d3461' }}>R {reconcileData.reduce((s: number, r: any) => s + (parseFloat(r.Quantity || r.Qty || '0') * parseFloat(r.UnitPrice || r.Price || '0')), 0).toFixed(2)}</strong>
+                  </span>
+                  <span style={{ fontSize: '11px', color: '#8896a8' }}>Variance = Actual - Quoted (Red = overrun, Green = saving)</span>
+                </div>
+              </div>
+            ) : (
+              <div style={{ textAlign: 'center', padding: '60px 20px', color: '#8896a8', fontSize: '13px' }}>
+                <div style={{ fontSize: '36px', marginBottom: '12px' }}>📊</div>
+                <div style={{ fontWeight: 600, marginBottom: '4px' }}>No Pastel data loaded</div>
+                <div>Upload a Pastel quote export CSV to compare against actual materials logged on this job</div>
+                <div style={{ marginTop: '12px', fontSize: '11px', color: '#b0b8c8' }}>Expected columns: Description, Quantity, UnitPrice</div>
+              </div>
+            )}
+          </div>
+        )}
+
+
+        {/* WORKSHOP NOTES â€” always visible at bottom */}
+        <div style={{ marginTop: '32px', background: 'white', border: '1px solid #dde3ec', borderRadius: '8px', padding: '20px' }}>
+          <div style={{ fontSize: '12px', fontWeight: 700, color: '#1d3461', textTransform: 'uppercase', letterSpacing: '0.08em', marginBottom: '10px' }}>Workshop Notes</div>
+          <textarea
+            value={notes}
+            onChange={e => setNotes(e.target.value)}
+            rows={3}
+            style={{ width: '100%', border: '1px solid #dde3ec', borderRadius: '6px', padding: '10px 12px', fontSize: '13px', color: '#1d3461', resize: 'none', outline: 'none', fontFamily: 'sans-serif', boxSizing: 'border-box' }}
+            placeholder="Add workshop notes..." />
+          <button
+            onClick={handleSaveNotes}
+            disabled={savingNotes}
+            style={{ marginTop: '10px', background: savingNotes ? '#8ec88b' : '#4db848', color: 'white', border: 'none', borderRadius: '6px', padding: '10px 24px', fontSize: '13px', fontWeight: 700, cursor: savingNotes ? 'not-allowed' : 'pointer' }}>
+            {savingNotes ? 'Saving...' : 'Save Notes'}
+          </button>
+        </div>
+      </div>
     </div>
   )
 }

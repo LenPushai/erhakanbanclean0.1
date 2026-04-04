@@ -16,12 +16,10 @@ const ALL = [RECIPIENTS.len, RECIPIENTS.hendrik, RECIPIENTS.juanic]
 
 async function sendEmail(to: string[], subject: string, html: string) {
   try {
-    const res = await fetch('https://lvaqqqyjqtguozmdjmfn.supabase.co/functions/v1/send-email', {
+    const res = await fetch('/api/send-email', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
-        'apikey': 'eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx2YXFxcXlqcXRndW96bWRqbWZuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njg1MTk2NzYsImV4cCI6MjA4NDA5NTY3Nn0._a09PreXgLIXSrSIqCdetmfgJDVvV3kN-aNa0myax7g',
-        'Authorization': 'Bearer eyJhbGciOiJIUzI1NiIsInR5cCI6IkpXVCJ9.eyJpc3MiOiJzdXBhYmFzZSIsInJlZiI6Imx2YXFxcXlqcXRndW96bWRqbWZuIiwicm9sZSI6ImFub24iLCJpYXQiOjE3Njg1MTk2NzYsImV4cCI6MjA4NDA5NTY3Nn0._a09PreXgLIXSrSIqCdetmfgJDVvV3kN-aNa0myax7g',
       },
       body: JSON.stringify({ to, subject, html }),
     })
@@ -192,6 +190,80 @@ export async function emailChildJobSpawned(parentJob: any, childJob: any) {
         ${infoRow('Client', childJob.client_name)}
         ${infoRow('Description', childJob.description)}
         ${infoRow('Due Date', childJob.due_date)}
+      </table>
+      ${footer}
+    </div>
+  </div>`
+  await sendEmail(ALL, subject, html)
+}
+
+export async function emailJobStarted(job: any) {
+  const subject = `? Job Started ? ${job.job_number}`
+  const html = `<div style="max-width:600px;margin:0 auto">
+    <div style="${headerStyle}"><h2 style="margin:0">? Job Started</h2></div>
+    <div style="${bodyStyle}">
+      <p style="margin-bottom:16px">A job has been started on the workshop floor.</p>
+      <table style="width:100%;border-collapse:collapse;background:#f9fafb;border-radius:6px">
+        ${infoRow('Job Number', job.job_number)}
+        ${infoRow('Client', job.client_name)}
+        ${infoRow('Description', job.description)}
+        ${infoRow('Due Date', job.due_date)}
+        ${infoRow('Priority', job.priority)}
+      </table>
+      ${footer}
+    </div>
+  </div>`
+  await sendEmail(ALL, subject, html)
+}
+
+export async function emailJobQCCheck(job: any) {
+  const subject = `?? QC Check Required ? ${job.job_number}`
+  const html = `<div style="max-width:600px;margin:0 auto">
+    <div style="${headerStyle}"><h2 style="margin:0">?? QC Check Required</h2></div>
+    <div style="${bodyStyle}">
+      <p style="margin-bottom:16px">A job is ready for quality control inspection.</p>
+      <table style="width:100%;border-collapse:collapse;background:#f9fafb;border-radius:6px">
+        ${infoRow('Job Number', job.job_number)}
+        ${infoRow('Client', job.client_name)}
+        ${infoRow('Description', job.description)}
+        ${infoRow('Due Date', job.due_date)}
+      </table>
+      <p style="color:#d97706;font-weight:600;margin-top:16px">Action Required: Complete all 9 QC holding points before marking complete.</p>
+      ${footer}
+    </div>
+  </div>`
+  await sendEmail(ALL, subject, html)
+}
+
+export async function emailJobComplete(job: any) {
+  const subject = `? Job Complete ? ${job.job_number}`
+  const html = `<div style="max-width:600px;margin:0 auto">
+    <div style="${headerStyle}"><h2 style="margin:0">? Job Complete</h2></div>
+    <div style="${bodyStyle}">
+      <p style="margin-bottom:16px">A job has been completed and is ready for dispatch.</p>
+      <table style="width:100%;border-collapse:collapse;background:#f9fafb;border-radius:6px">
+        ${infoRow('Job Number', job.job_number)}
+        ${infoRow('Client', job.client_name)}
+        ${infoRow('Description', job.description)}
+        ${infoRow('Due Date', job.due_date)}
+      </table>
+      <p style="color:#16a34a;font-weight:600;margin-top:16px">Action Required: Arrange delivery and capture invoice in Pastel.</p>
+      ${footer}
+    </div>
+  </div>`
+  await sendEmail(ALL, subject, html)
+}
+
+export async function emailJobDispatched(job: any) {
+  const subject = `?? Job Dispatched ? ${job.job_number}`
+  const html = `<div style="max-width:600px;margin:0 auto">
+    <div style="${headerStyle}"><h2 style="margin:0">?? Job Dispatched</h2></div>
+    <div style="${bodyStyle}">
+      <p style="margin-bottom:16px">A job has been dispatched to the client.</p>
+      <table style="width:100%;border-collapse:collapse;background:#f9fafb;border-radius:6px">
+        ${infoRow('Job Number', job.job_number)}
+        ${infoRow('Client', job.client_name)}
+        ${infoRow('Description', job.description)}
       </table>
       ${footer}
     </div>
