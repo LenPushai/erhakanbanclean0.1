@@ -568,8 +568,24 @@ ${childrenHtml}
 
   const handleWorkshopStatusChange = async (jobId: string, newStatus: string) => {
     try {
+      // US-11: QC gate - block QUALITY_CHECK unless all 9 checkpoints signed
+      if (newStatus === 'QUALITY_CHECK') {
+        const { data: qcData } = await supabase.from('job_qc_checkpoints').select('signed_off').eq('job_id', jobId)
+        const unsigned = qcData ? qcData.filter((c: any) => !c.signed_off).length : 9
+        if (unsigned > 0) {
+          alert('QC Gate: ' + unsigned + ' of 9 checkpoints not yet signed off. Complete all QC checkpoints before moving to Quality Check.')
+          return
+        }
+      }
       const updates: any = { workshop_status: newStatus }
-      if (newStatus === 'IN_PROGRESS') updates.time_started_at = new Date().toISOString()
+      if (newStatus === 'IN_PROGRESS') {
+        updates.time_started_at = new Date().toISOString()
+        // US-07: Auto clock-in all assigned workers
+        const { data: workers } = await supabase.from('job_workers').select('id').eq('job_id', jobId).is('clocked_in_at', null)
+        if (workers && workers.length > 0) {
+          await supabase.from('job_workers').update({ clocked_in_at: new Date().toISOString() }).eq('job_id', jobId).is('clocked_in_at', null)
+        }
+      }
       await supabase.from('jobs').update(updates).eq('id', jobId)
       if (newStatus === 'DISPATCHED') {
         const job = workshopJobs.find((j:any) => j.id === jobId)
