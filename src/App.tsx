@@ -239,6 +239,8 @@ function App() {
   const handlePrintJobCard = async (job: Job) => {
     await supabase.from('jobs').update({ status: 'PRINTED', workshop_status: 'NOT_STARTED' }).eq('id', job.id)
     fetchJobs()
+    const { data: rfqRecord } = job.rfq_id ? await supabase.from('rfqs').select('*').eq('id', job.rfq_id).single() : { data: null }
+    const rfq = rfqRecord
     const { data: lineItems } = await supabase.from('job_line_items').select('*').eq('job_id', job.id).order('sort_order')
     const items = lineItems || []
     const { data: childJobsData } = job.is_parent
@@ -246,11 +248,11 @@ function App() {
       : { data: null }
     const childJobs = (childJobsData || []) as Job[]
     const childrenHtml = childJobs.length > 0
-      ? '<div style="margin-top:8px;page-break-inside:avoid"><table style="border:1px solid #000;font-size:8pt;width:100%;border-collapse:collapse">' +
-        '<tr><td colspan="3" style="border:1px solid #000;padding:3px 6px;background:#e8eaf6;font-weight:bold">CHILD JOBS</td></tr>' +
-        '<tr style="background:#f5f5f5"><th style="border:1px solid #000;padding:2px 6px;text-align:left">Job Number</th><th style="border:1px solid #000;padding:2px 6px;text-align:left">Description</th><th style="border:1px solid #000;padding:2px 6px;text-align:left">Status</th></tr>' +
-        childJobs.map((ch: any) => '<tr><td style="border:1px solid #000;padding:2px 6px;font-weight:bold">' + (ch.job_number||'') + '</td><td style="border:1px solid #000;padding:2px 6px">' + (ch.description||'') + '</td><td style="border:1px solid #000;padding:2px 6px">' + ((ch.status||'').replace(/_/g,' ')) + '</td></tr>').join('') +
-        '</table><p style="font-size:8pt;font-style:italic;margin-top:4px">Child job cards print on separate pages.</p></div>'
+      ? '<div style="margin-top:12px;page-break-inside:avoid"><div class="sec-hdr">Child Jobs</div><table class="tbl">' +
+        '' +
+        '<thead><tr><th>Job Number</th><th>Description</th><th style="width:80px">Status</th></tr></thead><tbody>' +
+        childJobs.map((ch: any) => '<tr><td style="font-weight:700;color:#1d3461">' + (ch.job_number||'') + '</td><td style="border:1px solid #000;padding:2px 6px">' + (ch.description||'') + '</td><td style="border:1px solid #000;padding:2px 6px">' + ((ch.status||'').replace(/_/g,' ')) + '</td></tr>').join('') +
+        '</tbody></table><div style="font-size:7.5pt;color:#94a3b8;font-style:italic;margin-top:4px">Child job cards print on separate pages.</div></div>'
       : ''
     const fmtDate = (d: string | null | undefined) => d ? new Date(d).toLocaleDateString('en-ZA') : ''
     const val = (v: any) => v || ''
@@ -274,247 +276,95 @@ function App() {
 <title>Job Card - ${val(job.job_number)}</title>
 <style>
 * { margin:0; padding:0; box-sizing:border-box; }
-body { font-family:Arial,sans-serif; font-size:9pt; background:white; color:#000; }
-.page { width:210mm; min-height:297mm; margin:0 auto; padding:6mm 8mm; }
+body { font-family:'Segoe UI',Arial,sans-serif; font-size:9pt; background:white; color:#1a1a2e; }
+.page { width:210mm; min-height:297mm; margin:0 auto; padding:8mm 10mm; position:relative; }
+.page2 { page-break-before:always; }
 table { border-collapse:collapse; width:100%; }
-td, th { font-size:9pt; }
-.print-bar { background:#1e3a5f; color:white; padding:8px 16px; text-align:center; position:sticky; top:0; z-index:100; }
-.print-btn { background:#4a9a4a; color:white; border:none; padding:6px 20px; font-size:10pt; font-weight:bold; border-radius:4px; cursor:pointer; margin-right:8px; }
-.section-label { font-weight:bold; font-size:8pt; text-decoration:underline; margin:4px 0 2px; }
-.field-line { border-bottom:1px solid #000; min-height:14px; display:inline-block; }
-@media print {
-  .print-bar { display:none }
-  @page { size:A4; margin:8mm }
-  .page { margin:0; padding:6mm 8mm; width:210mm; border: 1px solid #000; }
-  table { page-break-inside: auto; border-collapse: collapse; }
-  tr { page-break-inside: avoid; page-break-after: auto; }
-  thead { display: table-header-group; }
-  tfoot { display: table-footer-group; }
-  .no-break { page-break-inside: avoid; }
-}
+.hdr { background:linear-gradient(135deg,#1d3461 0%,#243d6b 100%); color:white; padding:12px 16px; border-radius:6px; display:flex; align-items:center; justify-content:space-between; margin-bottom:8px; }
+.hdr-logo { font-size:18pt; font-weight:900; letter-spacing:1px; }
+.hdr-logo span { color:#4db848; }
+.hdr-dept { font-size:9pt; opacity:0.7; text-align:right; }
+.hdr-dept strong { opacity:1; font-size:10pt; }
+.job-hero { background:#f0fdf4; border:2px solid #4db848; border-radius:6px; padding:10px 16px; margin-bottom:8px; display:flex; align-items:center; justify-content:space-between; }
+.job-hero .jn { font-size:20pt; font-weight:900; color:#1d3461; letter-spacing:1px; }
+.job-hero .client { font-size:11pt; font-weight:600; color:#1d3461; text-align:right; }
+.job-hero .due { font-size:9pt; color:#dc2626; font-weight:700; text-align:right; margin-top:2px; }
+.info-grid { display:grid; grid-template-columns:1fr 1fr 1fr 1fr; gap:0; border:1px solid #cbd5e1; border-radius:4px; margin-bottom:8px; overflow:hidden; }
+.info-cell { padding:6px 10px; border-right:1px solid #cbd5e1; border-bottom:1px solid #cbd5e1; }
+.info-cell:last-child { border-right:none; }
+.info-label { font-size:7pt; font-weight:700; color:#64748b; text-transform:uppercase; letter-spacing:0.5px; }
+.info-val { font-size:9pt; font-weight:600; color:#1d3461; margin-top:1px; }
+.desc-box { background:#fffbeb; border:1px solid #fbbf24; border-left:4px solid #f59e0b; border-radius:0 4px 4px 0; padding:8px 12px; margin-bottom:8px; }
+.desc-box .lbl { font-size:7pt; font-weight:700; color:#92400e; text-transform:uppercase; letter-spacing:0.5px; }
+.desc-box .val { font-size:10pt; font-weight:600; color:#1a1a2e; margin-top:2px; }
+.sec-hdr { font-size:8pt; font-weight:800; color:#1d3461; text-transform:uppercase; letter-spacing:1px; margin:8px 0 4px; padding-bottom:2px; border-bottom:2px solid #4db848; }
+.actions-grid { display:grid; grid-template-columns:repeat(5,1fr); gap:0; border:1px solid #cbd5e1; border-radius:4px; overflow:hidden; margin-bottom:8px; }
+.action-cell { padding:5px 8px; border-right:1px solid #cbd5e1; border-bottom:1px solid #cbd5e1; font-size:8pt; font-weight:600; }
+.action-cell.checked { background:#f0fdf4; color:#166534; }
+.action-cell.unchecked { color:#94a3b8; }
+.chk { color:#4db848; font-weight:900; margin-right:4px; }
+.tbl { border:1px solid #cbd5e1; border-radius:4px; overflow:hidden; margin-bottom:8px; }
+.tbl th { background:#f1f5f9; padding:5px 8px; font-size:7.5pt; font-weight:700; color:#64748b; text-transform:uppercase; text-align:left; border-bottom:1px solid #cbd5e1; }
+.tbl td { padding:5px 8px; font-size:9pt; border-bottom:1px solid #e2e8f0; }
+.tbl tr:last-child td { border-bottom:none; }
+.doc-grid { display:grid; grid-template-columns:1fr 1fr 1fr; gap:0; border:1px solid #cbd5e1; border-radius:4px; overflow:hidden; margin-bottom:8px; }
+.doc-cell { padding:5px 10px; border-right:1px solid #cbd5e1; border-bottom:1px solid #cbd5e1; font-size:8pt; }
+.sig-row { display:flex; gap:24px; margin:6px 0; }
+.sig-line { flex:1; border-bottom:1px solid #1d3461; padding-bottom:4px; font-size:8pt; color:#64748b; min-height:24px; }
+.plan-grid { display:grid; grid-template-columns:1fr 1fr 1fr 1fr; gap:0; border:1px solid #cbd5e1; border-radius:4px; overflow:hidden; margin-bottom:8px; }
+.plan-cell { padding:6px 10px; border-right:1px solid #cbd5e1; min-height:40px; }
+.plan-cell .lbl { font-size:7pt; font-weight:700; color:#64748b; text-transform:uppercase; }
+.plan-cell .val { font-size:9pt; font-weight:600; color:#1d3461; margin-top:2px; }
+.notice { background:#fef3c7; border:1px solid #fbbf24; border-radius:4px; padding:6px 10px; font-size:8pt; font-style:italic; margin-bottom:8px; }
+.ts th, .ts td { border:1px solid #cbd5e1; padding:3px 4px; text-align:center; font-size:7.5pt; }
+.ts th { background:#1d3461; color:white; font-weight:700; }
+.ts td { min-height:38px; height:38px; }
+.footer { position:absolute; bottom:8mm; left:10mm; right:10mm; display:flex; justify-content:space-between; font-size:7pt; color:#94a3b8; border-top:1px solid #e2e8f0; padding-top:4px; }
+.print-bar { background:#1d3461; color:white; padding:10px 20px; text-align:center; position:sticky; top:0; z-index:100; }
+.print-btn { background:#4db848; color:white; border:none; padding:8px 24px; font-size:11pt; font-weight:bold; border-radius:6px; cursor:pointer; margin:0 6px; }
+.close-btn { background:#dc2626; color:white; border:none; padding:8px 24px; font-size:11pt; font-weight:bold; border-radius:6px; cursor:pointer; margin:0 6px; }
+@media print { .print-bar{display:none} @page{size:A4;margin:0} .page{margin:0;padding:8mm 10mm} .footer{position:fixed;bottom:8mm} }
 </style></head><body>
 <div class="print-bar">
-  <button class="print-btn" onclick="window.print()">&#128424; Print Job Card</button>
-  <span style="font-size:9pt;opacity:.8">Ctrl+P → Save as PDF</span><button onclick="window.close()" style="background:#e53e3e;color:white;border:none;padding:6px 20px;font-size:10pt;font-weight:bold;border-radius:4px;cursor:pointer;margin-left:12px">✕ Close & Return to Board</button</span>
+  <button class="print-btn" onclick="window.print()">🖨️ Print Job Card</button>
+  <button class="print-btn" style="background:#2563eb" onclick="window.print()">💾 Save as PDF</button>
+  <button class="close-btn" onclick="window.close()">✕ Close & Return to Board</button>
 </div>
 <div class="page">
-
-<!-- HEADER -->
-<table style="margin-bottom:4px">
-  <tr>
-    <td style="width:35%">${logoHtml}</td>
-    <td style="width:20%;text-align:center;font-weight:bold;font-size:10pt;vertical-align:middle">Q C<br>Department</td>
-    <td style="width:45%;font-size:8pt;border:1px solid #000;padding:4px">
-      <strong>Client:</strong> ${val(job.client_name)}<br>
-      <strong>Date Received:</strong> ${val(job.date_received)}<br>
-      <strong>Due Date:</strong> ${val(job.due_date)}
-    </td>
-  </tr>
-</table>
-
-<!-- CONTRACT / QUOTED WORK + COMPILED BY -->
-<table style="border:1px solid #000;margin-bottom:4px">
-  <tr>
-    <td style="border:1px solid #000;padding:3px 6px;width:30%">
-      <strong>Contract Work</strong><br>
-      <span style="font-size:8pt;font-style:italic">Panels, Lances, EBT Devices, Taphole Flanges, Ladle</span>
-      <div style="margin-top:4px">${job.is_contract_work ? '&#10003; YES' : '&#9633; NO'}</div>
-    </td>
-    <td style="border:1px solid #000;padding:3px 6px;width:30%">
-      <strong>Quoted Work</strong>
-      <div style="margin-top:4px">${!job.is_contract_work ? '&#10003; YES' : '&#9633; NO'}</div>
-    </td>
-    <td style="border:1px solid #000;padding:3px 6px;width:40%">
-      <strong>Compiled by:</strong><br>
-      <table><tr>
-        <td style="padding-right:12px"><strong>CHERISE</strong> ${(job as any).compiled_by==='Cherise'?'&#10003;':''}</td>
-        <td><strong>JUANIC</strong> ${(job as any).compiled_by==='Juanic'?'&#10003;':''}</td>
-      </tr></table>
-    </td>
-  </tr>
-</table>
-
-<!-- JOB REFERENCE ROW -->
-<table style="border:1px solid #000;margin-bottom:4px">
-  <tr>
-    <td style="border:1px solid #000;padding:3px 6px;width:40%">
-      <strong><u>Employee:</u></strong> <span style="border-bottom:1px solid #000;display:inline-block;min-width:120px">${val(job.assigned_employee_name)}</span>
-    </td>
-    <td colspan="4" style="padding:0">
-      <table style="width:100%"><tr>
-        <td style="border:1px solid #000;padding:3px 6px"><strong>Job Nr:</strong><br><span style="font-size:10pt;font-weight:900">${val(job.job_number)}</span></td>
-        <td style="border:1px solid #000;padding:3px 6px"><strong>JOB CARD NO:</strong><br><span style="font-size:10pt;font-weight:900">${val(job.job_number)}</span></td>
-        <td style="border:1px solid #000;padding:3px 6px"><strong>Client RFQ:</strong><br>${val(job.client_rfq_number || job.rfq_no)}</td>
-        <td style="border:1px solid #000;padding:3px 6px"><strong>SITE REQ:</strong><br>${val(job.site_req)}</td>
-      </tr>
-      <tr>
-        <td colspan="2" style="border:1px solid #000;padding:3px 6px"><strong>ORDER / PO NUMBER:</strong><br><span style="font-size:10pt;font-weight:900">${val(job.po_number)}</span></td>
-        <td colspan="2" style="border:1px solid #000;padding:3px 6px"><strong>DESCRIPTION:</strong><br>${val(job.description)}</td>
-      </tr></table>
-    </td>
-  </tr>
-</table>
-
-<!-- ACTIONS REQUIRED -->
-<div class="section-label">ACTIONS REQUIRED</div>
-<table style="border:1px solid #000;margin-bottom:4px">
-  <tr>
-    <td style="border:1px solid #000;padding:3px 8px;width:20%">${job.action_manufacture?'&#10003;':''} <strong>MANUFACTURE</strong></td>
-    <td style="border:1px solid #000;padding:3px 8px;width:20%">${job.action_service?'&#10003;':''} <strong>SERVICE</strong></td>
-    <td style="border:1px solid #000;padding:3px 8px;width:20%">${job.action_repair?'&#10003;':''} <strong>REPAIR</strong></td>
-    <td style="border:1px solid #000;padding:3px 8px;width:20%">${job.action_modify?'&#10003;':''} <strong>MODIFY</strong></td>
-    <td style="border:1px solid #000;padding:3px 8px;width:20%">${job.is_emergency?'&#9888; EMERGENCY':''}</td>
-  </tr>
-  <tr>
-    <td style="border:1px solid #000;padding:3px 8px">${job.action_sandblast?'&#10003;':''} <strong>SANDBLAST</strong></td>
-    <td style="border:1px solid #000;padding:3px 8px">${job.action_paint?'&#10003;':''} <strong>PAINT</strong></td>
-    <td style="border:1px solid #000;padding:3px 8px">${job.action_installation?'&#10003;':''} <strong>INSTALLATION</strong></td>
-    <td style="border:1px solid #000;padding:3px 8px"></td>
-    <td style="border:1px solid #000;padding:3px 8px"></td>
-  </tr>
-  <tr>
-    <td style="border:1px solid #000;padding:3px 8px">${job.action_prepare_material?'&#10003;':''} <strong>PREPARE MATERIAL</strong></td>
-    <td style="border:1px solid #000;padding:3px 8px">${job.action_other?'&#10003;':''} <strong>OTHER</strong></td>
-    <td style="border:1px solid #000;padding:3px 8px">${job.action_cut?'&#10003;':''} <strong>CUT</strong></td>
-    <td style="border:1px solid #000;padding:3px 8px"></td>
-    <td style="border:1px solid #000;padding:3px 8px"></td>
-  </tr>
-</table>
-
-<!-- JOB DESCRIPTION + QTY -->
-<table style="border:1px solid #000;margin-bottom:4px">
-  <tr>
-    <th style="border:1px solid #000;padding:3px 6px;text-align:left;background:#f5f5f5">JOB DESCRIPTION</th>
-    <th style="border:1px solid #000;padding:3px 6px;width:60px;text-align:center;background:#f5f5f5"><u>QTY</u></th>
-  </tr>
-  ${lineItemRows}
-  <tr>
-    <td style="border:1px solid #000;padding:3px 6px"><strong>DRAWING:</strong> ${val(job.drawing_number)}</td>
-    <td style="border:1px solid #000;padding:3px 6px"></td>
-  </tr>
-</table>
-
-<!-- ATTACHED DOCUMENTS -->
-<table style="border:1px solid #000;margin-bottom:4px">
-  <tr>
-    <td colspan="4" style="border:1px solid #000;padding:3px 6px"><strong><u>ATTACHED DOCUMENTS</u></strong></td>
-  </tr>
-  <tr>
-    <td style="border:1px solid #000;padding:3px 8px;width:25%">&#9633; SERVICE SCHEDULE / QCP</td>
-    <td style="border:1px solid #000;padding:3px 8px;width:25%">&#9633; INFO FOR QUOTE</td>
-    <td style="border:1px solid #000;padding:3px 8px;width:25%">&#9633; DRAWING ATTACHED / SKETCHES</td>
-    <td style="border:1px solid #000;padding:3px 8px;width:25%">&#9633; QCP</td>
-  </tr>
-  <tr>
-    <td style="border:1px solid #000;padding:3px 8px">&#9633; INTERNAL ORDER</td>
-    <td style="border:1px solid #000;padding:3px 8px">&#9633; LIST AS QUOTED</td>
-    <td style="border:1px solid #000;padding:3px 8px"></td>
-    <td style="border:1px solid #000;padding:3px 8px"></td>
-  </tr>
-</table>
-
-<!-- ARTISAN NOTICE -->
-<div style="border:1px solid #000;padding:4px 6px;margin-bottom:4px;font-style:italic;font-size:8.5pt">
-  <strong><u>ARTISAN:</u></strong> Make sure you signed the Internal Transmittal to acknowledge the receipt of your job card and the attached documents mentioned above!
+  <div class="hdr"><div class="hdr-logo">ERHA<span>.</span> FABRICATION</div><div class="hdr-dept"><strong>Quality Control Department</strong><br>Job Card / Work Order</div></div>
+  <div class="job-hero"><div><div class="jn">${val(job.job_number)}</div><div style="font-size:8pt;color:#64748b;margin-top:2px">Entry: ${val(job.entry_type)} | Priority: <strong style="color:${job.priority==='URGENT'?'#dc2626':job.priority==='HIGH'?'#ea580c':'#1d3461'}">${val(job.priority)}</strong></div></div><div><div class="client">${val(job.client_name)}</div><div class="due">${job.due_date ? 'DUE: ' + fmtDate(job.due_date) : ''}</div><div style="font-size:8pt;color:#64748b;margin-top:2px">Received: ${fmtDate(job.date_received)}</div></div></div>
+  <div class="info-grid"><div class="info-cell"><div class="info-label">Job Number</div><div class="info-val">${val(job.job_number)}</div></div><div class="info-cell"><div class="info-label">Client RFQ No</div><div class="info-val">${val(job.client_rfq_number)}</div></div><div class="info-cell"><div class="info-label">Order / PO Number</div><div class="info-val">${val(job.po_number || (job as any).order_number)}</div></div><div class="info-cell"><div class="info-label">Site Req</div><div class="info-val">${val(job.site_req)}</div></div></div>
+  <div class="info-grid" style="grid-template-columns:1fr 1fr 1fr"><div class="info-cell"><div class="info-label">RFQ Reference</div><div class="info-val">${val(job.rfq_no)}</div></div><div class="info-cell"><div class="info-label">Drawing Number</div><div class="info-val">${val(job.drawing_number)}</div></div><div class="info-cell"><div class="info-label">Compiled By</div><div class="info-val">${val((job as any).compiled_by)}</div></div></div>
+  <div class="desc-box"><div class="lbl">Job Description</div><div class="val">${val(job.description)}</div></div>
+  <div class="info-grid" style="grid-template-columns:1fr 1fr"><div class="info-cell"><div class="info-label">Work Type</div><div class="info-val">${job.is_contract_work ? '☑ Contract Work' : '☑ Quoted Work'}</div></div><div class="info-cell"><div class="info-label">Emergency</div><div class="info-val">${job.is_emergency ? '⚠️ YES — EMERGENCY' : 'No'}</div></div></div>
+  <div class="sec-hdr">Actions Required</div>
+  <div class="actions-grid"><div class="action-cell ${job.action_manufacture?'checked':'unchecked'}">${job.action_manufacture?'<span class=chk>✓</span>':'☐'} Manufacture</div><div class="action-cell ${job.action_service?'checked':'unchecked'}">${job.action_service?'<span class=chk>✓</span>':'☐'} Service</div><div class="action-cell ${job.action_repair?'checked':'unchecked'}">${job.action_repair?'<span class=chk>✓</span>':'☐'} Repair</div><div class="action-cell ${job.action_modify?'checked':'unchecked'}">${job.action_modify?'<span class=chk>✓</span>':'☐'} Modify</div><div class="action-cell ${job.action_cut?'checked':'unchecked'}">${job.action_cut?'<span class=chk>✓</span>':'☐'} Cut</div><div class="action-cell ${job.action_sandblast?'checked':'unchecked'}">${job.action_sandblast?'<span class=chk>✓</span>':'☐'} Sandblast</div><div class="action-cell ${job.action_paint?'checked':'unchecked'}">${job.action_paint?'<span class=chk>✓</span>':'☐'} Paint</div><div class="action-cell ${job.action_installation?'checked':'unchecked'}">${job.action_installation?'<span class=chk>✓</span>':'☐'} Installation</div><div class="action-cell ${job.action_prepare_material?'checked':'unchecked'}">${job.action_prepare_material?'<span class=chk>✓</span>':'☐'} Prep Material</div><div class="action-cell ${job.action_other?'checked':'unchecked'}">${job.action_other?'<span class=chk>✓</span>':'☐'} Other</div></div>
+  <div class="sec-hdr">Line Items / Bill of Materials</div>
+  <table class="tbl"><thead><tr><th style="width:70%">Description</th><th style="width:15%;text-align:center">Qty</th><th style="width:15%;text-align:center">UOM</th></tr></thead><tbody>${items.length > 0 ? items.map((item, i) => '<tr><td>' + (item.description||'') + '</td><td style="text-align:center;font-weight:700">' + (item.quantity||1) + '</td><td style="text-align:center">' + (item.uom||'EA') + '</td></tr>').join('') : '<tr><td colspan="3" style="text-align:center;color:#94a3b8;padding:12px">No line items</td></tr>'}</tbody></table>
+  <div class="sec-hdr">Attached Documents</div>
+  <div class="doc-grid"><div class="doc-cell">☐ Service Schedule / QCP</div><div class="doc-cell">${rfq ? '☑' : '☐'} Info for Quote</div><div class="doc-cell">${job.has_drawing || job.drawing_number ? '☑' : '☐'} Drawing / Sketches</div><div class="doc-cell">☐ QCP</div><div class="doc-cell">☐ Internal Order</div><div class="doc-cell">☐ List as Quoted</div></div>
+  <div class="notice"><strong>ARTISAN:</strong> Make sure you sign the Internal Transmittal to acknowledge receipt of your job card and attached documents. <strong>ALL WELDING FOOD MUST BE DRIED PRIOR TO WELDING.</strong></div>
+  <div class="sec-hdr">Supervisor Job Planning Info</div>
+  <div class="plan-grid"><div class="plan-cell"><div class="lbl">Date Received</div><div class="val">&nbsp;</div></div><div class="plan-cell"><div class="lbl">Material Ordered</div><div class="val">&nbsp;</div></div><div class="plan-cell"><div class="lbl">Completion Date</div><div class="val" style="font-size:7pt;color:#94a3b8">(2 days before delivery)</div></div><div class="plan-cell"><div class="lbl">Due Date</div><div class="val" style="color:#dc2626;font-weight:800">${fmtDate(job.due_date)}</div></div></div>
+  <div style="font-size:7.5pt;color:#94a3b8;font-style:italic;margin-bottom:8px">(All above to be completed by the supervisor)</div>
+  <div class="sec-hdr">Signatures</div>
+  <div class="sig-row"><div class="sig-line">Supervisor Signature</div><div class="sig-line">Date</div></div>
+  <div class="sig-row"><div class="sig-line">Employee Signature</div><div class="sig-line">Date</div></div>
+  ${childrenHtml}
+  <div class="footer"><span>ERHA Fabrication & Construction — Confidential</span><span>Printed: ${new Date().toLocaleString('en-ZA')}</span><span>PUSH AI</span></div>
 </div>
-
-<!-- SUPERVISOR JOB PLANNING INFO -->
-<table style="border:1px solid #000;margin-bottom:4px">
-  <tr>
-    <td colspan="4" style="border:1px solid #000;padding:3px 6px;background:#f5f5f5"><strong><u>SUPERVISOR JOB PLANNING INFO</u></strong></td>
-  </tr>
-  <tr>
-    <th style="border:1px solid #000;padding:3px 6px;width:25%">Date Received</th>
-    <th style="border:1px solid #000;padding:3px 6px;width:25%">Material Ordered</th>
-    <th style="border:1px solid #000;padding:3px 6px;width:25%">Completion Date<br><span style="font-size:7.5pt;font-weight:normal">(At least 2 days before delivery)</span></th>
-    <th style="border:1px solid #000;padding:3px 6px;width:25%">DUE DATE</th>
-  </tr>
-  <tr>
-    <td style="border:1px solid #000;padding:6px">${fmtDate(job.date_received)}</td>
-    <td style="border:1px solid #000;padding:6px"></td>
-    <td style="border:1px solid #000;padding:6px"></td>
-    <td style="border:1px solid #000;padding:6px;font-weight:bold">${fmtDate(job.due_date)}</td>
-  </tr>
-</table>
-<div style="font-size:8pt;font-style:italic;margin-bottom:6px">(All above is to be completed by the supervisor)</div>
-
-<!-- SIGNATURES -->
-<div style="margin-bottom:4px">
-  SUPERVISOR SIGNATURE: <span style="display:inline-block;border-bottom:1px solid #000;width:300px;margin-left:8px"></span>
+<div class="page page2">
+  <div class="hdr" style="margin-bottom:12px"><div class="hdr-logo">ERHA<span>.</span></div><div style="font-size:14pt;font-weight:800;color:white">${val(job.job_number)}</div><div class="hdr-dept"><strong>QC & Time Tracking</strong><br>${val(job.client_name)}</div></div>
+  <div class="sec-hdr">QC Holding Points</div>
+  <div style="font-size:7.5pt;color:#dc2626;font-weight:700;margin-bottom:4px">Take Note!! Final inspection must ALWAYS be at least 2 days before delivery date!!!! Please follow the below procedure. Under NO circumstances should work be continued to the next holding point if the previous holding point is not signed and work completed where applicable.</div>
+  <table class="tbl" style="margin-bottom:12px"><thead><tr><th style="width:30px;text-align:center">No</th><th>Description</th><th style="width:80px;text-align:center">Pass / Fail</th><th style="width:80px;text-align:center">Applicable</th><th style="width:120px;text-align:center">QC / Supervisor Signature</th></tr></thead><tbody><tr><td style="text-align:center;font-weight:800">1</td><td>Mark out all material & check prior to cutting</td><td></td><td></td><td></td></tr><tr><td style="text-align:center;font-weight:800">2</td><td>Cut all material, deburr holes, dress and remove all sharp edges</td><td></td><td></td><td></td></tr><tr><td style="text-align:center;font-weight:800">3</td><td>Assy and inspect prior to welding (Water passes if applicable)</td><td></td><td></td><td></td></tr><tr><td style="text-align:center;font-weight:800">4</td><td>Do welding complete as per WPS?</td><td></td><td></td><td></td></tr><tr><td style="text-align:center;font-weight:800">5</td><td>Do a pressure test on water cooled unit if applicable?</td><td></td><td></td><td></td></tr><tr><td style="text-align:center;font-weight:800">6</td><td>Clean all spatter and ensure NO sharp edges on workpiece</td><td></td><td></td><td></td></tr><tr><td style="text-align:center;font-weight:800">7</td><td>Do 100% dimensional & visual inspection prior to painting</td><td></td><td></td><td></td></tr><tr><td style="text-align:center;font-weight:800">8</td><td>Stamp and paint as required</td><td></td><td></td><td></td></tr><tr><td style="text-align:center;font-weight:800;background:#f0fdf4">9</td><td style="background:#f0fdf4;font-weight:700">Final inspection — Sticker, Sign, Paperwork, Ready for delivery</td><td style="background:#f0fdf4"></td><td style="background:#f0fdf4"></td><td style="background:#f0fdf4"></td></tr></tbody></table>
+  <div class="sec-hdr">Weekly Timesheet</div>
+  <table class="ts" style="margin-bottom:8px"><thead><tr><th rowspan="2" style="width:60px">Date</th><th rowspan="2" style="width:100px">Description</th><th colspan="2">Mon</th><th colspan="2">Tue</th><th colspan="2">Wed</th><th colspan="2">Thu</th><th colspan="2">Fri</th><th>Sat</th><th>Sun</th><th colspan="2">Total</th></tr><tr><th>NT</th><th>OT</th><th>NT</th><th>OT</th><th>NT</th><th>OT</th><th>NT</th><th>OT</th><th>NT</th><th>OT</th><th>OT</th><th>OT</th><th>NT</th><th>OT</th></tr></thead><tbody>${[1,2,3,4,5,6,7,8,9,10].map(() => '<tr>' + '<td></td><td></td>' + '<td></td><td></td>'.repeat(5) + '<td></td><td></td>' + '<td></td><td></td>' + '</tr>').join('')}</tbody></table>
+  <div class="sec-hdr">Workshop Notes</div>
+  <div style="border:1px solid #cbd5e1;border-radius:4px;padding:8px 10px;min-height:60px;font-size:9pt;color:#64748b">${val(job.notes) || '&nbsp;'}</div>
+  <div class="footer"><span>ERHA Fabrication & Construction — Confidential</span><span>Printed: ${new Date().toLocaleString('en-ZA')}</span><span>PUSH AI</span></div>
 </div>
-<div style="margin-bottom:8px">
-  EMPLOYEE SIGNATURE: &nbsp; <span style="display:inline-block;border-bottom:1px solid #000;width:308px;margin-left:8px"></span>
-</div>
-
-<!-- TIMESHEET (Phase 2 - blank) -->
-<table style="border:1px solid #000;margin-bottom:4px;font-size:8pt">
-  <thead>
-    <tr style="background:#f5f5f5">
-      <th style="border:1px solid #000;padding:2px 4px" rowspan="2">DATE</th>
-      <th style="border:1px solid #000;padding:2px 4px" rowspan="2">DESCRIPTION</th>
-      <th style="border:1px solid #000;padding:2px 4px;text-align:center" colspan="2">MON</th>
-      <th style="border:1px solid #000;padding:2px 4px;text-align:center" colspan="2">TUES</th>
-      <th style="border:1px solid #000;padding:2px 4px;text-align:center" colspan="2">WED</th>
-      <th style="border:1px solid #000;padding:2px 4px;text-align:center" colspan="2">THUR</th>
-      <th style="border:1px solid #000;padding:2px 4px;text-align:center" colspan="2">FRI</th>
-      <th style="border:1px solid #000;padding:2px 4px;text-align:center">SAT</th>
-      <th style="border:1px solid #000;padding:2px 4px;text-align:center">SUN</th>
-      <th style="border:1px solid #000;padding:2px 4px;text-align:center" colspan="2">TOTAL</th>
-    </tr>
-    <tr style="background:#f5f5f5">
-      <th style="border:1px solid #000;padding:1px 3px">NT</th><th style="border:1px solid #000;padding:1px 3px">OT</th>
-      <th style="border:1px solid #000;padding:1px 3px">NT</th><th style="border:1px solid #000;padding:1px 3px">OT</th>
-      <th style="border:1px solid #000;padding:1px 3px">NT</th><th style="border:1px solid #000;padding:1px 3px">OT</th>
-      <th style="border:1px solid #000;padding:1px 3px">NT</th><th style="border:1px solid #000;padding:1px 3px">OT</th>
-      <th style="border:1px solid #000;padding:1px 3px">NT</th><th style="border:1px solid #000;padding:1px 3px">OT</th>
-      <th style="border:1px solid #000;padding:1px 3px">OT</th>
-      <th style="border:1px solid #000;padding:1px 3px">OT</th>
-      <th style="border:1px solid #000;padding:1px 3px">NT</th><th style="border:1px solid #000;padding:1px 3px">OT</th>
-    </tr>
-  </thead>
-  <tbody>
-    ${Array(14).fill('<tr>' + Array(16).fill('<td style="border:1px solid #000;padding:5px 3px">&nbsp;</td>').join('') + '</tr>').join('')}
-  </tbody>
-</table>
-
-<!-- HOLDING POINTS -->
-<table style="border:1px solid #000;font-size:8pt">
-  <tr><td colspan="4" style="border:1px solid #000;padding:3px 6px;background:#ffe066"><strong>HOLDING POINTS</strong></td></tr>
-  <tr style="background:#f5f5f5">
-    <th style="border:1px solid #000;padding:2px 4px;width:5%">No</th>
-    <th style="border:1px solid #000;padding:2px 4px;width:55%">Description</th>
-    <th style="border:1px solid #000;padding:2px 4px;width:15%">Pass / Fail</th>
-    <th style="border:1px solid #000;padding:2px 4px;width:15%">Applicable / Not Applicable</th>
-    <th style="border:1px solid #000;padding:2px 4px;width:10%">QC / Supervisor Signature</th>
-  </tr>
-  <tr><td style="border:1px solid #000;padding:3px 4px">1.</td><td style="border:1px solid #000;padding:3px 4px">Mark out all material &amp; check prior to cutting.</td><td style="border:1px solid #000"></td><td style="border:1px solid #000"></td><td style="border:1px solid #000"></td></tr>
-  <tr><td style="border:1px solid #000;padding:3px 4px">2.</td><td style="border:1px solid #000;padding:3px 4px">Cut all material, deburr holes, dress and remove all sharp edges</td><td style="border:1px solid #000"></td><td style="border:1px solid #000"></td><td style="border:1px solid #000"></td></tr>
-  <tr><td style="border:1px solid #000;padding:3px 4px">3.</td><td style="border:1px solid #000;padding:3px 4px">Assy &amp; inspect prior to welding (Water passes if applicable)</td><td style="border:1px solid #000"></td><td style="border:1px solid #000"></td><td style="border:1px solid #000"></td></tr>
-  <tr><td style="border:1px solid #000;padding:3px 4px">4.</td><td style="border:1px solid #000;padding:3px 4px">Do welding complete as per WPS?</td><td style="border:1px solid #000"></td><td style="border:1px solid #000"></td><td style="border:1px solid #000"></td></tr>
-  <tr><td style="border:1px solid #000;padding:3px 4px">5.</td><td style="border:1px solid #000;padding:3px 4px">Do a pressure test on water cooled unit if applicable?</td><td style="border:1px solid #000"></td><td style="border:1px solid #000"></td><td style="border:1px solid #000"></td></tr>
-  <tr><td style="border:1px solid #000;padding:3px 4px">6.</td><td style="border:1px solid #000;padding:3px 4px">Clean all spatter and ensure NO sharp edges on workpiece</td><td style="border:1px solid #000"></td><td style="border:1px solid #000"></td><td style="border:1px solid #000"></td></tr>
-  <tr><td style="border:1px solid #000;padding:3px 4px">7.</td><td style="border:1px solid #000;padding:3px 4px">Do 100% dimensional &amp; visual inspection prior to painting</td><td style="border:1px solid #000"></td><td style="border:1px solid #000"></td><td style="border:1px solid #000"></td></tr>
-  <tr><td style="border:1px solid #000;padding:3px 4px">8.</td><td style="border:1px solid #000;padding:3px 4px">Stamp and paint as required</td><td style="border:1px solid #000"></td><td style="border:1px solid #000"></td><td style="border:1px solid #000"></td></tr>
-  <tr><td style="border:1px solid #000;padding:3px 4px">9.</td><td colspan="4" style="border:1px solid #000;padding:3px 4px">Final Inspection – Sticker – Sign – Paperwork – Ready for delivery</td></tr>
-  <tr><td colspan="5" style="border:1px solid #000;padding:4px 6px;font-size:8pt">
-    <strong>Take Note!!! Final Inspection must ALWAYS be at least 2 days before delivery date!!!!!</strong><br>
-    <strong>ALL WELDING RODS MUST BE BAKED PRIOR TO WELDING!!!!!!</strong>
-  </td></tr>
-  <tr><td colspan="5" style="border:1px solid #000;padding:4px 6px;font-size:8pt;background:#ffe066">
-    <strong>Please follow the above procedure.</strong> See "holding points" —
-    Under no circumstances should work be continued to the next holding point if the previous holding point is not signed and work completed where applicable.
-  </td></tr>
-</table>
-
-${childrenHtml}
-<div style="margin-top:6px;font-size:7pt;color:#888;display:flex;justify-content:space-between">
-  <span>ERHA Fabrication &amp; Construction — Confidential</span>
-  <span>Printed: ${new Date().toLocaleString('en-ZA')}</span>
-  <span>PUSH AI Foundation &copy; 2026</span>
-</div>
-
-</div></body></html>`
-
+</body></html>`;
     const win = window.open('', '_blank')
     if (win) { win.document.write(html); win.document.close() }
     if (childJobs.length > 0) {
@@ -1089,6 +939,11 @@ function JobDetailPanel({ job, parentJobNumber, onClose, onUpdate }: { job: Job;
         entry_type: 'CHILD',
         status: 'PENDING',
         rfq_no: job.rfq_no || null,
+        client_rfq_number: job.client_rfq_number || null,
+        po_number: job.po_number || null,
+        order_number: (job as any).order_number || null,
+        drawing_number: job.drawing_number || null,
+        compiled_by: (job as any).compiled_by || null,
         notes: 'Spawned from ' + (job.job_number || 'parent job') + ' - ' + lineItem.description,
         date_received: new Date().toISOString().split('T')[0],
       }).select().single()
@@ -2002,7 +1857,7 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, onJobCreated }: { rfq: R
         rfq_no: rfq.rfq_no || null,
         rfq_number: rfq.rfq_no || null,
         enq_number: rfq.enq_number || null,
-        client_name: rfq.clients?.company_name || null,
+        client_name: rfq.clients?.company_name || (rfq as any).client_name || 'Unknown Client',
         description: rfq.description,
         po_number: poNumber.trim(),
         order_number: poNumber.trim(),
@@ -2452,8 +2307,7 @@ function SpawnJobModal({ lineItem, parentJob, onClose, onSpawned }: {
 }) {
   const [saving, setSaving] = React.useState(false)
   const [description, setDescription] = React.useState(lineItem.description || '')
-  const [assignedEmployee, setAssignedEmployee] = React.useState(parentJob.assigned_employee_name || '')
-  const [supervisor, setSupervisor] = React.useState(parentJob.assigned_supervisor_name || '')
+  const [drawingNumber, setDrawingNumber] = React.useState(parentJob.drawing_number || '')
   const [priority, setPriority] = React.useState(parentJob.priority || 'NORMAL')
   const [dueDate, setDueDate] = React.useState(parentJob.due_date || '')
   const [notes, setNotes] = React.useState('')
@@ -2485,13 +2339,17 @@ function SpawnJobModal({ lineItem, parentJob, onClose, onSpawned }: {
         client_name:              parentJob.client_name,
         site_req:                 parentJob.site_req || null,
         rfq_no:                   parentJob.rfq_no || null,
+        client_rfq_number:        parentJob.client_rfq_number || null,
+        po_number:                parentJob.po_number || null,
+        order_number:             (parentJob as any).order_number || null,
+        compiled_by:              (parentJob as any).compiled_by || null,
         due_date:                 dueDate || null,
         priority:                 priority,
         entry_type:               'CHILD',
         status:                   'PENDING',
-        assigned_employee_name:   assignedEmployee || null,
-        assigned_supervisor_name: supervisor || null,
-        notes:                    notes || null,
+        assigned_employee_name:   null,
+        assigned_supervisor_name: null,
+        drawing_number:           drawingNumber || null,
         date_received:            new Date().toISOString().split('T')[0],
         is_contract_work:         parentJob.is_contract_work || false,
         action_manufacture:       actions.manufacture,
@@ -2532,13 +2390,9 @@ function SpawnJobModal({ lineItem, parentJob, onClose, onSpawned }: {
               className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500 resize-none"/>
           </div>
           <div className="grid grid-cols-2 gap-3">
-            <div><label className="block text-xs font-medium text-gray-600 mb-1">Assigned Employee</label>
-              <input value={assignedEmployee} onChange={e => setAssignedEmployee(e.target.value)}
-                placeholder="Employee name..." className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
-            </div>
-            <div><label className="block text-xs font-medium text-gray-600 mb-1">Supervisor</label>
-              <input value={supervisor} onChange={e => setSupervisor(e.target.value)}
-                placeholder="Supervisor name..." className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
+            <div className="col-span-2"><label className="block text-xs font-medium text-gray-600 mb-1">Drawing Number</label>
+              <input value={drawingNumber} onChange={e => setDrawingNumber(e.target.value)}
+                placeholder="DWG-001" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
             </div>
             <div><label className="block text-xs font-medium text-gray-600 mb-1">Priority</label>
               <select value={priority} onChange={e => setPriority(e.target.value)}
