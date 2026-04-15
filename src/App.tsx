@@ -1,11 +1,102 @@
 ﻿import React from 'react';
 import { useState, useEffect } from 'react'
-import { ClipboardList, Briefcase, ChevronRight, Factory, Building2, Calendar, Hash, RefreshCw, ArrowDownToLine, ArrowUpFromLine, X, Mail, FileText, Paperclip, Send, Plus, Check, Printer, Upload }  from 'lucide-react'
+import { ClipboardList, Briefcase, ChevronRight, ChevronDown, ChevronUp, Factory, Building2, Calendar, Hash, RefreshCw, ArrowDownToLine, ArrowUpFromLine, X, Mail, FileText, Paperclip, Send, Plus, Check, Printer, Upload, Package, Search, Filter, Edit3, XCircle, Trash2, Eye, CheckCircle, ShoppingCart, Download, Truck, DollarSign, AlertTriangle, Receipt }  from 'lucide-react'
 import { supabase } from './lib/supabase'
 import { emailRFQCreated, emailQuoterAssigned, emailQuoteReady, emailOrderWon, emailJobInReview, emailJobReadyToPrint, emailJobPrinted, emailChildJobSpawned, emailJobStarted, emailJobQCCheck, emailJobComplete, emailJobDispatched } from './emailService'
 import { format } from 'date-fns'
 
-type Board = 'rfq' | 'job' | 'workshop'
+type Board = 'rfq' | 'job' | 'workshop' | 'procurement'
+
+interface Supplier {
+  id: string
+  company_name: string
+  contact_person: string | null
+  phone: string | null
+  email: string | null
+  account_number: string | null
+  payment_terms: string | null
+  is_active: boolean
+  deactivation_reason: string | null
+  created_at: string
+  updated_at: string
+}
+
+interface PurchaseRequest {
+  id: string
+  pr_number: string | null
+  supplier_id: string | null
+  job_id: string | null
+  required_by_date: string | null
+  status: string
+  total_estimated_value: number | null
+  raised_by: string | null
+  approved_by: string | null
+  approved_at: string | null
+  rejection_reason: string | null
+  created_at: string
+  updated_at: string
+  suppliers?: { company_name: string } | null
+  jobs?: { job_number: string; description: string | null } | null
+}
+
+interface PRLineItem {
+  id: string
+  purchase_request_id: string
+  description: string
+  quantity: number
+  uom: string | null
+  estimated_unit_price: number | null
+  estimated_total: number | null
+}
+
+interface PurchaseOrder {
+  id: string
+  purchase_request_id: string | null
+  supplier_id: string | null
+  job_id: string | null
+  po_number: string
+  status: string
+  total_value: number | null
+  issued_by: string | null
+  issued_at: string | null
+  required_by_date: string | null
+  created_at: string
+  updated_at: string
+  suppliers?: { company_name: string; contact_person: string | null; phone: string | null; email: string | null; account_number: string | null } | null
+  jobs?: { job_number: string; description: string | null } | null
+  purchase_requests?: { pr_number: string | null } | null
+}
+
+interface POLineItem {
+  id: string
+  po_id: string
+  description: string
+  quantity_ordered: number
+  quantity_received: number
+  uom: string | null
+  unit_price: number | null
+  total_price: number | null
+}
+
+interface SupplierInvoice {
+  id: string
+  po_id: string
+  supplier_id: string
+  invoice_number: string
+  invoice_date: string
+  invoice_value: number
+  payment_due_date: string | null
+  pdf_url: string | null
+  status: string
+  match_result: any | null
+  captured_by: string | null
+  authorised_by: string | null
+  authorised_at: string | null
+  created_at: string
+  updated_at: string
+  suppliers?: { company_name: string } | null
+  purchase_orders?: { po_number: string; total_value: number | null } | null
+}
 
 interface RFQ {
   id: string
@@ -49,6 +140,7 @@ interface RFQ {
   invoice_date?: string | null
   invoice_value?: number | null
   payment_status?: string | null
+  job_number?: string | null
   clients?: { company_name: string } | null
 }
 
@@ -89,6 +181,7 @@ interface Job {
   has_service_schedule?: boolean | null
   has_internal_order?: boolean | null
   has_qcp?: boolean | null
+  has_info_for_quote?: boolean | null
   action_manufacture?: boolean | null
   action_sandblast?: boolean | null
   action_prepare_material?: boolean | null
@@ -148,8 +241,8 @@ const STATUS_LABELS: Record<string, string> = {
 
 const QUOTERS = ['Hendrik', 'Dewald', 'Estimator', 'Jaco']
 const DEPARTMENTS_CG = ['MELTSHOP', 'MILLS', 'SHARON', 'OREN', 'STORES', 'GENERAL', 'MRSTO']
-const ACTIONS_LIST = ['QUOTE', 'CUT', 'SERVICE', 'REPAIR', 'PAINT', 'MANUFACTURE', 'MODIFY', 'MACHINING', 'SANDBLAST', 'BREAKDOWN', 'SUPPLY', 'CHANGE', 'INSTALLATION', 'OTHER']
-const MEDIA_OPTIONS = ['Email', 'WhatsApp', 'Phone', 'Walk-in', 'Fax']
+const ACTIONS_LIST = ['MANUFACTURE', 'SANDBLAST', 'SERVICE', 'PAINT', 'REPAIR', 'INSTALLATION', 'CUT', 'MODIFY']
+const MEDIA_OPTIONS = ['Email', 'WhatsApp', 'Phone', 'Walk-in']
 const UOM_OPTIONS = ['EA', 'M', 'KG', 'L', 'HR', 'TRIP', 'SET', 'M2', 'M3', 'TON']
 const ITEM_TYPES = ['MATERIAL', 'LABOUR', 'TRANSPORT', 'EQUIPMENT', 'SUBCONTRACT', 'OTHER']
 const OPERATING_ENTITIES = ['ERHA FC', 'ERHA CC']
@@ -187,8 +280,7 @@ function RoleSelector({ onSelect }: any) {
               <span className="text-orange-600 font-bold text-sm">HK</span>
             </div>
             <div className="text-left">
-              <p className="font-semibold text-gray-900">Hendrik</p>
-              <p className="text-xs text-gray-400">CEO - Full access</p>
+              <p className="font-semibold text-gray-900">Hendrik — Managing Director</p>
             </div>
           </button>
           <button onClick={() => onSelect('JUANIC')}
@@ -197,12 +289,47 @@ function RoleSelector({ onSelect }: any) {
               <span className="text-blue-600 font-bold text-sm">JU</span>
             </div>
             <div className="text-left">
-              <p className="font-semibold text-gray-900">Juanic</p>
-              <p className="text-xs text-gray-400">Admin - RFQ management</p>
+              <p className="font-semibold text-gray-900">Jeanic — Operations System Manager</p>
+            </div>
+          </button>
+          <button onClick={() => onSelect('SONJA')}
+            className="w-full flex items-center gap-4 px-5 py-4 border-2 border-gray-200 rounded-xl hover:border-green-400 hover:bg-green-50 transition-all group">
+            <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center shrink-0 group-hover:bg-green-200">
+              <span className="text-green-600 font-bold text-sm">SN</span>
+            </div>
+            <div className="text-left">
+              <p className="font-semibold text-gray-900">Sonja — Procurement and Buying</p>
+            </div>
+          </button>
+          <button onClick={() => onSelect('CHARLES')}
+            className="w-full flex items-center gap-4 px-5 py-4 border-2 border-gray-200 rounded-xl hover:border-amber-400 hover:bg-amber-50 transition-all group">
+            <div className="w-10 h-10 bg-amber-100 rounded-full flex items-center justify-center shrink-0 group-hover:bg-amber-200">
+              <span className="text-amber-600 font-bold text-sm">CH</span>
+            </div>
+            <div className="text-left">
+              <p className="font-semibold text-gray-900">Charles — Store Manager</p>
+            </div>
+          </button>
+          <button onClick={() => onSelect('DEWALD')}
+            className="w-full flex items-center gap-4 px-5 py-4 border-2 border-gray-200 rounded-xl hover:border-purple-400 hover:bg-purple-50 transition-all group">
+            <div className="w-10 h-10 bg-purple-100 rounded-full flex items-center justify-center shrink-0 group-hover:bg-purple-200">
+              <span className="text-purple-600 font-bold text-sm">DW</span>
+            </div>
+            <div className="text-left">
+              <p className="font-semibold text-gray-900">Dewald — General Manager</p>
+            </div>
+          </button>
+          <button onClick={() => onSelect('JACO')}
+            className="w-full flex items-center gap-4 px-5 py-4 border-2 border-gray-200 rounded-xl hover:border-teal-400 hover:bg-teal-50 transition-all group">
+            <div className="w-10 h-10 bg-teal-100 rounded-full flex items-center justify-center shrink-0 group-hover:bg-teal-200">
+              <span className="text-teal-600 font-bold text-sm">JC</span>
+            </div>
+            <div className="text-left">
+              <p className="font-semibold text-gray-900">Jaco — Site Manager</p>
             </div>
           </button>
         </div>
-        <p className="text-center text-xs text-gray-400 pb-4">PUSH AI Foundation</p>
+        <p className="text-center text-xs text-gray-400 pb-4">PUSH AI Labs</p>
       </div>
     </div>
   )
@@ -210,7 +337,73 @@ function RoleSelector({ onSelect }: any) {
 
 // APP
 
-function App() {
+function 
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+App() {
   const [currentRole, setCurrentRole] = useState<string | null>(null)
   const [activeBoard, setActiveBoard] = useState<Board>('rfq')
   const [workshopJobs, setWorkshopJobs] = useState<Job[]>([])
@@ -221,10 +414,23 @@ function App() {
   const [selectedRFQ, setSelectedRFQ] = useState<RFQ | null>(null)
   const [showCreateModal, setShowCreateModal] = useState(false)
   const [showCreateDirectJob, setShowCreateDirectJob] = useState(false)
+  const [directJobModalKey, setDirectJobModalKey] = useState(0)
   const [showJarisonImport, setShowJarisonImport] = useState(false)
   const [selectedJob, setSelectedJob] = useState<Job | null>(null)
   const [jobs, setJobs] = useState<Job[]>([])
   const [jobsLoading, setJobsLoading] = useState(false)
+  const [suppliers, setSuppliers] = useState<Supplier[]>([])
+  const [suppliersLoading, setSuppliersLoading] = useState(false)
+
+  const fetchSuppliers = async () => {
+    setSuppliersLoading(true)
+    try {
+      const { data, error } = await supabase.from('suppliers').select('*').order('company_name')
+      if (error) throw error
+      setSuppliers(data || [])
+    } catch (e: any) { console.error('Failed to fetch suppliers:', e.message) }
+    finally { setSuppliersLoading(false) }
+  }
 
   const fetchRFQs = async () => {
     setLoading(true); setError(null)
@@ -338,11 +544,11 @@ table { border-collapse:collapse; width:100%; }
   <div class="desc-box"><div class="lbl">Job Description</div><div class="val">${val(job.description)}</div></div>
   <div class="info-grid" style="grid-template-columns:1fr 1fr"><div class="info-cell"><div class="info-label">Work Type</div><div class="info-val">${job.is_contract_work ? '☑ Contract Work' : '☑ Quoted Work'}</div></div><div class="info-cell"><div class="info-label">Emergency</div><div class="info-val">${job.is_emergency ? '⚠️ YES — EMERGENCY' : 'No'}</div></div></div>
   <div class="sec-hdr">Actions Required</div>
-  <div class="actions-grid"><div class="action-cell ${job.action_manufacture?'checked':'unchecked'}">${job.action_manufacture?'<span class=chk>✓</span>':'☐'} Manufacture</div><div class="action-cell ${job.action_service?'checked':'unchecked'}">${job.action_service?'<span class=chk>✓</span>':'☐'} Service</div><div class="action-cell ${job.action_repair?'checked':'unchecked'}">${job.action_repair?'<span class=chk>✓</span>':'☐'} Repair</div><div class="action-cell ${job.action_modify?'checked':'unchecked'}">${job.action_modify?'<span class=chk>✓</span>':'☐'} Modify</div><div class="action-cell ${job.action_cut?'checked':'unchecked'}">${job.action_cut?'<span class=chk>✓</span>':'☐'} Cut</div><div class="action-cell ${job.action_sandblast?'checked':'unchecked'}">${job.action_sandblast?'<span class=chk>✓</span>':'☐'} Sandblast</div><div class="action-cell ${job.action_paint?'checked':'unchecked'}">${job.action_paint?'<span class=chk>✓</span>':'☐'} Paint</div><div class="action-cell ${job.action_installation?'checked':'unchecked'}">${job.action_installation?'<span class=chk>✓</span>':'☐'} Installation</div><div class="action-cell ${job.action_prepare_material?'checked':'unchecked'}">${job.action_prepare_material?'<span class=chk>✓</span>':'☐'} Prep Material</div><div class="action-cell ${job.action_other?'checked':'unchecked'}">${job.action_other?'<span class=chk>✓</span>':'☐'} Other</div></div>
+  <div class="actions-grid"><div class="action-cell ${job.action_manufacture?'checked':'unchecked'}">${job.action_manufacture?'<span class=chk>✓</span>':'☐'} Manufacture</div><div class="action-cell ${job.action_service?'checked':'unchecked'}">${job.action_service?'<span class=chk>✓</span>':'☐'} Service</div><div class="action-cell ${job.action_repair?'checked':'unchecked'}">${job.action_repair?'<span class=chk>✓</span>':'☐'} Repair</div><div class="action-cell ${job.action_modify?'checked':'unchecked'}">${job.action_modify?'<span class=chk>✓</span>':'☐'} Modify</div><div class="action-cell ${job.action_cut?'checked':'unchecked'}">${job.action_cut?'<span class=chk>✓</span>':'☐'} Cut</div><div class="action-cell ${job.action_sandblast?'checked':'unchecked'}">${job.action_sandblast?'<span class=chk>✓</span>':'☐'} Sandblast</div><div class="action-cell ${job.action_paint?'checked':'unchecked'}">${job.action_paint?'<span class=chk>✓</span>':'☐'} Paint</div><div class="action-cell ${job.action_installation?'checked':'unchecked'}">${job.action_installation?'<span class=chk>✓</span>':'☐'} Installation</div></div>
   <div class="sec-hdr">Line Items / Bill of Materials</div>
   <table class="tbl"><thead><tr><th style="width:70%">Description</th><th style="width:15%;text-align:center">Qty</th><th style="width:15%;text-align:center">UOM</th></tr></thead><tbody>${items.length > 0 ? items.map((item, i) => '<tr><td>' + (item.description||'') + '</td><td style="text-align:center;font-weight:700">' + (item.quantity||1) + '</td><td style="text-align:center">' + (item.uom||'EA') + '</td></tr>').join('') : '<tr><td colspan="3" style="text-align:center;color:#94a3b8;padding:12px">No line items</td></tr>'}</tbody></table>
   <div class="sec-hdr">Attached Documents</div>
-  <div class="doc-grid"><div class="doc-cell">☐ Service Schedule / QCP</div><div class="doc-cell">${rfq ? '☑' : '☐'} Info for Quote</div><div class="doc-cell">${job.has_drawing || job.drawing_number ? '☑' : '☐'} Drawing / Sketches</div><div class="doc-cell">☐ QCP</div><div class="doc-cell">☐ Internal Order</div><div class="doc-cell">☐ List as Quoted</div></div>
+  <div class="doc-grid"><div class="doc-cell">${job.has_service_schedule ? '☑' : '☐'} Service Schedule / QCP</div><div class="doc-cell">${job.has_info_for_quote ? '☑' : '☐'} Info for Quote</div><div class="doc-cell">${job.has_drawing || job.drawing_number ? '☑' : '☐'} Drawing / Sketches</div><div class="doc-cell">${job.has_qcp ? '☑' : '☐'} QCP</div><div class="doc-cell">${job.has_internal_order ? '☑' : '☐'} Internal Order</div><div class="doc-cell">☐ List as Quoted</div></div>
   <div class="notice"><strong>ARTISAN:</strong> Make sure you sign the Internal Transmittal to acknowledge receipt of your job card and attached documents. <strong>ALL WELDING FOOD MUST BE DRIED PRIOR TO WELDING.</strong></div>
   <div class="sec-hdr">Supervisor Job Planning Info</div>
   <div class="plan-grid"><div class="plan-cell"><div class="lbl">Date Received</div><div class="val">&nbsp;</div></div><div class="plan-cell"><div class="lbl">Material Ordered</div><div class="val">&nbsp;</div></div><div class="plan-cell"><div class="lbl">Completion Date</div><div class="val" style="font-size:7pt;color:#94a3b8">(2 days before delivery)</div></div><div class="plan-cell"><div class="lbl">Due Date</div><div class="val" style="color:#dc2626;font-weight:800">${fmtDate(job.due_date)}</div></div></div>
@@ -398,7 +604,7 @@ table { border-collapse:collapse; width:100%; }
   const fetchWorkshopJobs = async () => {
     setWorkshopLoading(true)
     try {
-      const { data } = await supabase.from('jobs').select('*').or('workshop_status.not.is.null,is_child_job.eq.true').order('created_at',{ascending:false})
+      const { data } = await supabase.from('jobs').select('*').order('created_at',{ascending:false})
       setWorkshopJobs(data || [])
     } finally { setWorkshopLoading(false) }
   }
@@ -476,9 +682,15 @@ table { border-collapse:collapse; width:100%; }
           <NavItem icon={<ClipboardList size={18} />} label="RFQ Board" description="RFQ pipeline" active={activeBoard === 'rfq'} accentColor="text-blue-400" onClick={() => setActiveBoard('rfq')} />
           <NavItem icon={<Briefcase size={18} />} label="Job Board" description="Project tracking" active={activeBoard === 'job'} accentColor="text-green-400" onClick={() => setActiveBoard('job')} />
           <NavItem icon={<Factory size={18} />} label="Workshop Board" description="Floor execution" active={activeBoard === 'workshop'} accentColor="text-orange-400" onClick={() => { setActiveBoard('workshop'); fetchWorkshopJobs() }} />
+          <p className="text-gray-500 text-xs font-semibold uppercase tracking-widest px-3 mb-3 mt-6">Management</p>
+          <NavItem icon={<Package size={18} />} label="Procurement" description="Suppliers & purchasing" active={activeBoard === 'procurement'} accentColor="text-green-400" onClick={() => { setActiveBoard('procurement'); fetchSuppliers() }} />
+          <button className="w-full flex items-center gap-3 px-3 py-3 rounded-lg text-left text-gray-500 cursor-not-allowed opacity-50">
+            <Package size={18} />
+            <div className="flex-1 min-w-0"><p className="text-sm font-semibold leading-tight">Internal Store</p><p className="text-xs text-gray-500 leading-tight mt-0.5">Stock management</p></div>
+          </button>
         </nav>
         <div className="px-6 py-4 border-t border-gray-700">
-          <p className="text-gray-500 text-xs">PUSH AI Foundation</p>
+          <p className="text-gray-500 text-xs">PUSH AI Labs</p>
           <p className="text-gray-600 text-xs">v0.1.0 - dev</p>
         </div>
       </aside>
@@ -486,13 +698,15 @@ table { border-collapse:collapse; width:100%; }
       <main className="flex-1 flex flex-col overflow-hidden">
         <header className="bg-white border-b border-gray-200 px-8 py-4 flex items-center justify-between shrink-0">
           <div>
-            <h1 className="text-xl font-bold text-gray-900">{activeBoard === 'rfq' ? 'RFQ Board' : activeBoard === 'job' ? 'Job Board' : 'Workshop Board'}</h1>
-            <p className="text-sm text-gray-500 mt-0.5">{activeBoard === 'rfq' ? 'RFQ to job creation - sales pipeline' : activeBoard === 'job' ? 'Job created to paid - project tracking' : 'Workshop floor execution tracking'}</p>
+            <h1 className="text-xl font-bold text-gray-900">{activeBoard === 'rfq' ? 'RFQ Board' : activeBoard === 'job' ? 'Job Board' : activeBoard === 'procurement' ? 'Procurement' : 'Workshop Board'}</h1>
+            <p className="text-sm text-gray-500 mt-0.5">{activeBoard === 'rfq' ? 'RFQ to job creation - sales pipeline' : activeBoard === 'job' ? 'Job created to paid - project tracking' : activeBoard === 'procurement' ? 'Supplier register & purchasing' : 'Workshop floor execution tracking'}</p>
           </div>
           <div className="flex items-center gap-3">
-            <button onClick={() => { fetchRFQs(); fetchJobs() }} className="flex items-center gap-2 px-3 py-1.5 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors">
-              <RefreshCw size={14} />Refresh
-            </button>
+            {activeBoard !== 'procurement' && (
+              <button onClick={() => { fetchRFQs(); fetchJobs() }} className="flex items-center gap-2 px-3 py-1.5 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors">
+                <RefreshCw size={14} />Refresh
+              </button>
+            )}
             {activeBoard === 'rfq' && (
               <button onClick={() => setShowCreateModal(true)} className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg transition-colors">
                 <Plus size={15} />New RFQ
@@ -502,12 +716,12 @@ table { border-collapse:collapse; width:100%; }
               <button onClick={() => setShowJarisonImport(true)} className="flex items-center gap-2 px-3 py-2 bg-amber-500 hover:bg-amber-600 text-white text-sm font-semibold rounded-lg transition-colors">
                 <Upload size={15} />Import Jarison
               </button>
-              <button onClick={() => setShowCreateDirectJob(true)} className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-lg transition-colors">
+              <button onClick={() => { setDirectJobModalKey(k => k + 1); setShowCreateDirectJob(true) }} className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-lg transition-colors">
                 <Plus size={15} />New Job
               </button>
             </>)}
-            <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold ${activeBoard === 'rfq' ? 'bg-blue-100 text-blue-700' : activeBoard === 'job' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>
-              {activeBoard === 'rfq' ? 'RFQ Board' : activeBoard === 'job' ? 'Job Board' : 'Workshop Board'}
+            <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold ${activeBoard === 'rfq' ? 'bg-blue-100 text-blue-700' : activeBoard === 'job' ? 'bg-green-100 text-green-700' : activeBoard === 'procurement' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>
+              {activeBoard === 'rfq' ? 'RFQ Board' : activeBoard === 'job' ? 'Job Board' : activeBoard === 'procurement' ? 'Procurement' : 'Workshop Board'}
             </span>
           </div>
         </header>
@@ -518,14 +732,16 @@ table { border-collapse:collapse; width:100%; }
               ? <RFQBoard rfqs={rfqs} loading={loading} error={error} onRefresh={fetchRFQs} onCardClick={setSelectedRFQ} selectedId={selectedRFQ?.id} />
               : activeBoard === 'job'
               ? <JobBoard jobs={jobs} loading={jobsLoading} onStatusChange={handleJobStatusChange} onPrintCard={handlePrintJobCard} onCardClick={setSelectedJob} selectedId={selectedJob?.id} />
+              : activeBoard === 'procurement'
+              ? <SupplierManagement suppliers={suppliers} loading={suppliersLoading} onRefresh={fetchSuppliers} currentRole={currentRole} />
               : <WorkshopBoard jobs={workshopJobs} loading={workshopLoading} onRefresh={fetchWorkshopJobs} onStatusChange={handleWorkshopStatusChange} />}
           </div>
-          {selectedRFQ && <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4"><RFQDetailPanel rfq={selectedRFQ} onClose={() => setSelectedRFQ(null)} onUpdate={handleRFQUpdate} role={currentRole} onJobCreated={fetchJobs} /></div>}
+          {selectedRFQ && <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4"><RFQDetailPanel rfq={selectedRFQ} onClose={() => setSelectedRFQ(null)} onUpdate={handleRFQUpdate} role={currentRole} onJobCreated={fetchJobs} onNavigateToJob={(jobNumber) => { setSelectedRFQ(null); setActiveBoard('job'); const job = jobs.find(j => j.job_number === jobNumber); if (job) setSelectedJob(job); }} /></div>}
         </div>
       </main>
 
       {showCreateModal && <CreateRFQModal onClose={() => setShowCreateModal(false)} onCreated={handleRFQCreated} />}
-      {showCreateDirectJob && <CreateDirectJobModal onClose={() => setShowCreateDirectJob(false)} onCreated={fetchJobs} />}
+      {showCreateDirectJob && <CreateDirectJobModal key={directJobModalKey} onClose={() => setShowCreateDirectJob(false)} onCreated={fetchJobs} />}
       {showJarisonImport && <JarisonImportModal onClose={() => setShowJarisonImport(false)} onImported={fetchJobs} />}
       {selectedJob && <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4"><JobDetailPanel job={selectedJob} parentJobNumber={jobs.find(j=>j.id===selectedJob?.parent_job_id)?.job_number} onClose={() => setSelectedJob(null)} onUpdate={(j) => { setSelectedJob(j); fetchJobs() }} /></div>}
     </div>
@@ -569,6 +785,7 @@ function RFQCard({ rfq, hoverColor, onClick, isSelected }: { rfq: RFQ; hoverColo
       <div className="flex items-center gap-1.5 mb-2 flex-wrap">
         <span className="text-xs font-bold text-blue-600 tracking-wide">{enqNo}</span>
         {rfq.quote_number && <span className="text-xs font-bold text-purple-600 tracking-wide ml-1">| Q: {rfq.quote_number}</span>}
+        {rfq.job_number && <span className="text-xs font-bold text-green-600 tracking-wide ml-1">| {rfq.job_number}</span>}
         {direction && (
           <span className={`inline-flex items-center gap-0.5 text-xs font-semibold px-1.5 py-0.5 rounded ${direction === 'OUTGOING' ? 'bg-blue-50 text-blue-600' : 'bg-green-50 text-green-600'}`}>
             {direction === 'OUTGOING' ? <ArrowUpFromLine size={10} /> : <ArrowDownToLine size={10} />}
@@ -646,6 +863,8 @@ function JarisonImportModal({ onClose, onImported }: { onClose: () => void; onIm
           entry_type: 'IMPORT',
           status: 'PENDING',
           priority: 'MEDIUM',
+          workshop_status: 'NOT_STARTED',
+          has_info_for_quote: false,
         })
         if (error) { errors++; console.error('Import row error:', error) }
         else { success++; seq++ }
@@ -793,9 +1012,11 @@ function JobBoard({ jobs, loading, onCardClick, selectedId, onStatusChange, onPr
                       <div className="flex items-center gap-1">
                         {job.entry_type === 'DIRECT' && <span className="text-xs font-bold px-1.5 py-0.5 bg-orange-100 text-orange-600 rounded">DIRECT</span>}
                         {job.entry_type === 'IMPORT' && <span className="text-xs font-bold px-1.5 py-0.5 bg-teal-100 text-teal-600 rounded">IMPORT</span>}
+                        {job.entry_type === 'FAST_TRACK' && <span className="text-xs font-bold px-1.5 py-0.5 bg-amber-100 text-amber-600 rounded">⚡ FAST</span>}
                         {job.entry_type === 'CHILD' && <span className="text-xs font-bold px-1.5 py-0.5 bg-indigo-100 text-indigo-600 rounded">↳</span>}
                         {job.is_parent && <span className="text-xs font-bold px-1.5 py-0.5 bg-purple-100 text-purple-600 rounded">P</span>}
                         {job.is_emergency && <span className="text-xs font-bold px-1.5 py-0.5 bg-red-100 text-red-600 rounded">!</span>}
+                        {job.status !== 'PRINTED' && <span className="text-xs font-bold px-1.5 py-0.5 bg-rose-50 text-rose-500 rounded border border-rose-200">No Card</span>}
                       </div>
                     </div>
                     <p className="text-sm font-medium text-gray-800 mt-1 line-clamp-2">{job.description || job.client_name || 'No description'}</p>
@@ -834,7 +1055,10 @@ function JobBoard({ jobs, loading, onCardClick, selectedId, onStatusChange, onPr
                         <div onClick={() => onCardClick(child)} className={`bg-white rounded-lg shadow-sm border-2 p-2 cursor-pointer transition-all ${child.id === selectedId ? "border-green-400" : "border-transparent hover:border-purple-300"}`}>
                           <div className="flex items-center justify-between gap-1">
                             <p className="text-xs font-bold text-purple-600">{child.job_number}</p>
-                            <span className="text-xs font-bold px-1.5 py-0.5 bg-indigo-100 text-indigo-600 rounded">↳</span>
+                            <div className="flex items-center gap-1">
+                              {child.status !== 'PRINTED' && <span className="text-xs font-bold px-1.5 py-0.5 bg-rose-50 text-rose-500 rounded border border-rose-200">No Card</span>}
+                              <span className="text-xs font-bold px-1.5 py-0.5 bg-indigo-100 text-indigo-600 rounded">↳</span>
+                            </div>
                           </div>
                           <p className="text-xs text-gray-700 mt-0.5 line-clamp-2">{child.description || ''}</p>
                           <span className={`text-xs px-1.5 py-0.5 rounded mt-1 inline-block font-medium ${child.status==="PENDING"?"bg-gray-100 text-gray-600":child.status==="IN_REVIEW"?"bg-blue-100 text-blue-600":child.status==="READY_TO_PRINT"?"bg-amber-100 text-amber-600":"bg-green-100 text-green-600"}`}>{child.status.replace(/_/g,' ')}</span>
@@ -938,6 +1162,7 @@ function JobDetailPanel({ job, parentJobNumber, onClose, onUpdate }: { job: Job;
         priority: job.priority || 'NORMAL',
         entry_type: 'CHILD',
         status: 'PENDING',
+        workshop_status: 'NOT_STARTED',
         rfq_no: job.rfq_no || null,
         client_rfq_number: job.client_rfq_number || null,
         po_number: job.po_number || null,
@@ -946,11 +1171,41 @@ function JobDetailPanel({ job, parentJobNumber, onClose, onUpdate }: { job: Job;
         compiled_by: (job as any).compiled_by || null,
         notes: 'Spawned from ' + (job.job_number || 'parent job') + ' - ' + lineItem.description,
         date_received: new Date().toISOString().split('T')[0],
+        action_manufacture: false,
+        action_service: false,
+        action_repair: false,
+        action_sandblast: false,
+        action_paint: false,
+        action_installation: false,
+        action_cut: false,
+        action_modify: false,
+        action_other: false,
+        action_prepare_material: false,
+        has_info_for_quote: false,
       }).select().single()
       if (jobError) throw jobError
+      // Create line item for child job so it prints on the card
+      await supabase.from('job_line_items').insert({ job_id: childJob.id, description: lineItem.description, quantity: lineItem.quantity || 1, uom: lineItem.uom || 'EA', item_type: lineItem.item_type || 'MATERIAL', cost_price: 0, sell_price: 0, line_total: 0, status: 'PENDING', sort_order: 0, can_spawn_job: false })
       const { error: liError } = await supabase.from('job_line_items').update({ child_job_id: childJob.id }).eq('id', lineItem.id)
       if (liError) throw liError
       await supabase.from('jobs').update({ is_parent: true }).eq('id', job.id)
+      // LOG: child_job_spawned ML event
+      await supabase.from('import_events').insert({
+        source: 'child_job_spawned',
+        file_name: JSON.stringify({ parent_job_id: job.id, child_job_id: childJob.id, child_suffix: suffix, line_item_id: lineItem.id, spawned_at: new Date().toISOString() }),
+        rows_attempted: 1,
+        rows_imported: 1,
+        rows_failed: 0,
+        imported_at: new Date().toISOString(),
+        imported_by: 'system',
+      }).then(({ error: logErr }) => { if (logErr) console.error('Event log error:', logErr.message) })
+      // LOG: no_card_job_created ML event (child job starts without a printed card)
+      await supabase.from('import_events').insert({
+        source: 'no_card_job_created',
+        file_name: JSON.stringify({ job_id: childJob.id, job_type: 'CHILD', created_at: new Date().toISOString() }),
+        rows_attempted: 1, rows_imported: 1, rows_failed: 0,
+        imported_at: new Date().toISOString(), imported_by: 'system',
+      }).then(({ error: logErr }) => { if (logErr) console.error('Event log error:', logErr.message) })
       const { data: updatedItems } = await supabase
         .from('job_line_items')
         .select('*, child_job:jobs!child_job_id(job_number)')
@@ -994,6 +1249,7 @@ function JobDetailPanel({ job, parentJobNumber, onClose, onUpdate }: { job: Job;
             <h2 className="text-lg font-bold">{job.job_number || 'New Job'}</h2>
             {job.entry_type === 'DIRECT' && <span className="text-xs font-bold px-2 py-0.5 bg-orange-400 text-white rounded">DIRECT</span>}
             {job.entry_type === 'CHILD' && <span className="text-xs font-bold px-2 py-0.5 bg-indigo-400 text-white rounded">CHILD JOB</span>}
+            {job.entry_type === 'FAST_TRACK' && <span className="text-xs font-bold px-2 py-0.5 bg-amber-400 text-white rounded">⚡ FAST TRACK</span>}
             {job.is_parent && <span className="text-xs font-bold px-2 py-0.5 bg-purple-500 text-white rounded">PARENT</span>}
             {job.is_emergency && <span className="text-xs font-bold px-2 py-0.5 bg-red-500 text-white rounded">EMERGENCY</span>}
           </div>
@@ -1042,7 +1298,7 @@ function JobDetailPanel({ job, parentJobNumber, onClose, onUpdate }: { job: Job;
           <select value={compiledBy} onChange={e => setCompiledBy(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500">
             <option value="">Select...</option>
             <option value="Cherise">Cherise</option>
-            <option value="Juanic">Juanic</option>
+            <option value="Jeanic">Jeanic</option>
           </select>
         </div>
         <div>
@@ -1051,11 +1307,37 @@ function JobDetailPanel({ job, parentJobNumber, onClose, onUpdate }: { job: Job;
             {([
               ['action_manufacture','Manufacture'],['action_service','Service'],['action_repair','Repair'],
               ['action_sandblast','Sandblast'],['action_paint','Paint'],['action_installation','Installation'],
-              ['action_cut','Cut'],['action_modify','Modify'],['action_other','Other'],
+              ['action_cut','Cut'],['action_modify','Modify'],
             ] as [string, string][]).map(([key, label]) => (
               <label key={key} className="flex items-center gap-2 text-xs cursor-pointer">
                 <input type="checkbox" defaultChecked={!!(job as any)[key]}
                   onChange={async (e) => { await supabase.from('jobs').update({ [key]: e.target.checked }).eq('id', job.id) }}
+                  className="w-3.5 h-3.5 text-green-600 rounded" />
+                <span className="text-gray-700">{label}</span>
+              </label>
+            ))}
+          </div>
+        </div>
+        <div>
+          <label className="block text-xs font-medium text-gray-500 mb-2">Attached Documents</label>
+          <div className="grid grid-cols-3 gap-2 mb-3">
+            {([
+              ['has_info_for_quote','Info for Quote'],['has_service_schedule','Service Schedule / QCP'],['has_qcp','QCP'],
+              ['has_internal_order','Internal Order'],
+            ] as [string, string][]).map(([key, label]) => (
+              <label key={key} className="flex items-center gap-2 text-xs cursor-pointer">
+                <input type="checkbox" defaultChecked={!!(job as any)[key]}
+                  onChange={async (e) => {
+                    await supabase.from('jobs').update({ [key]: e.target.checked }).eq('id', job.id)
+                    if (key === 'has_info_for_quote' && e.target.checked) {
+                      await supabase.from('import_events').insert({
+                        source: 'info_for_quote_selected',
+                        file_name: JSON.stringify({ job_id: job.id, selected_by: 'user', selected_at: new Date().toISOString() }),
+                        rows_attempted: 1, rows_imported: 1, rows_failed: 0,
+                        imported_at: new Date().toISOString(), imported_by: 'user',
+                      }).then(({ error: logErr }) => { if (logErr) console.error('Event log error:', logErr.message) })
+                    }
+                  }}
                   className="w-3.5 h-3.5 text-green-600 rounded" />
                 <span className="text-gray-700">{label}</span>
               </label>
@@ -1112,7 +1394,6 @@ function JobDetailPanel({ job, parentJobNumber, onClose, onUpdate }: { job: Job;
               </div>
               <table className="w-full text-xs">
                 <thead className="bg-gray-50"><tr>
-                  <th className="px-2 py-1.5 text-left text-gray-500 font-medium w-24">Type</th>
                   <th className="px-2 py-1.5 text-left text-gray-500 font-medium">Description</th>
                   <th className="px-2 py-1.5 text-left text-gray-500 font-medium w-12">Qty</th>
                   <th className="px-2 py-1.5 text-left text-gray-500 font-medium w-14">UOM</th>
@@ -1121,7 +1402,6 @@ function JobDetailPanel({ job, parentJobNumber, onClose, onUpdate }: { job: Job;
                 <tbody>
                   {newLineItems.map((item,i) => (
                     <tr key={i} className="border-t border-gray-100">
-                      <td className="px-2 py-1"><select value={item.item_type} onChange={e=>updateNewLine(i,'item_type',e.target.value)} className="border border-gray-200 rounded px-1 py-0.5 text-xs w-full">{['MATERIAL','LABOUR','SUBCONTRACT','EQUIPMENT','OTHER'].map(t=><option key={t}>{t}</option>)}</select></td>
                       <td className="px-2 py-1"><input value={item.description} onChange={e=>updateNewLine(i,'description',e.target.value)} placeholder="Description..." className="border border-gray-200 rounded px-1 py-0.5 text-xs w-full"/></td>
                       <td className="px-2 py-1"><input type="number" min={1} value={item.quantity} onChange={e=>updateNewLine(i,'quantity',Number(e.target.value))} className="border border-gray-200 rounded px-1 py-0.5 text-xs w-full"/></td>
                       <td className="px-2 py-1"><select value={item.uom} onChange={e=>updateNewLine(i,'uom',e.target.value)} className="border border-gray-200 rounded px-1 py-0.5 text-xs w-full">{['EA','M','KG','L','HR','SET','M2','M3','TON'].map(u=><option key={u}>{u}</option>)}</select></td>
@@ -1192,6 +1472,7 @@ function JobDetailPanel({ job, parentJobNumber, onClose, onUpdate }: { job: Job;
 function CreateDirectJobModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
   const [saving, setSaving] = React.useState(false)
   const [clientName, setClientName] = React.useState('')
+  const [description, setDescription] = React.useState('')
   const [siteReq, setSiteReq] = React.useState('')
   const [workType, setWorkType] = React.useState<'contract' | 'quoted'>('contract')
   const [priority, setPriority] = React.useState('NORMAL')
@@ -1207,8 +1488,14 @@ function CreateDirectJobModal({ onClose, onCreated }: { onClose: () => void; onC
   const [rfqReference, setRfqReference] = React.useState('')
   const [directAttachments, setDirectAttachments] = React.useState<Array<{name:string;path:string;size:number}>>( [])
   const [uploadingDirect, setUploadingDirect] = React.useState(false)
-  const [actions, setActions] = React.useState({ manufacture: false, sandblast: false, prepare_material: false, service: false, paint: false, other: false, repair: false, installation: false, cut: false, modify: false })
+  const defaultActions = { manufacture: false, sandblast: false, prepare_material: false, service: false, paint: false, other: false, repair: false, installation: false, cut: false, modify: false }
+  const [actions, setActions] = React.useState(defaultActions)
   const [lineItems, setLineItems] = React.useState([{ description: '', quantity: 1, uom: 'Each', notes: '' }])
+
+  // Reset all form state on mount to prevent state bleed between modal opens
+  React.useEffect(() => {
+    setActions({ manufacture: false, sandblast: false, prepare_material: false, service: false, paint: false, other: false, repair: false, installation: false, cut: false, modify: false })
+  }, [])
 
   const toggleAction = (key: keyof typeof actions) => setActions(a => ({ ...a, [key]: !a[key] }))
   const addLineItem = () => setLineItems(li => [...li, { description: '', quantity: 1, uom: 'Each', notes: '' }])
@@ -1217,7 +1504,6 @@ function CreateDirectJobModal({ onClose, onCreated }: { onClose: () => void; onC
 
   const handleCreate = async () => {
     if (!clientName.trim()) { alert('Client name is required'); return }
-    if (!dueDate) { alert('Due date is required'); return }
     setSaving(true)
     try {
       const yr = new Date().getFullYear().toString().slice(-2)
@@ -1227,12 +1513,13 @@ function CreateDirectJobModal({ onClose, onCreated }: { onClose: () => void; onC
 
       const { data: job, error } = await supabase.from('jobs').insert({
         job_number: directJobNumber,
+        description: description.trim() || null,
         client_name: clientName.trim(), site_req: siteReq.trim() || null,
         is_contract_work: workType === 'contract', is_quoted_work: workType === 'quoted',
         priority, compiled_by: compiledBy.trim() || null, is_emergency: isEmergency,
         assigned_employee_name: assignedEmployee.trim() || null,
         assigned_supervisor_name: assignedSupervisor.trim() || null,
-        notes: notes.trim() || null, date_received: dateReceived, due_date: dueDate,
+        notes: notes.trim() || null, date_received: dateReceived, due_date: dueDate || null,
         has_drawing: hasDrawing,
         drawing_number: drawingNumber.trim() || null,
         client_rfq_number: rfqReference.trim() || null,
@@ -1240,7 +1527,8 @@ function CreateDirectJobModal({ onClose, onCreated }: { onClose: () => void; onC
         action_prepare_material: actions.prepare_material, action_service: actions.service,
         action_paint: actions.paint, action_other: actions.other, action_repair: actions.repair,
         action_installation: actions.installation, action_cut: actions.cut, action_modify: actions.modify,
-        entry_type: 'DIRECT', status: 'PENDING',
+        entry_type: 'DIRECT', status: 'PENDING', workshop_status: 'NOT_STARTED',
+        has_info_for_quote: false,
       }).select().single()
       if (error) throw error
       const validItems = lineItems.filter(l => l.description.trim())
@@ -1254,7 +1542,15 @@ function CreateDirectJobModal({ onClose, onCreated }: { onClose: () => void; onC
           }))
         )
       }
+      // LOG: no_card_job_created ML event (direct job starts without a printed card)
+      await supabase.from('import_events').insert({
+        source: 'no_card_job_created',
+        file_name: JSON.stringify({ job_id: job.id, job_type: 'DIRECT', created_at: new Date().toISOString() }),
+        rows_attempted: 1, rows_imported: 1, rows_failed: 0,
+        imported_at: new Date().toISOString(), imported_by: 'system',
+      }).then(({ error: logErr }) => { if (logErr) console.error('Event log error:', logErr.message) })
       onCreated()
+      onClose()
     } catch (err: any) { alert('Error: ' + err.message) }
     finally { setSaving(false) }
   }
@@ -1262,8 +1558,7 @@ function CreateDirectJobModal({ onClose, onCreated }: { onClose: () => void; onC
   const uomOptions = ['Each', 'Meter', 'kg', 'Liter', 'Hour', 'Set', 'm2', 'm3']
   const actionList = [
     { key: 'manufacture' as const, label: 'Manufacture' }, { key: 'sandblast' as const, label: 'Sandblast' },
-    { key: 'prepare_material' as const, label: 'Prepare Material' }, { key: 'service' as const, label: 'Service' },
-    { key: 'paint' as const, label: 'Paint' }, { key: 'other' as const, label: 'Other' },
+    { key: 'service' as const, label: 'Service' }, { key: 'paint' as const, label: 'Paint' },
     { key: 'repair' as const, label: 'Repair' }, { key: 'installation' as const, label: 'Installation' },
     { key: 'cut' as const, label: 'Cut' }, { key: 'modify' as const, label: 'Modify' },
   ]
@@ -1279,8 +1574,9 @@ function CreateDirectJobModal({ onClose, onCreated }: { onClose: () => void; onC
           <div className="grid grid-cols-3 gap-4">
             <div><label className="block text-xs font-medium text-gray-600 mb-1">Client *</label><input value={clientName} onChange={e => setClientName(e.target.value)} placeholder="Client name..." className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" /></div>
             <div><label className="block text-xs font-medium text-gray-600 mb-1">Site Req / PO</label><input value={siteReq} onChange={e => setSiteReq(e.target.value)} placeholder="e.g. PO-12345" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" /></div>
-            <div><label className="block text-xs font-medium text-gray-600 mb-1">Due Date *</label><input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" /></div>
+            <div><label className="block text-xs font-medium text-gray-600 mb-1">Due Date</label><input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" /></div>
           </div>
+          <div><label className="block text-xs font-medium text-gray-600 mb-1">Job Description *</label><input value={description} onChange={e => setDescription(e.target.value)} placeholder="Brief description of the work..." className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" /></div>
           <div className="grid grid-cols-4 gap-4 items-end">
             <div><label className="block text-xs font-medium text-gray-600 mb-1">Work Type</label>
               <div className="flex rounded-lg overflow-hidden border border-gray-300">
@@ -1330,10 +1626,7 @@ function CreateDirectJobModal({ onClose, onCreated }: { onClose: () => void; onC
             </div>
           </div>
           <div className="flex items-center gap-2"><input type="checkbox" id="djDrawing" checked={hasDrawing} onChange={e => setHasDrawing(e.target.checked)} className="w-4 h-4" /><label htmlFor="djDrawing" className="text-sm text-gray-700">Drawing / Sketches Attached</label></div>
-          <div className="grid grid-cols-2 gap-4">
-            <div><label className="block text-xs font-medium text-gray-600 mb-1">Drawing Number</label><input value={drawingNumber} onChange={e => setDrawingNumber(e.target.value)} placeholder="DWG-001" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" /></div>
-            <div><label className="block text-xs font-medium text-gray-600 mb-1">RFQ Reference (optional)</label><input value={rfqReference} onChange={e => setRfqReference(e.target.value)} placeholder="Client RFQ number..." className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" /></div>
-          </div>
+          <div><label className="block text-xs font-medium text-gray-600 mb-1">Drawing Number</label><input value={drawingNumber} onChange={e => setDrawingNumber(e.target.value)} placeholder="DWG-001" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" /></div>
           <div>
             <label className="block text-xs font-medium text-gray-600 mb-2">Attachments</label>
             <div className="border-2 border-dashed border-gray-200 rounded-lg p-4 text-center">
@@ -1661,7 +1954,6 @@ function CreateRFQModal({ onClose, onCreated }: { onClose: () => void; onCreated
               <table className="w-full text-sm">
                 <thead className="bg-gray-50">
                   <tr>
-                    <th className="text-left px-3 py-2 text-xs font-medium text-gray-500 w-36">Type</th>
                     <th className="text-left px-3 py-2 text-xs font-medium text-gray-500">Description</th>
                     <th className="text-left px-3 py-2 text-xs font-medium text-gray-500 w-20">Qty</th>
                     <th className="text-left px-3 py-2 text-xs font-medium text-gray-500 w-20">UOM</th>
@@ -1671,7 +1963,6 @@ function CreateRFQModal({ onClose, onCreated }: { onClose: () => void; onCreated
                 <tbody className="divide-y divide-gray-100">
                   {lineItems.map((li, i) => (
                     <tr key={i}>
-                      <td className="px-2 py-1.5"><select value={li.item_type} onChange={e => updateLineItem(i, 'item_type', e.target.value)} className="w-full border border-gray-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500">{ITEM_TYPES.map(t => <option key={t}>{t}</option>)}</select></td>
                       <td className="px-2 py-1.5"><input type="text" value={li.description} onChange={e => updateLineItem(i, 'description', e.target.value)} placeholder="Item description" className="w-full border border-gray-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500" /></td>
                       <td className="px-2 py-1.5"><input type="number" min="0" step="0.01" value={li.quantity} onChange={e => updateLineItem(i, 'quantity', parseFloat(e.target.value) || 1)} className="w-full border border-gray-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500" /></td>
                       <td className="px-2 py-1.5"><select value={li.unit_of_measure} onChange={e => updateLineItem(i, 'unit_of_measure', e.target.value)} className="w-full border border-gray-200 rounded px-2 py-1 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500">{UOM_OPTIONS.map(u => <option key={u}>{u}</option>)}</select></td>
@@ -1723,7 +2014,7 @@ function CreateRFQModal({ onClose, onCreated }: { onClose: () => void; onCreated
 
 // RFQ DETAIL PANEL
 
-function RFQDetailPanel({ rfq, onClose, onUpdate, role, onJobCreated }: { rfq: RFQ; onClose: () => void; onUpdate: (rfq: RFQ) => void; role: string | null; onJobCreated?: () => void }) {
+function RFQDetailPanel({ rfq, onClose, onUpdate, role, onJobCreated, onNavigateToJob }: { rfq: RFQ; onClose: () => void; onUpdate: (rfq: RFQ) => void; role: string | null; onJobCreated?: () => void; onNavigateToJob?: (jobNumber: string) => void }) {
   const [lineItems, setLineItems] = React.useState<LineItem[]>([])
   const [panelLineItems, setPanelLineItems] = React.useState<any[]>([])
   const [loadingItems, setLoadingItems] = React.useState(true)
@@ -1839,103 +2130,145 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, onJobCreated }: { rfq: R
     if (!poNumber.trim()) { alert('Please enter the client PO number'); return }
     setSaving(true)
     try {
-      // 1. Update RFQ to ACCEPTED
-      const { data, error } = await supabase.from('rfqs').update({ po_number: poNumber.trim(), order_date: orderDate || null, status: 'ACCEPTED' }).eq('id', rfq.id).select('*, clients(company_name)').single()
-      if (error) throw error
-      onUpdate(data)
+      // GUARD: Check if job_number already locked on this RFQ (Fast Track or prior Order Won)
+      const { data: freshRfq } = await supabase.from('rfqs').select('job_number').eq('id', rfq.id).single()
+      const jobAlreadyLocked = !!(freshRfq?.job_number || rfq.job_number)
 
-      // 2. Create job record
-      // 2. Create job record with all RFQ fields
-      const year = new Date().getFullYear().toString().slice(-2)
-      const { count: jobCount } = await supabase.from('jobs').select('*', { count: 'exact', head: true })
-      const seq = String((jobCount || 0) + 1).padStart(3, '0')
-      const newJobNumber = `JOB-${year}-${seq}`
-
-      const { data: jobData, error: jobError } = await supabase.from('jobs').insert({
-        job_number: newJobNumber,
-        rfq_id: rfq.id,
-        rfq_no: rfq.rfq_no || null,
-        rfq_number: rfq.rfq_no || null,
-        enq_number: rfq.enq_number || null,
-        client_name: rfq.clients?.company_name || (rfq as any).client_name || 'Unknown Client',
-        description: rfq.description,
-        po_number: poNumber.trim(),
-        order_number: poNumber.trim(),
-        status: 'PENDING',
-        entry_type: 'RFQ',
-        priority: rfq.priority || 'NORMAL',
-        site_req: rfq.site_req || null,
-        contact_person: rfq.contact_person || null,
-        contact_email: rfq.contact_email || null,
-        contact_phone: rfq.contact_phone || null,
-        due_date: rfq.required_date || null,
-        date_received: rfq.request_date || new Date().toISOString().split('T')[0],
-        special_requirements: rfq.special_requirements || null,
-        notes: rfq.notes || null,
-        drawing_number: rfq.drawing_number || null,
-        has_drawing: rfq.drawing_number ? true : false,
-        is_contract_work: rfq.is_contract_work || false,
-        operating_entity: rfq.operating_entity || null,
-        client_rfq_number: rfq.client_rfq_number || null,
-        is_parent: false,
-        is_child_job: false,
-      }).select('id').single()
-
-      if (jobError) {
-        console.error('Job creation error:', jobError.message)
-        showMsg('Order saved but job creation failed - check console')
-      } else {
-        // 3. Copy line items from RFQ to job
-        const { data: rfqItems } = await supabase
-          .from('rfq_line_items')
-          .select('line_number, item_type, description, quantity, unit_of_measure')
-          .eq('rfq_id', rfq.id)
-          .order('line_number')
-
-        if (rfqItems && rfqItems.length > 0) {
-          const jobLineItems = rfqItems.map((item, idx) => ({
-            job_id: jobData.id,
-            description: item.description,
-            quantity: item.quantity || 1,
-            uom: item.unit_of_measure || 'EA',
-            item_type: item.item_type || 'MATERIAL',
-            cost_price: 0,
-            sell_price: 0,
-            line_total: 0,
-            status: 'PENDING',
-            sort_order: idx + 1,
-            can_spawn_job: true,
-          }))
-          const { error: liError } = await supabase.from('job_line_items').insert(jobLineItems)
-          if (liError) console.error('Line items copy error:', liError.message)
-          else console.log('Copied', jobLineItems.length, 'line items to job')
-        }
-
-
-        // 4. Copy attachments from RFQ to job
-        const { data: rfqAttachments } = await supabase
-          .from('rfq_attachments')
-          .select('*')
-          .eq('rfq_id', rfq.id)
-
-        if (rfqAttachments && rfqAttachments.length > 0) {
-          const jobAttachments = rfqAttachments.map((att: any) => ({
-            job_id: jobData.id,
-            rfq_attachment_id: att.id,
-            file_name: att.file_name,
-            file_path: att.file_path,
-            file_size: att.file_size || null,
-            file_type: att.file_type || null,
-            uploaded_by: att.uploaded_by || null,
-          }))
-          const { error: attError } = await supabase.from('job_attachments').insert(jobAttachments)
-          if (attError) console.error('Attachment copy error:', attError.message)
-          else console.log('Copied', jobAttachments.length, 'attachments to job')
-        }
-
-        if (jobData) emailOrderWon(data, (jobData as any).job_number || '')
-        showMsg('Order won! Job created with all RFQ details, line items & attachments.')
+      if (jobAlreadyLocked) {
+        // Job already exists — just update PO/order fields on RFQ and the existing job, skip job creation
+        const lockedJobNumber = freshRfq?.job_number || rfq.job_number
+        const { data, error } = await supabase.from('rfqs').update({ po_number: poNumber.trim(), order_date: orderDate || null, status: 'ACCEPTED' }).eq('id', rfq.id).select('*, clients(company_name)').single()
+        if (error) throw error
+        onUpdate(data)
+        // Update the existing job's PO fields too
+        await supabase.from('jobs').update({ po_number: poNumber.trim(), order_number: poNumber.trim() }).eq('rfq_id', rfq.id)
+        showMsg('PO updated on existing job ' + lockedJobNumber + '. No new job created.')
         if (onJobCreated) onJobCreated()
+      } else {
+        // GUARD: Also check jobs table for any linked job (belt & suspenders)
+        const { data: existingJobs } = await supabase.from('jobs').select('job_number').eq('rfq_id', rfq.id)
+        if (existingJobs && existingJobs.length > 0) {
+          alert('⚠️ DUPLICATE DETECTED: A job (' + existingJobs[0].job_number + ') already exists for this RFQ. Updating PO on existing job instead.')
+          const { data, error } = await supabase.from('rfqs').update({ po_number: poNumber.trim(), order_date: orderDate || null, job_number: existingJobs[0].job_number, status: 'ACCEPTED' }).eq('id', rfq.id).select('*, clients(company_name)').single()
+          if (error) throw error
+          onUpdate(data)
+          await supabase.from('jobs').update({ po_number: poNumber.trim(), order_number: poNumber.trim() }).eq('rfq_id', rfq.id)
+          if (onJobCreated) onJobCreated()
+          return
+        }
+
+        // 1. Update RFQ to ACCEPTED
+        const { data, error } = await supabase.from('rfqs').update({ po_number: poNumber.trim(), order_date: orderDate || null, status: 'ACCEPTED' }).eq('id', rfq.id).select('*, clients(company_name)').single()
+        if (error) throw error
+        onUpdate(data)
+
+        // 2. Create job record with all RFQ fields
+        const year = new Date().getFullYear().toString().slice(-2)
+        const { count: jobCount } = await supabase.from('jobs').select('*', { count: 'exact', head: true })
+        const seq = String((jobCount || 0) + 1).padStart(3, '0')
+        const newJobNumber = `JOB-${year}-${seq}`
+
+        const { data: jobData, error: jobError } = await supabase.from('jobs').insert({
+          job_number: newJobNumber,
+          rfq_id: rfq.id,
+          rfq_no: rfq.rfq_no || null,
+          rfq_number: rfq.rfq_no || null,
+          enq_number: rfq.enq_number || null,
+          client_name: rfq.clients?.company_name || (rfq as any).client_name || 'Unknown Client',
+          description: rfq.description,
+          po_number: poNumber.trim(),
+          order_number: poNumber.trim(),
+          status: 'PENDING',
+          workshop_status: 'NOT_STARTED',
+          entry_type: 'RFQ',
+          priority: rfq.priority || 'NORMAL',
+          site_req: rfq.site_req || null,
+          contact_person: rfq.contact_person || null,
+          contact_email: rfq.contact_email || null,
+          contact_phone: rfq.contact_phone || null,
+          due_date: rfq.required_date || null,
+          date_received: rfq.request_date || new Date().toISOString().split('T')[0],
+          special_requirements: rfq.special_requirements || null,
+          notes: rfq.notes || null,
+          drawing_number: rfq.drawing_number || null,
+          has_drawing: rfq.drawing_number ? true : false,
+          is_contract_work: rfq.is_contract_work || false,
+          operating_entity: rfq.operating_entity || null,
+          client_rfq_number: rfq.client_rfq_number || null,
+          is_parent: false,
+          is_child_job: false,
+          action_manufacture: false,
+          action_service: false,
+          action_repair: false,
+          action_sandblast: false,
+          action_paint: false,
+          action_installation: false,
+          action_cut: false,
+          action_modify: false,
+          action_other: false,
+          action_prepare_material: false,
+          has_info_for_quote: false,
+        }).select('id').single()
+
+        if (jobError) {
+          console.error('Job creation error:', jobError.message)
+          showMsg('Order saved but job creation failed - check console')
+        } else {
+          // LOCK: Store job_number on RFQ immediately (Order Won = ACCEPTED)
+          await supabase.from('rfqs').update({ job_number: newJobNumber, status: 'ACCEPTED' }).eq('id', rfq.id)
+
+          // 3. Copy line items from RFQ to job
+          const { data: rfqItems } = await supabase
+            .from('rfq_line_items')
+            .select('line_number, item_type, description, quantity, unit_of_measure')
+            .eq('rfq_id', rfq.id)
+            .order('line_number')
+
+          if (rfqItems && rfqItems.length > 0) {
+            const jobLineItems = rfqItems.map((item, idx) => ({
+              job_id: jobData.id,
+              description: item.description,
+              quantity: item.quantity || 1,
+              uom: item.unit_of_measure || 'EA',
+              item_type: item.item_type || 'MATERIAL',
+              cost_price: 0,
+              sell_price: 0,
+              line_total: 0,
+              status: 'PENDING',
+              sort_order: idx + 1,
+              can_spawn_job: true,
+            }))
+            const { error: liError } = await supabase.from('job_line_items').insert(jobLineItems)
+            if (liError) console.error('Line items copy error:', liError.message)
+            else console.log('Copied', jobLineItems.length, 'line items to job')
+          }
+
+
+          // 4. Copy attachments from RFQ to job
+          const { data: rfqAttachments } = await supabase
+            .from('rfq_attachments')
+            .select('*')
+            .eq('rfq_id', rfq.id)
+
+          if (rfqAttachments && rfqAttachments.length > 0) {
+            const jobAttachments = rfqAttachments.map((att: any) => ({
+              job_id: jobData.id,
+              rfq_attachment_id: att.id,
+              file_name: att.file_name,
+              file_path: att.file_path,
+              file_size: att.file_size || null,
+              file_type: att.file_type || null,
+              uploaded_by: att.uploaded_by || null,
+            }))
+            const { error: attError } = await supabase.from('job_attachments').insert(jobAttachments)
+            if (attError) console.error('Attachment copy error:', attError.message)
+            else console.log('Copied', jobAttachments.length, 'attachments to job')
+          }
+
+          if (jobData) emailOrderWon(data, (jobData as any).job_number || '')
+          showMsg('Order won! Job ' + newJobNumber + ' created & locked.')
+          if (onJobCreated) onJobCreated()
+        }
       }
     } catch (e: any) { alert('Error: ' + e.message) }
     finally { setSaving(false) }
@@ -2010,14 +2343,124 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, onJobCreated }: { rfq: R
             </div>
           )}
 
-          {(status === 'QUOTED' || status === 'SENT_TO_CUSTOMER' || status === 'ACCEPTED') && (
+          {(['NEW','PENDING','QUOTED','SENT_TO_CUSTOMER','ACCEPTED'].includes(status)) && (
             <div className="px-5 py-4 border-b border-gray-100">
-              <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-3">Order Information (when won)</p>
+{(['QUOTED','SENT_TO_CUSTOMER','ACCEPTED'].includes(status)) && <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-3">Order Information (when won)</p>}
               <div className="grid grid-cols-3 gap-3 mb-3">
                 <div><label className="text-xs font-medium text-gray-600 block mb-1">Client PO Number *</label><input value={poNumber} onChange={e => setPoNumber(e.target.value)} placeholder="Client PO" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400" /></div>
 
                 <div><label className="text-xs font-medium text-gray-600 block mb-1">Order Date</label><input type="date" value={orderDate} onChange={e => setOrderDate(e.target.value)} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400" /></div>
               </div>
+        {(['NEW','PENDING','QUOTED','SENT_TO_CUSTOMER'].includes(status)) && !rfq.job_number && (
+          <button onClick={async () => {
+            if (!confirm('FAST TRACK: This will create a Job Card immediately without waiting for a PO number. The PO can be added later. Continue?')) return
+            setSaving(true)
+            try {
+              // GUARD: Re-check from DB that no job_number is already locked to this RFQ
+              const { data: freshRfq } = await supabase.from('rfqs').select('job_number').eq('id', rfq.id).single()
+              if (freshRfq?.job_number) {
+                alert('⚠️ This RFQ already has a locked job number: ' + freshRfq.job_number + '. Cannot create a second job.')
+                return
+              }
+              // GUARD: Check no existing job is linked to this RFQ
+              const { data: existingJobs } = await supabase.from('jobs').select('job_number').eq('rfq_id', rfq.id)
+              if (existingJobs && existingJobs.length > 0) {
+                alert('⚠️ DUPLICATE DETECTED: A job (' + existingJobs[0].job_number + ') already exists for this RFQ. Cannot create a second job.')
+                return
+              }
+
+              const year = new Date().getFullYear().toString().slice(-2)
+              const { count: jobCount } = await supabase.from('jobs').select('*', { count: 'exact', head: true })
+              const seq = String((jobCount || 0) + 1).padStart(3, '0')
+              const newJobNumber = 'JOB-' + year + '-' + seq
+              const pendingPO = 'PENDING-' + new Date().toISOString().slice(0,10)
+              const { data: jobData, error: jobError } = await supabase.from('jobs').insert({
+                job_number: newJobNumber,
+                rfq_id: rfq.id,
+                rfq_no: rfq.rfq_no || null,
+                enq_number: rfq.enq_number || null,
+                client_name: rfq.clients?.company_name || (rfq as any).client_name || 'Unknown Client',
+                description: rfq.description,
+                po_number: pendingPO,
+                order_number: pendingPO,
+                status: 'PENDING',
+                workshop_status: 'NOT_STARTED',
+                entry_type: 'FAST_TRACK',
+                priority: rfq.priority || 'URGENT',
+                site_req: rfq.site_req || null,
+                contact_person: rfq.contact_person || null,
+                contact_email: rfq.contact_email || null,
+                contact_phone: rfq.contact_phone || null,
+                due_date: rfq.required_date || null,
+                date_received: rfq.request_date || new Date().toISOString().split('T')[0],
+                special_requirements: rfq.special_requirements || null,
+                notes: 'FAST TRACKED - PO pending. Created from ' + (rfq.rfq_no || 'RFQ') + ' on ' + new Date().toLocaleDateString('en-ZA'),
+                drawing_number: rfq.drawing_number || null,
+                has_drawing: rfq.drawing_number ? true : false,
+                client_rfq_number: rfq.client_rfq_number || null,
+                is_contract_work: rfq.is_contract_work || false,
+                is_parent: false,
+                is_child_job: false,
+                action_manufacture: false,
+                action_service: false,
+                action_repair: false,
+                action_sandblast: false,
+                action_paint: false,
+                action_installation: false,
+                action_cut: false,
+                action_modify: false,
+                action_other: false,
+                action_prepare_material: false,
+                has_info_for_quote: false,
+              }).select('id').single()
+              if (jobError) throw jobError
+
+              // LOCK: Store job_number on RFQ record immediately + move to Order Won (ACCEPTED)
+              const { data: updatedRfq, error: lockError } = await supabase.from('rfqs').update({
+                job_number: newJobNumber,
+                status: 'ACCEPTED',
+              }).eq('id', rfq.id).select('*, clients(company_name)').single()
+              if (lockError) console.error('Failed to lock job_number on RFQ:', lockError.message)
+              else onUpdate(updatedRfq)
+
+              // LOG: fast_track_job_locked event
+              await supabase.from('import_events').insert({
+                source: 'fast_track_job_locked',
+                file_name: newJobNumber,
+                rows_attempted: 1,
+                rows_imported: 1,
+                rows_failed: 0,
+                imported_at: new Date().toISOString(),
+                imported_by: rfq.assigned_quoter_name || 'system',
+              }).then(({ error: logErr }) => { if (logErr) console.error('Event log error:', logErr.message) })
+
+              // LOG: no_card_job_created ML event (fast track job starts without a printed card)
+              await supabase.from('import_events').insert({
+                source: 'no_card_job_created',
+                file_name: JSON.stringify({ job_id: jobData.id, job_type: 'FAST_TRACK', created_at: new Date().toISOString() }),
+                rows_attempted: 1, rows_imported: 1, rows_failed: 0,
+                imported_at: new Date().toISOString(), imported_by: 'system',
+              }).then(({ error: logErr }) => { if (logErr) console.error('Event log error:', logErr.message) })
+
+              // Copy line items
+              const { data: rfqItems } = await supabase.from('rfq_line_items').select('*').eq('rfq_id', rfq.id).order('line_number')
+              if (rfqItems && rfqItems.length > 0) {
+                await supabase.from('job_line_items').insert(rfqItems.map((item, idx) => ({ job_id: jobData.id, description: item.description, quantity: item.quantity || 1, uom: item.unit_of_measure || 'EA', item_type: item.item_type || 'MATERIAL', cost_price: 0, sell_price: 0, line_total: 0, status: 'PENDING', sort_order: idx, can_spawn_job: true })))
+              }
+              if (onJobCreated) onJobCreated()
+              showMsg('⚡ Fast Track: Job ' + newJobNumber + ' created & locked! PO pending.')
+            } catch (err) { alert('Error: ' + (err as any).message) }
+            finally { setSaving(false) }
+          }} disabled={saving} className="w-full py-2 bg-amber-500 hover:bg-amber-600 text-white text-sm font-semibold rounded-lg disabled:opacity-50 mb-2">
+            {saving ? 'Creating...' : '⚡ Fast Track → Create Job (No PO Required)'}
+          </button>
+        )}
+        {rfq.job_number && (
+          <button onClick={() => onNavigateToJob?.(rfq.job_number!)} className="w-full py-2 bg-green-50 border border-green-200 text-green-700 text-sm font-semibold rounded-lg text-center mb-2 hover:bg-green-100 hover:border-green-300 transition-colors cursor-pointer">
+            🔒 Job: {rfq.job_number} → Open on Job Board
+          </button>
+        )}
+
         {status === 'QUOTED' && (
           <button onClick={async () => {
             setSaving(true)
@@ -2079,7 +2522,7 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, onJobCreated }: { rfq: R
             <div className="grid grid-cols-2 gap-2 mb-3">
               <div><label className="text-xs text-gray-500 block mb-1">Drawing Number</label><input value={editDrawingNumber} onChange={e => setEditDrawingNumber(e.target.value)} className="w-full border border-gray-200 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-blue-400" /></div>
               <div><label className="text-xs text-gray-500 block mb-1">Requested / Received By</label><input value={editRequestedBy} onChange={e => setEditRequestedBy(e.target.value)} className="w-full border border-gray-200 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-blue-400" /></div>
-              <div><label className="text-xs text-gray-500 block mb-1">Media Received</label><select value={editMediaReceived} onChange={e => setEditMediaReceived(e.target.value)} className="w-full border border-gray-200 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-blue-400 bg-white"><option value="">Select...</option>{['Email','WhatsApp','Phone','Walk-in','Fax'].map(m => <option key={m} value={m}>{m}</option>)}</select></div>
+              <div><label className="text-xs text-gray-500 block mb-1">Media Received</label><select value={editMediaReceived} onChange={e => setEditMediaReceived(e.target.value)} className="w-full border border-gray-200 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-blue-400 bg-white"><option value="">Select...</option>{['Email','WhatsApp','Phone','Walk-in'].map(m => <option key={m} value={m}>{m}</option>)}</select></div>
               <div><label className="text-xs text-gray-500 block mb-1">Operating Entity</label><select value={editOperatingEntity} onChange={e => setEditOperatingEntity(e.target.value)} className="w-full border border-gray-200 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-blue-400 bg-white">{OPERATING_ENTITIES.map(e => <option key={e} value={e}>{e}</option>)}</select></div>
               <div><label className="text-xs text-gray-500 block mb-1">Date Received</label><input type="date" value={editDateReceived} onChange={e => setEditDateReceived(e.target.value)} className="w-full border border-gray-200 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-blue-400" /></div>
               <div><label className="text-xs text-gray-500 block mb-1">Required By</label><input type="date" value={editRequiredBy} onChange={e => setEditRequiredBy(e.target.value)} className="w-full border border-gray-200 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-blue-400" /></div>
@@ -2126,12 +2569,11 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, onJobCreated }: { rfq: R
                   : (
                     <div className="space-y-1.5 mb-3">
                       <div className="grid grid-cols-12 gap-1.5 text-xs font-medium text-gray-400 px-1 mb-1">
-                        <div className="col-span-2">Type</div><div className="col-span-5">Description</div><div className="col-span-2">Qty</div><div className="col-span-2">UOM</div><div className="col-span-1"></div>
+                        <div className="col-span-7">Description</div><div className="col-span-2">Qty</div><div className="col-span-2">UOM</div><div className="col-span-1"></div>
                       </div>
                       {panelLineItems.map((item, idx) => (
                         <div key={idx} className="grid grid-cols-12 gap-1.5 items-center">
-                          <div className="col-span-2"><select value={item.item_type} onChange={e => updatePanelLineItem(idx, 'item_type', e.target.value)} className="w-full border border-gray-200 rounded px-1.5 py-1 text-xs focus:outline-none focus:border-blue-400 bg-white">{['MATERIAL','LABOUR','SUBCONTRACT','EQUIPMENT','OTHER'].map(t => <option key={t} value={t}>{t}</option>)}</select></div>
-                          <div className="col-span-5"><input value={item.description} onChange={e => updatePanelLineItem(idx, 'description', e.target.value)} placeholder="Description" className="w-full border border-gray-200 rounded px-1.5 py-1 text-xs focus:outline-none focus:border-blue-400" /></div>
+                          <div className="col-span-7"><input value={item.description} onChange={e => updatePanelLineItem(idx, 'description', e.target.value)} placeholder="Description" className="w-full border border-gray-200 rounded px-1.5 py-1 text-xs focus:outline-none focus:border-blue-400" /></div>
                           <div className="col-span-2"><input type="number" value={item.quantity} onChange={e => updatePanelLineItem(idx, 'quantity', e.target.value)} className="w-full border border-gray-200 rounded px-1.5 py-1 text-xs focus:outline-none focus:border-blue-400" /></div>
                           <div className="col-span-2"><select value={item.unit_of_measure} onChange={e => updatePanelLineItem(idx, 'unit_of_measure', e.target.value)} className="w-full border border-gray-200 rounded px-1.5 py-1 text-xs focus:outline-none focus:border-blue-400 bg-white">{['EA','M','KG','L','SET','LOT','HR','DAY'].map(u => <option key={u} value={u}>{u}</option>)}</select></div>
                           <div className="col-span-1 flex justify-center"><button onClick={() => removePanelLineItem(idx)} className="text-red-400 hover:text-red-600"><X size={12} /></button></div>
@@ -2347,6 +2789,7 @@ function SpawnJobModal({ lineItem, parentJob, onClose, onSpawned }: {
         priority:                 priority,
         entry_type:               'CHILD',
         status:                   'PENDING',
+        workshop_status:          'NOT_STARTED',
         assigned_employee_name:   null,
         assigned_supervisor_name: null,
         drawing_number:           drawingNumber || null,
@@ -2361,10 +2804,30 @@ function SpawnJobModal({ lineItem, parentJob, onClose, onSpawned }: {
         action_cut:               actions.cut,
         action_modify:            actions.modify,
         action_other:             actions.other,
+        has_info_for_quote:       false,
       }).select().single()
       if (error) throw error
+      // Create line item for child job so it prints on the card
+      await supabase.from('job_line_items').insert({ job_id: childJob.id, description: lineItem.description || description.trim(), quantity: lineItem.quantity || 1, uom: lineItem.uom || 'EA', item_type: lineItem.item_type || 'MATERIAL', cost_price: 0, sell_price: 0, line_total: 0, status: 'PENDING', sort_order: 0, can_spawn_job: false })
       await supabase.from('job_line_items').update({ child_job_id: childJob.id }).eq('id', lineItem.id)
       await supabase.from('jobs').update({ is_parent: true }).eq('id', parentJob.id)
+      // LOG: child_job_spawned ML event
+      await supabase.from('import_events').insert({
+        source: 'child_job_spawned',
+        file_name: JSON.stringify({ parent_job_id: parentJob.id, child_job_id: childJob.id, child_suffix: suffix, line_item_id: lineItem.id, spawned_at: new Date().toISOString() }),
+        rows_attempted: 1,
+        rows_imported: 1,
+        rows_failed: 0,
+        imported_at: new Date().toISOString(),
+        imported_by: 'system',
+      }).then(({ error: logErr }) => { if (logErr) console.error('Event log error:', logErr.message) })
+      // LOG: no_card_job_created ML event (child job starts without a printed card)
+      await supabase.from('import_events').insert({
+        source: 'no_card_job_created',
+        file_name: JSON.stringify({ job_id: childJob.id, job_type: 'CHILD', created_at: new Date().toISOString() }),
+        rows_attempted: 1, rows_imported: 1, rows_failed: 0,
+        imported_at: new Date().toISOString(), imported_by: 'system',
+      }).then(({ error: logErr }) => { if (logErr) console.error('Event log error:', logErr.message) })
       emailChildJobSpawned(parentJob, childJob)
       onSpawned(childJob)
     } catch (err: any) { alert('Error: ' + err.message) }
@@ -2462,7 +2925,7 @@ function WorkshopBoard({ jobs, loading, onRefresh, onStatusChange }: {
   return (
     <div className="flex gap-4 h-full overflow-x-auto pb-4">
       {COLS.map(col => {
-        const allCards = jobs.filter(j => j.workshop_status === col.key)
+        const allCards = jobs.filter(j => (j.workshop_status || 'NOT_STARTED') === col.key)
         const cards = allCards.filter(j => !j.is_child_job)
         const childMap: Record<string, Job[]> = {}
         jobs.filter(j => j.is_child_job && j.parent_job_id).forEach(child => {
@@ -2488,6 +2951,7 @@ function WorkshopBoard({ jobs, loading, onRefresh, onStatusChange }: {
                         <p className="text-xs font-bold text-orange-600">{job.job_number}</p>
                         <div className="flex items-center gap-1">
                           {job.is_parent && <span className="text-xs font-bold px-1.5 py-0.5 bg-purple-100 text-purple-600 rounded">P</span>}
+                          {job.status !== 'PRINTED' && <span className="text-xs font-bold px-1.5 py-0.5 bg-rose-50 text-rose-500 rounded border border-rose-200">No Card</span>}
                           <span className={`text-xs font-semibold px-1.5 py-0.5 rounded ${job.priority==='URGENT'?'bg-red-100 text-red-700':job.priority==='HIGH'?'bg-orange-100 text-orange-700':'bg-gray-100 text-gray-600'}`}>{job.priority}</span>
                         </div>
                       </div>
@@ -2520,14 +2984,17 @@ function WorkshopBoard({ jobs, loading, onRefresh, onStatusChange }: {
                         <div onClick={() => setSelectedJob(child)} className="bg-white rounded-lg shadow-sm border border-purple-100 p-2 cursor-pointer hover:border-purple-300 transition-all">
                           <div className="flex items-center justify-between gap-1">
                             <p className="text-xs font-bold text-purple-600">{child.job_number}</p>
-                            <span className="text-xs px-1.5 py-0.5 bg-indigo-100 text-indigo-600 rounded">↳</span>
+                            <div className="flex items-center gap-1">
+                              {child.status !== 'PRINTED' && <span className="text-xs font-bold px-1.5 py-0.5 bg-rose-50 text-rose-500 rounded border border-rose-200">No Card</span>}
+                              <span className="text-xs px-1.5 py-0.5 bg-indigo-100 text-indigo-600 rounded">↳</span>
+                            </div>
                           </div>
                           <p className="text-xs text-gray-700 mt-0.5 line-clamp-1">{child.description||''}</p>
                           <div className="flex gap-1 mt-1" onClick={e => e.stopPropagation()}>
-                            {nextStatus[child.workshop_status||''] && (
-                              <button onClick={() => onStatusChange(child.id, nextStatus[child.workshop_status||''])}
+                            {nextStatus[(child.workshop_status || 'NOT_STARTED')] && (
+                              <button onClick={() => onStatusChange(child.id, nextStatus[(child.workshop_status || 'NOT_STARTED')])}
                                 className="flex-1 py-0.5 text-xs font-semibold text-white rounded bg-orange-500 hover:bg-orange-600">
-                                {nextLabel[child.workshop_status||'']}
+                                {nextLabel[(child.workshop_status || 'NOT_STARTED')]}
                               </button>
                             )}
                           </div>
@@ -3194,6 +3661,1911 @@ function JobExecutionPanel({ job, onClose, onStatusChange, onRefresh }: {
             {savingNotes ? 'Saving...' : 'Save Notes'}
           </button>
         </div>
+      </div>
+    </div>
+  )
+}
+
+// PROCUREMENT PAGE (TABBED)
+
+const PR_STATUS_BADGE: Record<string, string> = {
+  PENDING_APPROVAL: 'bg-amber-100 text-amber-700 border border-amber-200',
+  APPROVED: 'bg-green-100 text-green-700 border border-green-200',
+  REJECTED: 'bg-red-100 text-red-700 border border-red-200',
+  PO_ISSUED: 'bg-[#1d3461] text-white border border-[#1d3461]',
+}
+
+function SupplierManagement({ suppliers, loading, onRefresh, currentRole }: { suppliers: Supplier[]; loading: boolean; onRefresh: () => void; currentRole: string | null }) {
+  const [procurementTab, setProcurementTab] = React.useState<'suppliers' | 'purchase_requests' | 'purchase_orders' | 'invoices'>('suppliers')
+  const [purchaseRequests, setPurchaseRequests] = React.useState<PurchaseRequest[]>([])
+  const [prsLoading, setPrsLoading] = React.useState(false)
+  const [purchaseOrders, setPurchaseOrders] = React.useState<PurchaseOrder[]>([])
+  const [posLoading, setPosLoading] = React.useState(false)
+  const [invoices, setInvoices] = React.useState<SupplierInvoice[]>([])
+  const [invoicesLoading, setInvoicesLoading] = React.useState(false)
+
+  const fetchPRs = React.useCallback(async () => {
+    setPrsLoading(true)
+    try {
+      const { data, error } = await supabase
+        .from('purchase_requests')
+        .select('*, suppliers(company_name), jobs(job_number, description)')
+        .order('created_at', { ascending: false })
+      if (error) throw error
+      setPurchaseRequests(data || [])
+    } catch (e: any) { console.error('Failed to fetch PRs:', e.message) }
+    finally { setPrsLoading(false) }
+  }, [])
+
+  const fetchPOs = React.useCallback(async () => {
+    setPosLoading(true)
+    try {
+      const { data, error } = await supabase
+        .from('purchase_orders')
+        .select('*, suppliers(company_name, contact_person, phone, email, account_number), jobs(job_number, description), purchase_requests(pr_number)')
+        .order('created_at', { ascending: false })
+      if (error) throw error
+      setPurchaseOrders(data || [])
+    } catch (e: any) { console.error('Failed to fetch POs:', e.message) }
+    finally { setPosLoading(false) }
+  }, [])
+
+  const fetchInvoices = React.useCallback(async () => {
+    setInvoicesLoading(true)
+    try {
+      const { data, error } = await supabase
+        .from('supplier_invoices')
+        .select('*, suppliers(company_name), purchase_orders(po_number, total_value)')
+        .order('created_at', { ascending: false })
+      if (error) throw error
+      setInvoices(data || [])
+    } catch (e: any) { console.error('Failed to fetch invoices:', e.message) }
+    finally { setInvoicesLoading(false) }
+  }, [])
+
+  React.useEffect(() => { if (procurementTab === 'purchase_requests') fetchPRs() }, [procurementTab, fetchPRs])
+  React.useEffect(() => { if (procurementTab === 'purchase_orders') fetchPOs() }, [procurementTab, fetchPOs])
+  React.useEffect(() => { if (procurementTab === 'invoices') fetchInvoices() }, [procurementTab, fetchInvoices])
+
+  return (
+    <div className="h-full flex flex-col">
+      <div className="flex items-center gap-1 mb-4 border-b border-gray-200">
+        <button onClick={() => setProcurementTab('suppliers')}
+          className={`px-4 py-2.5 text-sm font-semibold border-b-2 transition-colors -mb-px ${procurementTab === 'suppliers' ? 'border-green-500 text-green-700' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+          Supplier Register
+        </button>
+        <button onClick={() => setProcurementTab('purchase_requests')}
+          className={`px-4 py-2.5 text-sm font-semibold border-b-2 transition-colors -mb-px ${procurementTab === 'purchase_requests' ? 'border-green-500 text-green-700' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+          Purchase Requests
+        </button>
+        <button onClick={() => setProcurementTab('purchase_orders')}
+          className={`px-4 py-2.5 text-sm font-semibold border-b-2 transition-colors -mb-px ${procurementTab === 'purchase_orders' ? 'border-green-500 text-green-700' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+          Purchase Orders
+        </button>
+        <button onClick={() => setProcurementTab('invoices')}
+          className={`px-4 py-2.5 text-sm font-semibold border-b-2 transition-colors -mb-px ${procurementTab === 'invoices' ? 'border-green-500 text-green-700' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+          Invoices
+        </button>
+      </div>
+
+      {procurementTab === 'suppliers'
+        ? <SupplierRegisterTab suppliers={suppliers} loading={loading} onRefresh={onRefresh} currentRole={currentRole} />
+        : procurementTab === 'purchase_requests'
+        ? <PurchaseRequestsTab purchaseRequests={purchaseRequests} loading={prsLoading} onRefresh={fetchPRs} currentRole={currentRole} suppliers={suppliers} />
+        : procurementTab === 'purchase_orders'
+        ? <PurchaseOrdersTab purchaseOrders={purchaseOrders} loading={posLoading} onRefresh={fetchPOs} currentRole={currentRole} />
+        : <InvoicesTab invoices={invoices} loading={invoicesLoading} onRefresh={fetchInvoices} currentRole={currentRole} />}
+    </div>
+  )
+}
+
+// SUPPLIER REGISTER TAB
+
+function SupplierRegisterTab({ suppliers, loading, onRefresh, currentRole }: { suppliers: Supplier[]; loading: boolean; onRefresh: () => void; currentRole: string | null }) {
+  const [searchTerm, setSearchTerm] = React.useState('')
+  const [activeOnly, setActiveOnly] = React.useState(true)
+  const [showAddModal, setShowAddModal] = React.useState(false)
+  const [editingSupplier, setEditingSupplier] = React.useState<Supplier | null>(null)
+  const [deactivatingSupplier, setDeactivatingSupplier] = React.useState<Supplier | null>(null)
+
+  const filtered = suppliers.filter(s => {
+    if (activeOnly && !s.is_active) return false
+    if (!searchTerm.trim()) return true
+    const term = searchTerm.toLowerCase()
+    return (s.company_name?.toLowerCase().includes(term) ||
+      s.contact_person?.toLowerCase().includes(term) ||
+      s.email?.toLowerCase().includes(term) ||
+      s.account_number?.toLowerCase().includes(term))
+  })
+
+  const activeCount = suppliers.filter(s => s.is_active).length
+
+  if (loading) return <div className="flex items-center justify-center h-64 gap-3 text-gray-400"><div className="w-5 h-5 border-2 border-gray-300 border-t-green-500 rounded-full animate-spin" /><span>Loading suppliers...</span></div>
+
+  return (
+    <div className="flex-1 flex flex-col min-h-0">
+      <div className="mb-4">
+        <div className="flex items-center gap-2 mb-1">
+          <h2 className="text-lg font-bold text-gray-900">Supplier Register</h2>
+          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-green-100 text-green-700">{activeCount} active</span>
+        </div>
+        <p className="text-sm text-gray-500">Manage approved suppliers for procurement</p>
+      </div>
+
+      <div className="flex items-center gap-3 mb-4">
+        <div className="relative flex-1 max-w-md">
+          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+          <input type="text" placeholder="Search suppliers..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)}
+            className="w-full pl-9 pr-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500" />
+        </div>
+        <button onClick={() => setActiveOnly(!activeOnly)}
+          className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${activeOnly ? 'bg-green-50 border-green-300 text-green-700' : 'bg-gray-50 border-gray-300 text-gray-600'}`}>
+          <Filter size={14} />{activeOnly ? 'Active Only' : 'Show All'}
+        </button>
+        <button onClick={onRefresh} className="flex items-center gap-2 px-3 py-2 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors border border-gray-300">
+          <RefreshCw size={14} />Refresh
+        </button>
+        <button onClick={() => setShowAddModal(true)} className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-lg transition-colors ml-auto">
+          <Plus size={15} />Add Supplier
+        </button>
+      </div>
+
+      <div className="flex-1 overflow-auto bg-white rounded-xl border border-gray-200 shadow-sm">
+        <table className="w-full text-sm">
+          <thead className="bg-gray-50 sticky top-0">
+            <tr>
+              <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Company Name</th>
+              <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Contact Person</th>
+              <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Phone</th>
+              <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Email</th>
+              <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Account No.</th>
+              <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Payment Terms</th>
+              <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Status</th>
+              <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Actions</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {filtered.length === 0 ? (
+              <tr><td colSpan={8} className="px-4 py-12 text-center text-gray-400">
+                {searchTerm ? 'No suppliers match your search' : 'No suppliers found. Add your first supplier to get started.'}
+              </td></tr>
+            ) : filtered.map(supplier => (
+              <tr key={supplier.id} className="hover:bg-gray-50 transition-colors">
+                <td className="px-4 py-3 font-medium text-gray-900">{supplier.company_name}</td>
+                <td className="px-4 py-3 text-gray-600">{supplier.contact_person || '-'}</td>
+                <td className="px-4 py-3 text-gray-600">{supplier.phone || '-'}</td>
+                <td className="px-4 py-3 text-gray-600">{supplier.email || '-'}</td>
+                <td className="px-4 py-3 text-gray-600 font-mono text-xs">{supplier.account_number || '-'}</td>
+                <td className="px-4 py-3 text-gray-600">{supplier.payment_terms || '-'}</td>
+                <td className="px-4 py-3">
+                  {supplier.is_active
+                    ? <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-green-100 text-green-700">ACTIVE</span>
+                    : <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-gray-100 text-gray-500">INACTIVE</span>}
+                </td>
+                <td className="px-4 py-3 text-right">
+                  <div className="flex items-center justify-end gap-1">
+                    <button onClick={() => setEditingSupplier(supplier)} className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors" title="Edit">
+                      <Edit3 size={14} />
+                    </button>
+                    {supplier.is_active && (
+                      <button onClick={() => setDeactivatingSupplier(supplier)} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors" title="Deactivate">
+                        <XCircle size={14} />
+                      </button>
+                    )}
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {showAddModal && <AddSupplierModal onClose={() => setShowAddModal(false)} onCreated={onRefresh} currentRole={currentRole} />}
+      {editingSupplier && <EditSupplierModal supplier={editingSupplier} onClose={() => setEditingSupplier(null)} onUpdated={onRefresh} currentRole={currentRole} />}
+      {deactivatingSupplier && <DeactivateSupplierModal supplier={deactivatingSupplier} onClose={() => setDeactivatingSupplier(null)} onDeactivated={onRefresh} currentRole={currentRole} />}
+    </div>
+  )
+}
+
+// PURCHASE REQUESTS TAB
+
+function PurchaseRequestsTab({ purchaseRequests, loading, onRefresh, currentRole, suppliers }: { purchaseRequests: PurchaseRequest[]; loading: boolean; onRefresh: () => void; currentRole: string | null; suppliers: Supplier[] }) {
+  const [searchTerm, setSearchTerm] = React.useState('')
+  const [statusFilter, setStatusFilter] = React.useState<string>('ALL')
+  const [showCreateModal, setShowCreateModal] = React.useState(false)
+  const [selectedPR, setSelectedPR] = React.useState<PurchaseRequest | null>(null)
+
+  const filtered = React.useMemo(() => {
+    let result = [...purchaseRequests]
+    if (statusFilter !== 'ALL') result = result.filter(pr => pr.status === statusFilter)
+    if (searchTerm.trim()) {
+      const term = searchTerm.toLowerCase()
+      result = result.filter(pr =>
+        pr.pr_number?.toLowerCase().includes(term) ||
+        pr.suppliers?.company_name?.toLowerCase().includes(term) ||
+        pr.jobs?.job_number?.toLowerCase().includes(term))
+    }
+    // Sort PENDING_APPROVAL first
+    result.sort((a, b) => {
+      if (a.status === 'PENDING_APPROVAL' && b.status !== 'PENDING_APPROVAL') return -1
+      if (b.status === 'PENDING_APPROVAL' && a.status !== 'PENDING_APPROVAL') return 1
+      return new Date(b.created_at).getTime() - new Date(a.created_at).getTime()
+    })
+    return result
+  }, [purchaseRequests, statusFilter, searchTerm])
+
+  const pendingCount = purchaseRequests.filter(pr => pr.status === 'PENDING_APPROVAL').length
+
+  if (loading) return <div className="flex items-center justify-center h-64 gap-3 text-gray-400"><div className="w-5 h-5 border-2 border-gray-300 border-t-green-500 rounded-full animate-spin" /><span>Loading purchase requests...</span></div>
+
+  return (
+    <div className="flex-1 flex flex-col min-h-0">
+      <div className="mb-4">
+        <div className="flex items-center gap-2 mb-1">
+          <h2 className="text-lg font-bold text-gray-900">Purchase Requests</h2>
+          {pendingCount > 0 && <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-amber-100 text-amber-700">{pendingCount} pending</span>}
+        </div>
+        <p className="text-sm text-gray-500">Raise and manage purchase requests</p>
+      </div>
+
+      <div className="flex items-center gap-3 mb-4">
+        <div className="relative flex-1 max-w-md">
+          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+          <input type="text" placeholder="Search by PR number, supplier or job..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)}
+            className="w-full pl-9 pr-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500" />
+        </div>
+        <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
+          className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500">
+          <option value="ALL">All Statuses</option>
+          <option value="PENDING_APPROVAL">Pending Approval</option>
+          <option value="APPROVED">Approved</option>
+          <option value="REJECTED">Rejected</option>
+          <option value="PO_ISSUED">PO Issued</option>
+        </select>
+        <button onClick={onRefresh} className="flex items-center gap-2 px-3 py-2 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors border border-gray-300">
+          <RefreshCw size={14} />Refresh
+        </button>
+        {currentRole === 'SONJA' && (
+          <button onClick={() => setShowCreateModal(true)} className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-lg transition-colors ml-auto">
+            <Plus size={15} />New Purchase Request
+          </button>
+        )}
+      </div>
+
+      <div className="flex-1 overflow-auto bg-white rounded-xl border border-gray-200 shadow-sm">
+        <table className="w-full text-sm">
+          <thead className="bg-gray-50 sticky top-0">
+            <tr>
+              <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">PR Number</th>
+              <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Supplier</th>
+              <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Job Ref</th>
+              <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Required By</th>
+              <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Est. Value</th>
+              <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Status</th>
+              <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Raised By</th>
+              <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Date Raised</th>
+              <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Actions</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {filtered.length === 0 ? (
+              <tr><td colSpan={9} className="px-4 py-12 text-center text-gray-400">
+                {searchTerm || statusFilter !== 'ALL' ? 'No purchase requests match your filter' : 'No purchase requests yet.'}
+              </td></tr>
+            ) : filtered.map(pr => (
+              <tr key={pr.id} className="hover:bg-gray-50 transition-colors cursor-pointer" onClick={() => setSelectedPR(pr)}>
+                <td className="px-4 py-3 font-medium text-gray-900 font-mono text-xs">{pr.pr_number || '-'}</td>
+                <td className="px-4 py-3 text-gray-700">{pr.suppliers?.company_name || '-'}</td>
+                <td className="px-4 py-3 text-gray-600 font-mono text-xs">{pr.jobs?.job_number || '-'}</td>
+                <td className="px-4 py-3 text-gray-600">{formatDate(pr.required_by_date)}</td>
+                <td className="px-4 py-3 text-right text-gray-700 font-medium">R {(pr.total_estimated_value || 0).toLocaleString('en-ZA', { minimumFractionDigits: 2 })}</td>
+                <td className="px-4 py-3">
+                  <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${PR_STATUS_BADGE[pr.status] || 'bg-gray-100 text-gray-500'}`}>
+                    {pr.status.replace(/_/g, ' ')}
+                  </span>
+                </td>
+                <td className="px-4 py-3 text-gray-600">{pr.raised_by || '-'}</td>
+                <td className="px-4 py-3 text-gray-600">{formatDate(pr.created_at)}</td>
+                <td className="px-4 py-3 text-right" onClick={e => e.stopPropagation()}>
+                  <button onClick={() => setSelectedPR(pr)} className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors" title="View Details">
+                    <Eye size={14} />
+                  </button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {showCreateModal && <CreatePurchaseRequestModal suppliers={suppliers} onClose={() => setShowCreateModal(false)} onCreated={onRefresh} currentRole={currentRole} />}
+      {selectedPR && <PurchaseRequestDetailModal pr={selectedPR} onClose={() => setSelectedPR(null)} onUpdated={() => { setSelectedPR(null); onRefresh() }} currentRole={currentRole} />}
+    </div>
+  )
+}
+
+// CREATE PURCHASE REQUEST MODAL
+
+function CreatePurchaseRequestModal({ suppliers, onClose, onCreated, currentRole }: { suppliers: Supplier[]; onClose: () => void; onCreated: () => void; currentRole: string | null }) {
+  const [saving, setSaving] = React.useState(false)
+  const [activeJobs, setActiveJobs] = React.useState<{ id: string; job_number: string; description: string | null }[]>([])
+  const [form, setForm] = React.useState({
+    supplier_id: '',
+    job_id: '',
+    required_by_date: '',
+  })
+  const [lineItems, setLineItems] = React.useState([
+    { description: '', quantity: 1, uom: 'EA', estimated_unit_price: 0 }
+  ])
+
+  React.useEffect(() => {
+    supabase.from('jobs').select('id, job_number, description').order('job_number', { ascending: false }).then(({ data }) => {
+      if (data) setActiveJobs(data)
+    })
+  }, [])
+
+  const activeSuppliers = suppliers.filter(s => s.is_active)
+
+  const set = (field: string, value: string) => setForm(f => ({ ...f, [field]: value }))
+
+  const addLineItem = () => setLineItems(li => [...li, { description: '', quantity: 1, uom: 'EA', estimated_unit_price: 0 }])
+  const removeLineItem = (i: number) => { if (lineItems.length > 1) setLineItems(li => li.filter((_, idx) => idx !== i)) }
+  const updateLineItem = (i: number, field: string, value: any) =>
+    setLineItems(li => li.map((item, idx) => idx === i ? { ...item, [field]: value } : item))
+
+  const totalEstimated = lineItems.reduce((sum, li) => sum + (li.quantity * li.estimated_unit_price), 0)
+
+  const handleSave = async () => {
+    if (!form.supplier_id) { alert('Please select a supplier'); return }
+    if (!form.job_id) { alert('Please select a job'); return }
+    const validItems = lineItems.filter(li => li.description.trim())
+    if (validItems.length === 0) { alert('Please add at least one line item with a description'); return }
+
+    setSaving(true)
+    try {
+      const { data: pr, error: prError } = await supabase.from('purchase_requests').insert({
+        supplier_id: form.supplier_id,
+        job_id: form.job_id,
+        required_by_date: form.required_by_date || null,
+        status: 'PENDING_APPROVAL',
+        total_estimated_value: totalEstimated,
+        raised_by: currentRole,
+      }).select('id, pr_number').single()
+      if (prError) throw prError
+
+      const { error: liError } = await supabase.from('purchase_request_line_items').insert(
+        validItems.map(li => ({
+          purchase_request_id: pr.id,
+          description: li.description.trim(),
+          quantity: li.quantity,
+          uom: li.uom,
+          estimated_unit_price: li.estimated_unit_price,
+          estimated_total: li.quantity * li.estimated_unit_price,
+        }))
+      )
+      if (liError) console.error('Line items error:', liError.message)
+
+      const selectedSupplier = activeSuppliers.find(s => s.id === form.supplier_id)
+      const selectedJob = activeJobs.find(j => j.id === form.job_id)
+
+      await supabase.from('activity_log').insert({
+        event_type: 'purchase_request_raised',
+        entity_type: 'purchase_request',
+        entity_id: pr.id,
+        metadata: {
+          pr_number: pr.pr_number,
+          supplier_name: selectedSupplier?.company_name || null,
+          job_reference: selectedJob?.job_number || null,
+          total_estimated_value: totalEstimated,
+          line_item_count: validItems.length,
+          raised_by: currentRole,
+        },
+        user_id: currentRole,
+      })
+
+      onCreated()
+      onClose()
+    } catch (e: any) { alert('Error: ' + e.message) }
+    finally { setSaving(false) }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-start justify-center overflow-y-auto py-8">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl mx-4">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+          <h2 className="text-lg font-bold text-gray-900">New Purchase Request</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={18} /></button>
+        </div>
+        <div className="px-6 py-5 space-y-5 max-h-[75vh] overflow-y-auto">
+          <div className="grid grid-cols-2 gap-4">
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Supplier <span className="text-red-500">*</span></label>
+              <select value={form.supplier_id} onChange={e => set('supplier_id', e.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500">
+                <option value="">Select supplier...</option>
+                {activeSuppliers.map(s => <option key={s.id} value={s.id}>{s.company_name}</option>)}
+              </select>
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Job <span className="text-red-500">*</span></label>
+              <select value={form.job_id} onChange={e => set('job_id', e.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500">
+                <option value="">Select job...</option>
+                {activeJobs.map(j => <option key={j.id} value={j.id}>{j.job_number} — {j.description || 'No description'}</option>)}
+              </select>
+            </div>
+          </div>
+          <div className="max-w-xs">
+            <label className="block text-xs font-medium text-gray-600 mb-1">Required By Date</label>
+            <input type="date" value={form.required_by_date} onChange={e => set('required_by_date', e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
+          </div>
+
+          <div>
+            <div className="flex items-center justify-between mb-2">
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Line Items</p>
+              <button onClick={addLineItem} className="flex items-center gap-1 text-xs font-semibold text-green-600 hover:text-green-700">
+                <Plus size={13} />Add Line Item
+              </button>
+            </div>
+            <div className="bg-gray-50 rounded-lg border border-gray-200 overflow-hidden">
+              <table className="w-full text-sm">
+                <thead>
+                  <tr className="bg-gray-100">
+                    <th className="text-left px-3 py-2 text-xs font-semibold text-gray-500 w-2/5">Description</th>
+                    <th className="text-center px-3 py-2 text-xs font-semibold text-gray-500 w-16">Qty</th>
+                    <th className="text-center px-3 py-2 text-xs font-semibold text-gray-500 w-20">UOM</th>
+                    <th className="text-right px-3 py-2 text-xs font-semibold text-gray-500 w-28">Unit Price</th>
+                    <th className="text-right px-3 py-2 text-xs font-semibold text-gray-500 w-28">Total</th>
+                    <th className="w-10"></th>
+                  </tr>
+                </thead>
+                <tbody className="divide-y divide-gray-200">
+                  {lineItems.map((li, i) => (
+                    <tr key={i}>
+                      <td className="px-2 py-1.5">
+                        <input type="text" value={li.description} onChange={e => updateLineItem(i, 'description', e.target.value)} placeholder="Item description"
+                          className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-green-500" />
+                      </td>
+                      <td className="px-2 py-1.5">
+                        <input type="number" value={li.quantity} onChange={e => updateLineItem(i, 'quantity', parseFloat(e.target.value) || 0)} min="0" step="0.01"
+                          className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm text-center focus:outline-none focus:ring-1 focus:ring-green-500" />
+                      </td>
+                      <td className="px-2 py-1.5">
+                        <select value={li.uom} onChange={e => updateLineItem(i, 'uom', e.target.value)}
+                          className="w-full border border-gray-300 rounded px-1 py-1.5 text-sm text-center focus:outline-none focus:ring-1 focus:ring-green-500">
+                          {UOM_OPTIONS.map(u => <option key={u}>{u}</option>)}
+                        </select>
+                      </td>
+                      <td className="px-2 py-1.5">
+                        <input type="number" value={li.estimated_unit_price} onChange={e => updateLineItem(i, 'estimated_unit_price', parseFloat(e.target.value) || 0)} min="0" step="0.01"
+                          className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm text-right focus:outline-none focus:ring-1 focus:ring-green-500" />
+                      </td>
+                      <td className="px-3 py-1.5 text-right text-sm font-medium text-gray-700">
+                        R {(li.quantity * li.estimated_unit_price).toLocaleString('en-ZA', { minimumFractionDigits: 2 })}
+                      </td>
+                      <td className="px-1 py-1.5">
+                        {lineItems.length > 1 && (
+                          <button onClick={() => removeLineItem(i)} className="p-1 text-gray-400 hover:text-red-500 rounded transition-colors">
+                            <Trash2 size={14} />
+                          </button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+              <div className="flex justify-end px-4 py-3 bg-white border-t border-gray-200">
+                <div className="text-sm font-bold text-gray-900">
+                  Total Estimated: <span className="text-green-700">R {totalEstimated.toLocaleString('en-ZA', { minimumFractionDigits: 2 })}</span>
+                </div>
+              </div>
+            </div>
+          </div>
+        </div>
+        <div className="flex justify-end gap-3 px-6 py-4 border-t border-gray-200 bg-gray-50 rounded-b-xl">
+          <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800 font-medium">Cancel</button>
+          <button onClick={handleSave} disabled={saving} className="px-6 py-2 bg-green-600 text-white text-sm font-semibold rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors">
+            {saving ? 'Creating...' : 'Submit Purchase Request'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// PURCHASE REQUEST DETAIL MODAL
+
+function PurchaseRequestDetailModal({ pr, onClose, onUpdated, currentRole }: { pr: PurchaseRequest; onClose: () => void; onUpdated: () => void; currentRole: string | null }) {
+  const [lineItems, setLineItems] = React.useState<PRLineItem[]>([])
+  const [loadingLines, setLoadingLines] = React.useState(true)
+  const [showApproveConfirm, setShowApproveConfirm] = React.useState(false)
+  const [showRejectModal, setShowRejectModal] = React.useState(false)
+  const [processing, setProcessing] = React.useState(false)
+  const [rejectReason, setRejectReason] = React.useState('')
+
+  React.useEffect(() => {
+    setLoadingLines(true)
+    supabase.from('purchase_request_line_items').select('*').eq('purchase_request_id', pr.id).then(({ data }) => {
+      setLineItems(data || [])
+      setLoadingLines(false)
+    })
+  }, [pr.id])
+
+  const handleApprove = async () => {
+    setProcessing(true)
+    try {
+      // 1. Set PR to APPROVED
+      const { error: approveErr } = await supabase.from('purchase_requests').update({
+        status: 'APPROVED',
+        approved_by: currentRole,
+        approved_at: new Date().toISOString(),
+      }).eq('id', pr.id)
+      if (approveErr) throw approveErr
+
+      // 2. Create PO (po_number auto-generated by trigger)
+      const { data: po, error: poErr } = await supabase.from('purchase_orders').insert({
+        purchase_request_id: pr.id,
+        supplier_id: pr.supplier_id,
+        job_id: pr.job_id,
+        status: 'ISSUED',
+        total_value: pr.total_estimated_value || 0,
+        issued_by: currentRole,
+        issued_at: new Date().toISOString(),
+        required_by_date: pr.required_by_date || null,
+      }).select('id, po_number').single()
+      if (poErr) throw poErr
+
+      // 3. Copy line items to po_line_items
+      if (lineItems.length > 0) {
+        const { error: poLiErr } = await supabase.from('po_line_items').insert(
+          lineItems.map(li => ({
+            po_id: po.id,
+            description: li.description,
+            quantity_ordered: li.quantity,
+            quantity_received: 0,
+            uom: li.uom,
+            unit_price: li.estimated_unit_price || 0,
+            total_price: li.estimated_total || 0,
+          }))
+        )
+        if (poLiErr) console.error('PO line items error:', poLiErr.message)
+      }
+
+      // 4. Set PR status to PO_ISSUED
+      await supabase.from('purchase_requests').update({ status: 'PO_ISSUED' }).eq('id', pr.id)
+
+      // 5. ML activity log
+      await supabase.from('activity_log').insert({
+        event_type: 'purchase_request_approved',
+        entity_type: 'purchase_request',
+        entity_id: pr.id,
+        metadata: {
+          pr_number: pr.pr_number,
+          supplier_name: pr.suppliers?.company_name || null,
+          job_reference: pr.jobs?.job_number || null,
+          po_number: po.po_number,
+          approved_by: currentRole,
+        },
+        user_id: currentRole,
+      })
+
+      onUpdated()
+    } catch (e: any) { alert('Error: ' + e.message); setProcessing(false) }
+  }
+
+  const handleReject = async () => {
+    if (!rejectReason.trim()) { alert('Please provide a rejection reason'); return }
+    setProcessing(true)
+    try {
+      const { error } = await supabase.from('purchase_requests').update({
+        status: 'REJECTED',
+        rejection_reason: rejectReason.trim(),
+      }).eq('id', pr.id)
+      if (error) throw error
+
+      await supabase.from('activity_log').insert({
+        event_type: 'purchase_request_rejected',
+        entity_type: 'purchase_request',
+        entity_id: pr.id,
+        metadata: {
+          pr_number: pr.pr_number,
+          supplier_name: pr.suppliers?.company_name || null,
+          rejection_reason: rejectReason.trim(),
+          rejected_by: currentRole,
+        },
+        user_id: currentRole,
+      })
+
+      onUpdated()
+    } catch (e: any) { alert('Error: ' + e.message); setProcessing(false) }
+  }
+
+  const canApproveReject = currentRole === 'HENDRIK' && pr.status === 'PENDING_APPROVAL'
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-start justify-center overflow-y-auto py-8">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl mx-4">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+          <div className="flex items-center gap-3">
+            <ShoppingCart size={20} className="text-gray-400" />
+            <div>
+              <h2 className="text-lg font-bold text-gray-900">{pr.pr_number || 'Purchase Request'}</h2>
+              <p className="text-xs text-gray-500">Raised {formatDate(pr.created_at)} by {pr.raised_by || 'Unknown'}</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold ${PR_STATUS_BADGE[pr.status] || 'bg-gray-100 text-gray-500'}`}>
+              {pr.status.replace(/_/g, ' ')}
+            </span>
+            <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={18} /></button>
+          </div>
+        </div>
+
+        <div className="px-6 py-5 space-y-5 max-h-[70vh] overflow-y-auto">
+          {/* PR details */}
+          <div className="grid grid-cols-2 gap-x-8 gap-y-3">
+            <div>
+              <p className="text-xs text-gray-400 font-medium uppercase tracking-wider">Supplier</p>
+              <p className="text-sm font-medium text-gray-900 mt-0.5">{pr.suppliers?.company_name || '-'}</p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-400 font-medium uppercase tracking-wider">Job Reference</p>
+              <p className="text-sm font-medium text-gray-900 mt-0.5">{pr.jobs?.job_number || '-'}{pr.jobs?.description ? ` — ${pr.jobs.description}` : ''}</p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-400 font-medium uppercase tracking-wider">Required By</p>
+              <p className="text-sm text-gray-700 mt-0.5">{formatDate(pr.required_by_date)}</p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-400 font-medium uppercase tracking-wider">Total Estimated Value</p>
+              <p className="text-sm font-bold text-green-700 mt-0.5">R {(pr.total_estimated_value || 0).toLocaleString('en-ZA', { minimumFractionDigits: 2 })}</p>
+            </div>
+            {pr.approved_by && (
+              <div>
+                <p className="text-xs text-gray-400 font-medium uppercase tracking-wider">Approved By</p>
+                <p className="text-sm text-gray-700 mt-0.5">{pr.approved_by} on {formatDate(pr.approved_at)}</p>
+              </div>
+            )}
+            {pr.rejection_reason && (
+              <div className="col-span-2">
+                <p className="text-xs text-gray-400 font-medium uppercase tracking-wider">Rejection Reason</p>
+                <p className="text-sm text-red-700 mt-0.5 bg-red-50 rounded-lg p-2">{pr.rejection_reason}</p>
+              </div>
+            )}
+          </div>
+
+          {/* Line items */}
+          <div>
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Line Items</p>
+            {loadingLines ? (
+              <div className="text-center py-6 text-gray-400 text-sm">Loading line items...</div>
+            ) : (
+              <div className="bg-gray-50 rounded-lg border border-gray-200 overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-gray-100">
+                      <th className="text-left px-3 py-2 text-xs font-semibold text-gray-500">#</th>
+                      <th className="text-left px-3 py-2 text-xs font-semibold text-gray-500">Description</th>
+                      <th className="text-center px-3 py-2 text-xs font-semibold text-gray-500">Qty</th>
+                      <th className="text-center px-3 py-2 text-xs font-semibold text-gray-500">UOM</th>
+                      <th className="text-right px-3 py-2 text-xs font-semibold text-gray-500">Unit Price</th>
+                      <th className="text-right px-3 py-2 text-xs font-semibold text-gray-500">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200">
+                    {lineItems.map((li, i) => (
+                      <tr key={li.id}>
+                        <td className="px-3 py-2 text-gray-400">{i + 1}</td>
+                        <td className="px-3 py-2 text-gray-900">{li.description}</td>
+                        <td className="px-3 py-2 text-center text-gray-700">{li.quantity}</td>
+                        <td className="px-3 py-2 text-center text-gray-500">{li.uom || '-'}</td>
+                        <td className="px-3 py-2 text-right text-gray-700">R {(li.estimated_unit_price || 0).toLocaleString('en-ZA', { minimumFractionDigits: 2 })}</td>
+                        <td className="px-3 py-2 text-right font-medium text-gray-900">R {(li.estimated_total || 0).toLocaleString('en-ZA', { minimumFractionDigits: 2 })}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <div className="flex justify-end px-4 py-3 bg-white border-t border-gray-200">
+                  <div className="text-sm font-bold text-gray-900">
+                    Total: <span className="text-green-700">R {(pr.total_estimated_value || 0).toLocaleString('en-ZA', { minimumFractionDigits: 2 })}</span>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Action buttons */}
+        <div className="flex justify-end gap-3 px-6 py-4 border-t border-gray-200 bg-gray-50 rounded-b-xl">
+          <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800 font-medium">Close</button>
+          {canApproveReject && !showApproveConfirm && !showRejectModal && (
+            <>
+              <button onClick={() => setShowRejectModal(true)} className="px-4 py-2 bg-red-600 text-white text-sm font-semibold rounded-lg hover:bg-red-700 transition-colors flex items-center gap-2">
+                <XCircle size={14} />Reject
+              </button>
+              <button onClick={() => setShowApproveConfirm(true)} className="px-4 py-2 bg-green-600 text-white text-sm font-semibold rounded-lg hover:bg-green-700 transition-colors flex items-center gap-2">
+                <CheckCircle size={14} />Approve
+              </button>
+            </>
+          )}
+        </div>
+
+        {/* Approve confirmation inline */}
+        {showApproveConfirm && (
+          <div className="px-6 py-4 border-t border-green-200 bg-green-50 rounded-b-xl">
+            <p className="text-sm text-green-800 font-medium mb-3">Approve this purchase request? This will automatically generate a Purchase Order.</p>
+            <div className="flex justify-end gap-3">
+              <button onClick={() => setShowApproveConfirm(false)} disabled={processing} className="px-4 py-2 text-sm text-gray-600 font-medium">Cancel</button>
+              <button onClick={handleApprove} disabled={processing} className="px-6 py-2 bg-green-600 text-white text-sm font-semibold rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors">
+                {processing ? 'Processing...' : 'Confirm Approve & Generate PO'}
+              </button>
+            </div>
+          </div>
+        )}
+
+        {/* Reject reason inline */}
+        {showRejectModal && (
+          <div className="px-6 py-4 border-t border-red-200 bg-red-50 rounded-b-xl">
+            <p className="text-sm text-red-800 font-medium mb-2">Rejection Reason <span className="text-red-500">*</span></p>
+            <textarea value={rejectReason} onChange={e => setRejectReason(e.target.value)} rows={2} placeholder="Provide a reason for rejecting this purchase request..."
+              className="w-full border border-red-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-500 resize-none mb-3" />
+            <div className="flex justify-end gap-3">
+              <button onClick={() => { setShowRejectModal(false); setRejectReason('') }} disabled={processing} className="px-4 py-2 text-sm text-gray-600 font-medium">Cancel</button>
+              <button onClick={handleReject} disabled={processing || !rejectReason.trim()} className="px-6 py-2 bg-red-600 text-white text-sm font-semibold rounded-lg hover:bg-red-700 disabled:opacity-50 transition-colors">
+                {processing ? 'Rejecting...' : 'Confirm Reject'}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+    </div>
+  )
+}
+
+// PURCHASE ORDERS TAB
+
+const PO_STATUS_BADGE: Record<string, string> = {
+  ISSUED: 'bg-blue-100 text-blue-700 border border-blue-200',
+  PARTIALLY_RECEIVED: 'bg-amber-100 text-amber-700 border border-amber-200',
+  FULLY_RECEIVED: 'bg-green-100 text-green-700 border border-green-200',
+  INVOICED: 'bg-purple-100 text-purple-700 border border-purple-200',
+  CLOSED: 'bg-gray-100 text-gray-500 border border-gray-200',
+}
+
+function PurchaseOrdersTab({ purchaseOrders, loading, onRefresh, currentRole }: { purchaseOrders: PurchaseOrder[]; loading: boolean; onRefresh: () => void; currentRole: string | null }) {
+  const [searchTerm, setSearchTerm] = React.useState('')
+  const [statusFilter, setStatusFilter] = React.useState<string>('ACTIVE')
+  const [selectedPO, setSelectedPO] = React.useState<PurchaseOrder | null>(null)
+  const [deliveryPO, setDeliveryPO] = React.useState<PurchaseOrder | null>(null)
+  const canLogDelivery = currentRole === 'CHARLES' || currentRole === 'HENDRIK'
+
+  const filtered = React.useMemo(() => {
+    let result = [...purchaseOrders]
+    if (statusFilter === 'ACTIVE') result = result.filter(po => po.status !== 'CLOSED')
+    else if (statusFilter !== 'ALL') result = result.filter(po => po.status === statusFilter)
+    if (searchTerm.trim()) {
+      const term = searchTerm.toLowerCase()
+      result = result.filter(po =>
+        po.po_number?.toLowerCase().includes(term) ||
+        po.suppliers?.company_name?.toLowerCase().includes(term) ||
+        po.jobs?.job_number?.toLowerCase().includes(term))
+    }
+    return result
+  }, [purchaseOrders, statusFilter, searchTerm])
+
+  const today = new Date().toISOString().split('T')[0]
+  const isOverdue = (po: PurchaseOrder) =>
+    po.required_by_date && po.required_by_date < today && po.status !== 'FULLY_RECEIVED' && po.status !== 'CLOSED'
+
+  const activeCount = purchaseOrders.filter(po => po.status !== 'CLOSED').length
+
+  if (loading) return <div className="flex items-center justify-center h-64 gap-3 text-gray-400"><div className="w-5 h-5 border-2 border-gray-300 border-t-green-500 rounded-full animate-spin" /><span>Loading purchase orders...</span></div>
+
+  return (
+    <div className="flex-1 flex flex-col min-h-0">
+      <div className="mb-4">
+        <div className="flex items-center gap-2 mb-1">
+          <h2 className="text-lg font-bold text-gray-900">Purchase Orders</h2>
+          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-700">{activeCount} active</span>
+        </div>
+        <p className="text-sm text-gray-500">Auto-generated from approved purchase requests</p>
+      </div>
+
+      <div className="flex items-center gap-3 mb-4">
+        <div className="relative flex-1 max-w-md">
+          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+          <input type="text" placeholder="Search by PO number, supplier or job..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)}
+            className="w-full pl-9 pr-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500" />
+        </div>
+        <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
+          className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500">
+          <option value="ACTIVE">Active (not Closed)</option>
+          <option value="ALL">All Statuses</option>
+          <option value="ISSUED">Issued</option>
+          <option value="PARTIALLY_RECEIVED">Partially Received</option>
+          <option value="FULLY_RECEIVED">Fully Received</option>
+          <option value="INVOICED">Invoiced</option>
+          <option value="CLOSED">Closed</option>
+        </select>
+        <button onClick={onRefresh} className="flex items-center gap-2 px-3 py-2 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors border border-gray-300">
+          <RefreshCw size={14} />Refresh
+        </button>
+      </div>
+
+      <div className="flex-1 overflow-auto bg-white rounded-xl border border-gray-200 shadow-sm">
+        <table className="w-full text-sm">
+          <thead className="bg-gray-50 sticky top-0">
+            <tr>
+              <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">PO Number</th>
+              <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Supplier</th>
+              <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Job Ref</th>
+              <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Required By</th>
+              <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Total Value</th>
+              <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Status</th>
+              <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Issued By</th>
+              <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Date Issued</th>
+              <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Actions</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {filtered.length === 0 ? (
+              <tr><td colSpan={9} className="px-4 py-12 text-center text-gray-400">
+                {searchTerm || statusFilter !== 'ACTIVE' ? 'No purchase orders match your filter' : 'No active purchase orders.'}
+              </td></tr>
+            ) : filtered.map(po => (
+              <tr key={po.id} className="hover:bg-gray-50 transition-colors cursor-pointer" onClick={() => setSelectedPO(po)}>
+                <td className="px-4 py-3 font-medium text-gray-900 font-mono text-xs">{po.po_number}</td>
+                <td className="px-4 py-3 text-gray-700">{po.suppliers?.company_name || '-'}</td>
+                <td className="px-4 py-3 text-gray-600 font-mono text-xs">{po.jobs?.job_number || '-'}</td>
+                <td className={`px-4 py-3 ${isOverdue(po) ? 'text-red-600 font-semibold' : 'text-gray-600'}`}>{formatDate(po.required_by_date)}{isOverdue(po) ? ' OVERDUE' : ''}</td>
+                <td className="px-4 py-3 text-right text-gray-700 font-medium">R {(po.total_value || 0).toLocaleString('en-ZA', { minimumFractionDigits: 2 })}</td>
+                <td className="px-4 py-3">
+                  <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${PO_STATUS_BADGE[po.status] || 'bg-gray-100 text-gray-500'}`}>
+                    {po.status.replace(/_/g, ' ')}
+                  </span>
+                </td>
+                <td className="px-4 py-3 text-gray-600">{po.issued_by || '-'}</td>
+                <td className="px-4 py-3 text-gray-600">{formatDate(po.issued_at)}</td>
+                <td className="px-4 py-3 text-right" onClick={e => e.stopPropagation()}>
+                  <div className="flex items-center justify-end gap-1">
+                    {canLogDelivery && (po.status === 'ISSUED' || po.status === 'PARTIALLY_RECEIVED') && (
+                      <button onClick={() => setDeliveryPO(po)} className="p-1.5 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded transition-colors" title="Log Delivery">
+                        <Truck size={14} />
+                      </button>
+                    )}
+                    <button onClick={() => setSelectedPO(po)} className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors" title="View Details">
+                      <Eye size={14} />
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {selectedPO && <PODetailModal po={selectedPO} onClose={() => setSelectedPO(null)} onUpdated={() => { setSelectedPO(null); onRefresh() }} currentRole={currentRole} />}
+      {deliveryPO && <LogDeliveryModal po={deliveryPO} onClose={() => setDeliveryPO(null)} onSaved={() => { setDeliveryPO(null); onRefresh() }} currentRole={currentRole} />}
+    </div>
+  )
+}
+
+// PO DETAIL MODAL
+
+function PODetailModal({ po, onClose, onUpdated, currentRole }: { po: PurchaseOrder; onClose: () => void; onUpdated: () => void; currentRole: string | null }) {
+  const [lineItems, setLineItems] = React.useState<POLineItem[]>([])
+  const [loadingLines, setLoadingLines] = React.useState(true)
+  const [showCloseModal, setShowCloseModal] = React.useState(false)
+  const [closeReason, setCloseReason] = React.useState('')
+  const [processing, setProcessing] = React.useState(false)
+  const [showDeliveryModal, setShowDeliveryModal] = React.useState(false)
+  const [grvHistory, setGrvHistory] = React.useState<any[]>([])
+  const [grvExpanded, setGrvExpanded] = React.useState(false)
+  const [refreshKey, setRefreshKey] = React.useState(0)
+
+  const loadData = React.useCallback(async () => {
+    setLoadingLines(true)
+    const [liRes, grvRes] = await Promise.all([
+      supabase.from('po_line_items').select('*').eq('po_id', po.id),
+      supabase.from('goods_received_vouchers').select('*, grv_line_items(*, po_line_items(description))').eq('po_id', po.id).order('received_at', { ascending: false }),
+    ])
+    setLineItems(liRes.data || [])
+    setGrvHistory(grvRes.data || [])
+    setLoadingLines(false)
+  }, [po.id])
+
+  React.useEffect(() => {
+    loadData()
+    // Log view event
+    supabase.from('activity_log').insert({
+      event_type: 'po_viewed',
+      entity_type: 'purchase_order',
+      entity_id: po.id,
+      metadata: { po_number: po.po_number, supplier_name: po.suppliers?.company_name || null, viewed_by: currentRole },
+      user_id: currentRole,
+    })
+  }, [po.id, po.po_number, po.suppliers?.company_name, currentRole, loadData, refreshKey])
+
+  const totalOrdered = lineItems.reduce((sum, li) => sum + li.quantity_ordered, 0)
+  const totalReceived = lineItems.reduce((sum, li) => sum + li.quantity_received, 0)
+  const deliveryPct = totalOrdered > 0 ? Math.round((totalReceived / totalOrdered) * 100) : 0
+
+  const today = new Date().toISOString().split('T')[0]
+  const isOverdue = po.required_by_date && po.required_by_date < today && po.status !== 'FULLY_RECEIVED' && po.status !== 'CLOSED'
+
+  const canLogDelivery = (currentRole === 'CHARLES' || currentRole === 'HENDRIK') && (po.status === 'ISSUED' || po.status === 'PARTIALLY_RECEIVED')
+
+  const handleDownloadPDF = () => {
+    const fmtDate = (d: string | null | undefined) => d ? new Date(d).toLocaleDateString('en-ZA') : '-'
+    const liRows = lineItems.map((li, i) =>
+      `<tr>
+        <td style="border:1px solid #cbd5e1;padding:6px 10px;font-size:9pt">${i + 1}</td>
+        <td style="border:1px solid #cbd5e1;padding:6px 10px;font-size:9pt">${li.description}</td>
+        <td style="border:1px solid #cbd5e1;padding:6px 10px;font-size:9pt;text-align:center">${li.quantity_ordered}</td>
+        <td style="border:1px solid #cbd5e1;padding:6px 10px;font-size:9pt;text-align:center">${li.quantity_received}</td>
+        <td style="border:1px solid #cbd5e1;padding:6px 10px;font-size:9pt;text-align:center">${li.uom || '-'}</td>
+        <td style="border:1px solid #cbd5e1;padding:6px 10px;font-size:9pt;text-align:right">R ${(li.unit_price || 0).toLocaleString('en-ZA', { minimumFractionDigits: 2 })}</td>
+        <td style="border:1px solid #cbd5e1;padding:6px 10px;font-size:9pt;text-align:right;font-weight:600">R ${(li.total_price || 0).toLocaleString('en-ZA', { minimumFractionDigits: 2 })}</td>
+      </tr>`
+    ).join('')
+
+    const html = `<!DOCTYPE html><html><head><title>${po.po_number}</title>
+<style>
+  @page { size:A4; margin:15mm; }
+  body { font-family: Arial, Helvetica, sans-serif; color: #1e293b; margin: 0; padding: 20mm; }
+  .hdr { display:flex; justify-content:space-between; align-items:center; border-bottom:3px solid #1d3461; padding-bottom:12px; margin-bottom:20px; }
+  .hdr-logo { font-size:24pt; font-weight:900; color:#1d3461; letter-spacing:-0.5px; }
+  .hdr-logo span { color:#4db848; }
+  .hdr-right { text-align:right; }
+  .po-title { font-size:14pt; font-weight:700; color:#1d3461; }
+  .po-num { font-size:18pt; font-weight:900; color:#4db848; margin-top:2px; }
+  .info-grid { display:grid; grid-template-columns:1fr 1fr; gap:12px; margin-bottom:16px; }
+  .info-box { background:#f8fafc; border:1px solid #e2e8f0; border-radius:6px; padding:10px 14px; }
+  .info-label { font-size:8pt; font-weight:700; color:#64748b; text-transform:uppercase; letter-spacing:0.05em; }
+  .info-val { font-size:10pt; font-weight:600; color:#1d3461; margin-top:3px; }
+  table { border-collapse:collapse; width:100%; margin-top:16px; }
+  th { background:#1d3461; color:white; padding:8px 10px; font-size:8pt; font-weight:700; text-transform:uppercase; text-align:left; }
+  .total-row { background:#f0fdf4; }
+  .total-row td { font-weight:700; font-size:10pt; }
+  .footer { margin-top:30px; border-top:1px solid #e2e8f0; padding-top:10px; font-size:8pt; color:#94a3b8; display:flex; justify-content:space-between; }
+  .print-bar { background:#1d3461; color:white; padding:10px 20px; text-align:center; position:sticky; top:0; z-index:100; }
+  .print-btn { background:#4db848; color:white; border:none; padding:8px 24px; font-size:11pt; font-weight:bold; border-radius:6px; cursor:pointer; margin:0 6px; }
+  .close-btn { background:#dc2626; color:white; border:none; padding:8px 24px; font-size:11pt; font-weight:bold; border-radius:6px; cursor:pointer; margin:0 6px; }
+  @media print { .print-bar{display:none} body{padding:0} }
+</style></head><body>
+<div class="print-bar">
+  <button class="print-btn" onclick="window.print()">💾 Save as PDF</button>
+  <button class="print-btn" style="background:#2563eb" onclick="window.print()">🖨️ Print</button>
+  <button class="close-btn" onclick="window.close()">✕ Close</button>
+</div>
+<div class="hdr">
+  <div>
+    <div class="hdr-logo">ERHA<span>.</span> FABRICATION</div>
+    <div style="font-size:8pt;color:#64748b;margin-top:2px">ERHA Fabrication & Construction (Pty) Ltd</div>
+  </div>
+  <div class="hdr-right">
+    <div class="po-title">PURCHASE ORDER</div>
+    <div class="po-num">${po.po_number}</div>
+    <div style="font-size:9pt;color:#64748b;margin-top:4px">Date: ${fmtDate(po.issued_at)}</div>
+  </div>
+</div>
+<div class="info-grid">
+  <div class="info-box">
+    <div class="info-label">Supplier</div>
+    <div class="info-val">${po.suppliers?.company_name || '-'}</div>
+    ${po.suppliers?.contact_person ? `<div style="font-size:9pt;color:#475569;margin-top:3px">Contact: ${po.suppliers.contact_person}</div>` : ''}
+    ${po.suppliers?.phone ? `<div style="font-size:9pt;color:#475569">Tel: ${po.suppliers.phone}</div>` : ''}
+    ${po.suppliers?.email ? `<div style="font-size:9pt;color:#475569">Email: ${po.suppliers.email}</div>` : ''}
+    ${po.suppliers?.account_number ? `<div style="font-size:9pt;color:#475569">Account: ${po.suppliers.account_number}</div>` : ''}
+  </div>
+  <div class="info-box">
+    <div class="info-label">Job Reference</div>
+    <div class="info-val">${po.jobs?.job_number || '-'}</div>
+    ${po.jobs?.description ? `<div style="font-size:9pt;color:#475569;margin-top:3px">${po.jobs.description}</div>` : ''}
+    <div style="margin-top:8px"><div class="info-label">Required By</div><div class="info-val" ${isOverdue ? 'style="color:#ef4444"' : ''}>${fmtDate(po.required_by_date)}${isOverdue ? ' — OVERDUE' : ''}</div></div>
+    ${po.purchase_requests?.pr_number ? `<div style="margin-top:8px"><div class="info-label">Linked PR</div><div class="info-val">${po.purchase_requests.pr_number}</div></div>` : ''}
+  </div>
+</div>
+<div style="font-size:9pt;font-weight:700;color:#1d3461;margin-bottom:4px">ORDER ITEMS</div>
+<table>
+  <thead><tr>
+    <th style="width:30px">#</th><th>Description</th><th style="text-align:center;width:70px">Qty</th><th style="text-align:center;width:70px">Received</th><th style="text-align:center;width:60px">UOM</th><th style="text-align:right;width:90px">Unit Price</th><th style="text-align:right;width:100px">Total</th>
+  </tr></thead>
+  <tbody>
+    ${liRows}
+    <tr class="total-row">
+      <td colspan="6" style="border:1px solid #cbd5e1;padding:8px 10px;text-align:right">TOTAL VALUE</td>
+      <td style="border:1px solid #cbd5e1;padding:8px 10px;text-align:right;color:#1d3461">R ${(po.total_value || 0).toLocaleString('en-ZA', { minimumFractionDigits: 2 })}</td>
+    </tr>
+  </tbody>
+</table>
+<div style="margin-top:24px;display:grid;grid-template-columns:1fr 1fr;gap:20px">
+  <div><div style="border-bottom:1px solid #1d3461;padding-bottom:30px;font-size:8pt;color:#64748b">Authorised Signature</div></div>
+  <div><div style="border-bottom:1px solid #1d3461;padding-bottom:30px;font-size:8pt;color:#64748b">Date</div></div>
+</div>
+<div class="footer">
+  <div>Issued by: ${po.issued_by || '-'} | Status: ${po.status.replace(/_/g, ' ')}</div>
+  <div>ERHA Fabrication & Construction (Pty) Ltd — Confidential</div>
+</div>
+</body></html>`
+
+    const w = window.open('', '_blank')
+    if (w) { w.document.write(html); w.document.close() }
+
+    // Log download event
+    supabase.from('activity_log').insert({
+      event_type: 'po_downloaded',
+      entity_type: 'purchase_order',
+      entity_id: po.id,
+      metadata: { po_number: po.po_number, downloaded_by: currentRole },
+      user_id: currentRole,
+    })
+  }
+
+  const handleClosePO = async () => {
+    if (!closeReason.trim()) { alert('Please provide a reason for closing this PO'); return }
+    setProcessing(true)
+    try {
+      const { error } = await supabase.from('purchase_orders').update({ status: 'CLOSED' }).eq('id', po.id)
+      if (error) throw error
+
+      await supabase.from('activity_log').insert({
+        event_type: 'po_closed',
+        entity_type: 'purchase_order',
+        entity_id: po.id,
+        metadata: { po_number: po.po_number, reason: closeReason.trim(), closed_by: currentRole },
+        user_id: currentRole,
+      })
+
+      onUpdated()
+    } catch (e: any) { alert('Error: ' + e.message); setProcessing(false) }
+  }
+
+  const qtyColor = (ordered: number, received: number) => {
+    if (received >= ordered) return 'text-green-700 font-semibold'
+    if (received > 0) return 'text-amber-600 font-semibold'
+    return 'text-gray-400'
+  }
+
+  const canClose = currentRole === 'HENDRIK' && po.status !== 'CLOSED'
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-start justify-center overflow-y-auto py-8">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl mx-4">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+          <div className="flex items-center gap-3">
+            <ShoppingCart size={20} className="text-gray-400" />
+            <div>
+              <h2 className="text-lg font-bold text-gray-900">{po.po_number}</h2>
+              <p className="text-xs text-gray-500">Issued {formatDate(po.issued_at)} by {po.issued_by || 'System'}</p>
+            </div>
+          </div>
+          <div className="flex items-center gap-3">
+            <span className={`inline-flex items-center px-2.5 py-1 rounded-full text-xs font-semibold ${PO_STATUS_BADGE[po.status] || 'bg-gray-100 text-gray-500'}`}>
+              {po.status.replace(/_/g, ' ')}
+            </span>
+            <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={18} /></button>
+          </div>
+        </div>
+
+        <div className="px-6 py-5 space-y-5 max-h-[70vh] overflow-y-auto">
+          {/* PO details */}
+          <div className="grid grid-cols-2 gap-x-8 gap-y-3">
+            <div>
+              <p className="text-xs text-gray-400 font-medium uppercase tracking-wider">Supplier</p>
+              <p className="text-sm font-medium text-gray-900 mt-0.5">{po.suppliers?.company_name || '-'}</p>
+              {po.suppliers?.contact_person && <p className="text-xs text-gray-500">{po.suppliers.contact_person}{po.suppliers.phone ? ` · ${po.suppliers.phone}` : ''}</p>}
+            </div>
+            <div>
+              <p className="text-xs text-gray-400 font-medium uppercase tracking-wider">Job Reference</p>
+              <p className="text-sm font-medium text-gray-900 mt-0.5">{po.jobs?.job_number || '-'}{po.jobs?.description ? ` — ${po.jobs.description}` : ''}</p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-400 font-medium uppercase tracking-wider">Required By</p>
+              <p className={`text-sm mt-0.5 ${isOverdue ? 'text-red-600 font-bold' : 'text-gray-700'}`}>{formatDate(po.required_by_date)}{isOverdue ? ' — OVERDUE' : ''}</p>
+            </div>
+            <div>
+              <p className="text-xs text-gray-400 font-medium uppercase tracking-wider">Total Value</p>
+              <p className="text-sm font-bold text-green-700 mt-0.5">R {(po.total_value || 0).toLocaleString('en-ZA', { minimumFractionDigits: 2 })}</p>
+            </div>
+            {po.purchase_requests?.pr_number && (
+              <div>
+                <p className="text-xs text-gray-400 font-medium uppercase tracking-wider">Linked Purchase Request</p>
+                <p className="text-sm font-medium text-blue-600 mt-0.5">{po.purchase_requests.pr_number}</p>
+              </div>
+            )}
+            <div>
+              <p className="text-xs text-gray-400 font-medium uppercase tracking-wider">Last Status Change</p>
+              <p className="text-sm text-gray-700 mt-0.5">{formatDate(po.updated_at)}</p>
+            </div>
+          </div>
+
+          {/* Delivery progress */}
+          <div>
+            <div className="flex items-center justify-between mb-1.5">
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Delivery Progress</p>
+              <p className="text-xs font-bold text-gray-700">{deliveryPct}%</p>
+            </div>
+            <div className="w-full h-3 rounded-full overflow-hidden" style={{ background: '#1d3461' }}>
+              <div className="h-full rounded-full transition-all" style={{ width: `${deliveryPct}%`, background: '#4db848' }} />
+            </div>
+            <p className="text-xs text-gray-500 mt-1">{totalReceived} of {totalOrdered} items received</p>
+          </div>
+
+          {/* Line items */}
+          <div>
+            <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-2">Order Line Items</p>
+            {loadingLines ? (
+              <div className="text-center py-6 text-gray-400 text-sm">Loading line items...</div>
+            ) : (
+              <div className="bg-gray-50 rounded-lg border border-gray-200 overflow-hidden">
+                <table className="w-full text-sm">
+                  <thead>
+                    <tr className="bg-gray-100">
+                      <th className="text-left px-3 py-2 text-xs font-semibold text-gray-500">#</th>
+                      <th className="text-left px-3 py-2 text-xs font-semibold text-gray-500">Description</th>
+                      <th className="text-center px-3 py-2 text-xs font-semibold text-gray-500">Ordered</th>
+                      <th className="text-center px-3 py-2 text-xs font-semibold text-gray-500">Received</th>
+                      <th className="text-center px-3 py-2 text-xs font-semibold text-gray-500">UOM</th>
+                      <th className="text-right px-3 py-2 text-xs font-semibold text-gray-500">Unit Price</th>
+                      <th className="text-right px-3 py-2 text-xs font-semibold text-gray-500">Total</th>
+                    </tr>
+                  </thead>
+                  <tbody className="divide-y divide-gray-200">
+                    {lineItems.map((li, i) => (
+                      <tr key={li.id}>
+                        <td className="px-3 py-2 text-gray-400">{i + 1}</td>
+                        <td className="px-3 py-2 text-gray-900">{li.description}</td>
+                        <td className="px-3 py-2 text-center text-gray-700">{li.quantity_ordered}</td>
+                        <td className={`px-3 py-2 text-center ${qtyColor(li.quantity_ordered, li.quantity_received)}`}>{li.quantity_received}</td>
+                        <td className="px-3 py-2 text-center text-gray-500">{li.uom || '-'}</td>
+                        <td className="px-3 py-2 text-right text-gray-700">R {(li.unit_price || 0).toLocaleString('en-ZA', { minimumFractionDigits: 2 })}</td>
+                        <td className="px-3 py-2 text-right font-medium text-gray-900">R {(li.total_price || 0).toLocaleString('en-ZA', { minimumFractionDigits: 2 })}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+                <div className="flex justify-end px-4 py-3 bg-white border-t border-gray-200">
+                  <div className="text-sm font-bold text-gray-900">
+                    Total: <span className="text-green-700">R {(po.total_value || 0).toLocaleString('en-ZA', { minimumFractionDigits: 2 })}</span>
+                  </div>
+                </div>
+              </div>
+            )}
+          </div>
+
+          {/* GRV Delivery History */}
+          <div>
+            <button onClick={() => setGrvExpanded(!grvExpanded)} className="flex items-center gap-2 w-full text-left">
+              <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider">Delivery History ({grvHistory.length})</p>
+              {grvExpanded ? <ChevronUp size={14} className="text-gray-400" /> : <ChevronDown size={14} className="text-gray-400" />}
+            </button>
+            {grvExpanded && (
+              <div className="mt-2 space-y-2">
+                {grvHistory.length === 0 ? (
+                  <p className="text-sm text-gray-400 py-3 text-center">No deliveries recorded yet</p>
+                ) : grvHistory.map((grv: any) => (
+                  <div key={grv.id} className="bg-gray-50 rounded-lg border border-gray-200 p-3">
+                    <div className="flex items-center justify-between mb-2">
+                      <div className="flex items-center gap-2">
+                        <Truck size={14} className="text-green-600" />
+                        <span className="text-sm font-semibold text-gray-900">{formatDate(grv.received_at)}</span>
+                        <span className="text-xs text-gray-500">by {grv.received_by || 'Unknown'}</span>
+                      </div>
+                    </div>
+                    {grv.notes && <p className="text-xs text-gray-600 mb-2 italic">{grv.notes}</p>}
+                    <div className="space-y-1">
+                      {(grv.grv_line_items || []).map((gli: any) => (
+                        <div key={gli.id} className="flex items-center gap-3 text-xs">
+                          <span className="text-gray-700 flex-1">{gli.po_line_items?.description || 'Item'}</span>
+                          <span className="font-medium text-gray-900">Qty: {gli.quantity_received}</span>
+                          <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-xs font-semibold ${
+                            gli.condition === 'GOOD' ? 'bg-green-100 text-green-700' :
+                            gli.condition === 'DAMAGED' ? 'bg-red-100 text-red-700' :
+                            'bg-amber-100 text-amber-700'
+                          }`}>{gli.condition}</span>
+                          {gli.notes && <span className="text-gray-400 italic">{gli.notes}</span>}
+                        </div>
+                      ))}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
+          </div>
+        </div>
+
+        {/* Action buttons */}
+        <div className="flex justify-between items-center px-6 py-4 border-t border-gray-200 bg-gray-50 rounded-b-xl">
+          <div className="flex items-center gap-2">
+            <button onClick={handleDownloadPDF} className="flex items-center gap-2 px-4 py-2 bg-[#1d3461] text-white text-sm font-semibold rounded-lg hover:bg-[#162850] transition-colors">
+              <Download size={14} />Download PDF
+            </button>
+            {canLogDelivery && (
+              <button onClick={() => setShowDeliveryModal(true)} className="flex items-center gap-2 px-4 py-2 bg-green-600 text-white text-sm font-semibold rounded-lg hover:bg-green-700 transition-colors">
+                <Truck size={14} />Log Delivery
+              </button>
+            )}
+          </div>
+          <div className="flex items-center gap-3">
+            <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800 font-medium">Close</button>
+            {canClose && !showCloseModal && (
+              <button onClick={() => setShowCloseModal(true)} className="px-4 py-2 bg-gray-600 text-white text-sm font-semibold rounded-lg hover:bg-gray-700 transition-colors">
+                Close PO
+              </button>
+            )}
+          </div>
+        </div>
+
+        {/* Close PO confirmation */}
+        {showCloseModal && (
+          <div className="px-6 py-4 border-t border-gray-300 bg-gray-100 rounded-b-xl">
+            <p className="text-sm text-gray-800 font-medium mb-2">Reason for closing PO <span className="text-red-500">*</span></p>
+            <textarea value={closeReason} onChange={e => setCloseReason(e.target.value)} rows={2} placeholder="Provide a reason for closing this purchase order..."
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-gray-500 resize-none mb-3" />
+            <div className="flex justify-end gap-3">
+              <button onClick={() => { setShowCloseModal(false); setCloseReason('') }} disabled={processing} className="px-4 py-2 text-sm text-gray-600 font-medium">Cancel</button>
+              <button onClick={handleClosePO} disabled={processing || !closeReason.trim()} className="px-6 py-2 bg-gray-700 text-white text-sm font-semibold rounded-lg hover:bg-gray-800 disabled:opacity-50 transition-colors">
+                {processing ? 'Closing...' : 'Confirm Close PO'}
+              </button>
+            </div>
+          </div>
+        )}
+      </div>
+
+      {showDeliveryModal && <LogDeliveryModal po={po} onClose={() => setShowDeliveryModal(false)} onSaved={() => { setShowDeliveryModal(false); setRefreshKey(k => k + 1) }} currentRole={currentRole} />}
+    </div>
+  )
+}
+
+// LOG DELIVERY (GRV) MODAL
+
+const CONDITION_BADGE: Record<string, string> = {
+  GOOD: 'bg-green-100 text-green-700',
+  DAMAGED: 'bg-red-100 text-red-700',
+  SHORT: 'bg-amber-100 text-amber-700',
+}
+
+function LogDeliveryModal({ po, onClose, onSaved, currentRole }: { po: PurchaseOrder; onClose: () => void; onSaved: () => void; currentRole: string | null }) {
+  const [poLineItems, setPoLineItems] = React.useState<POLineItem[]>([])
+  const [loading, setLoading] = React.useState(true)
+  const [saving, setSaving] = React.useState(false)
+  const [deliveryNotes, setDeliveryNotes] = React.useState('')
+  const [receiptLines, setReceiptLines] = React.useState<Array<{
+    po_line_item_id: string
+    description: string
+    qty_ordered: number
+    qty_previously_received: number
+    qty_remaining: number
+    qty_now: number
+    condition: string
+    notes: string
+  }>>([])
+  const [successMsg, setSuccessMsg] = React.useState('')
+
+  React.useEffect(() => {
+    setLoading(true)
+    supabase.from('po_line_items').select('*').eq('po_id', po.id).then(({ data }) => {
+      const items = data || []
+      setPoLineItems(items)
+      setReceiptLines(items.map(li => ({
+        po_line_item_id: li.id,
+        description: li.description,
+        qty_ordered: li.quantity_ordered,
+        qty_previously_received: li.quantity_received,
+        qty_remaining: Math.max(0, li.quantity_ordered - li.quantity_received),
+        qty_now: Math.max(0, li.quantity_ordered - li.quantity_received),
+        condition: 'GOOD',
+        notes: '',
+      })))
+      setLoading(false)
+    })
+  }, [po.id])
+
+  const updateLine = (i: number, field: string, value: any) =>
+    setReceiptLines(lines => lines.map((l, idx) => idx === i ? { ...l, [field]: value } : l))
+
+  const totalReceivingNow = receiptLines.reduce((sum, l) => sum + l.qty_now, 0)
+
+  const handleSave = async () => {
+    if (totalReceivingNow <= 0) { alert('Nothing to receive — enter quantities for at least one line item'); return }
+    setSaving(true)
+    try {
+      // 1. Insert GRV
+      const { data: grv, error: grvErr } = await supabase.from('goods_received_vouchers').insert({
+        po_id: po.id,
+        received_by: currentRole,
+        received_at: new Date().toISOString(),
+        notes: deliveryNotes.trim() || null,
+      }).select('id').single()
+      if (grvErr) throw grvErr
+
+      // 2. Insert GRV line items
+      const grvLines = receiptLines.filter(l => l.qty_now > 0)
+      if (grvLines.length > 0) {
+        const { error: gliErr } = await supabase.from('grv_line_items').insert(
+          grvLines.map(l => ({
+            grv_id: grv.id,
+            po_line_item_id: l.po_line_item_id,
+            quantity_received: l.qty_now,
+            condition: l.condition,
+            notes: l.notes.trim() || null,
+          }))
+        )
+        if (gliErr) console.error('GRV line items error:', gliErr.message)
+      }
+
+      // 3. Update po_line_items.quantity_received
+      for (const l of grvLines) {
+        const newQtyReceived = l.qty_previously_received + l.qty_now
+        await supabase.from('po_line_items').update({ quantity_received: newQtyReceived }).eq('id', l.po_line_item_id)
+      }
+
+      // 4. Determine new PO status
+      const updatedLines = receiptLines.map(l => ({
+        ordered: l.qty_ordered,
+        received: l.qty_previously_received + l.qty_now,
+      }))
+      const allFullyReceived = updatedLines.every(l => l.received >= l.ordered)
+      const someReceived = updatedLines.some(l => l.received > 0)
+      const newStatus = allFullyReceived ? 'FULLY_RECEIVED' : someReceived ? 'PARTIALLY_RECEIVED' : po.status
+      if (newStatus !== po.status) {
+        await supabase.from('purchase_orders').update({ status: newStatus }).eq('id', po.id)
+      }
+
+      // 5. Stock matching — fuzzy match on item_name
+      const { data: stockItems } = await supabase.from('stock_items').select('id, item_name, current_quantity').eq('is_active', true)
+      const allStock = stockItems || []
+      for (const l of grvLines) {
+        const descLower = l.description.toLowerCase().trim()
+        const match = allStock.find(s => s.item_name.toLowerCase().trim() === descLower)
+        if (match) {
+          const newQty = (match.current_quantity || 0) + l.qty_now
+          await supabase.from('stock_items').update({ current_quantity: newQty }).eq('id', match.id)
+          await supabase.from('stock_transactions').insert({
+            stock_item_id: match.id,
+            transaction_type: 'RECEIPT_PO',
+            reference_id: po.id,
+            reference_type: 'purchase_order',
+            quantity_change: l.qty_now,
+            quantity_before: match.current_quantity || 0,
+            quantity_after: newQty,
+            unit_price: poLineItems.find(p => p.id === l.po_line_item_id)?.unit_price || 0,
+            job_id: po.job_id,
+            grv_id: grv.id,
+            transacted_by: currentRole,
+            notes: `PO ${po.po_number} delivery receipt`,
+          })
+        }
+      }
+
+      // 6. ML activity log — GRV logged
+      await supabase.from('activity_log').insert({
+        event_type: 'grv_logged',
+        entity_type: 'goods_received_voucher',
+        entity_id: grv.id,
+        metadata: {
+          po_number: po.po_number,
+          supplier_name: po.suppliers?.company_name || null,
+          line_items_received: grvLines.length,
+          total_qty_received: totalReceivingNow,
+          received_by: currentRole,
+          new_po_status: newStatus,
+        },
+        user_id: currentRole,
+      })
+
+      // 7. ML activity log — discrepancy events
+      for (const l of grvLines) {
+        if (l.condition === 'DAMAGED' || l.condition === 'SHORT') {
+          await supabase.from('activity_log').insert({
+            event_type: 'delivery_discrepancy_flagged',
+            entity_type: 'goods_received_voucher',
+            entity_id: grv.id,
+            metadata: {
+              po_number: po.po_number,
+              po_line_item_id: l.po_line_item_id,
+              description: l.description,
+              condition: l.condition,
+              qty_received: l.qty_now,
+              qty_ordered: l.qty_ordered,
+              flagged_by: currentRole,
+            },
+            user_id: currentRole,
+          })
+        }
+      }
+
+      setSuccessMsg('Delivery logged successfully — GRV recorded')
+      setTimeout(() => onSaved(), 1200)
+    } catch (e: any) { alert('Error: ' + e.message); setSaving(false) }
+  }
+
+  if (loading) return (
+    <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center">
+      <div className="bg-white rounded-xl p-8 text-center">
+        <div className="w-6 h-6 border-2 border-gray-300 border-t-green-500 rounded-full animate-spin mx-auto mb-3" />
+        <p className="text-sm text-gray-500">Loading PO line items...</p>
+      </div>
+    </div>
+  )
+
+  if (successMsg) return (
+    <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center">
+      <div className="bg-white rounded-xl p-8 text-center shadow-2xl">
+        <div className="w-12 h-12 bg-green-100 rounded-full flex items-center justify-center mx-auto mb-3">
+          <CheckCircle size={24} className="text-green-600" />
+        </div>
+        <p className="text-sm font-semibold text-green-700">{successMsg}</p>
+      </div>
+    </div>
+  )
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-[60] flex items-start justify-center overflow-y-auto py-8">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-4xl mx-4">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+          <div className="flex items-center gap-3">
+            <Truck size={20} className="text-green-600" />
+            <div>
+              <h2 className="text-lg font-bold text-gray-900">Log Goods Received — {po.po_number}</h2>
+              <p className="text-xs text-gray-500">{po.suppliers?.company_name || 'Supplier'} · {po.jobs?.job_number || 'Job'}</p>
+            </div>
+          </div>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={18} /></button>
+        </div>
+
+        <div className="px-6 py-5 space-y-5 max-h-[70vh] overflow-y-auto">
+          <div className="bg-gray-50 rounded-lg border border-gray-200 overflow-x-auto">
+            <table className="w-full text-sm">
+              <thead>
+                <tr className="bg-gray-100">
+                  <th className="text-left px-3 py-2 text-xs font-semibold text-gray-500">Description</th>
+                  <th className="text-center px-3 py-2 text-xs font-semibold text-gray-500 w-16">Ordered</th>
+                  <th className="text-center px-3 py-2 text-xs font-semibold text-gray-500 w-20">Prev Rcvd</th>
+                  <th className="text-center px-3 py-2 text-xs font-semibold text-gray-500 w-20">Remaining</th>
+                  <th className="text-center px-3 py-2 text-xs font-semibold text-gray-500 w-24">Qty Now</th>
+                  <th className="text-center px-3 py-2 text-xs font-semibold text-gray-500 w-28">Condition</th>
+                  <th className="text-left px-3 py-2 text-xs font-semibold text-gray-500 w-36">Notes</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-200">
+                {receiptLines.map((line, i) => (
+                  <tr key={line.po_line_item_id} className={line.qty_remaining <= 0 ? 'opacity-50' : ''}>
+                    <td className="px-3 py-2 text-gray-900">{line.description}</td>
+                    <td className="px-3 py-2 text-center text-gray-700">{line.qty_ordered}</td>
+                    <td className="px-3 py-2 text-center text-gray-500">{line.qty_previously_received}</td>
+                    <td className="px-3 py-2 text-center font-medium text-gray-700">{line.qty_remaining}</td>
+                    <td className="px-2 py-1.5">
+                      <input type="number" value={line.qty_now} min={0} max={line.qty_remaining} step="0.01"
+                        onChange={e => updateLine(i, 'qty_now', Math.min(parseFloat(e.target.value) || 0, line.qty_remaining))}
+                        disabled={line.qty_remaining <= 0}
+                        className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm text-center focus:outline-none focus:ring-1 focus:ring-green-500 disabled:bg-gray-100" />
+                    </td>
+                    <td className="px-2 py-1.5">
+                      <select value={line.condition} onChange={e => updateLine(i, 'condition', e.target.value)}
+                        disabled={line.qty_remaining <= 0}
+                        className="w-full border border-gray-300 rounded px-1 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-green-500 disabled:bg-gray-100">
+                        <option value="GOOD">GOOD</option>
+                        <option value="DAMAGED">DAMAGED</option>
+                        <option value="SHORT">SHORT</option>
+                      </select>
+                    </td>
+                    <td className="px-2 py-1.5">
+                      <input type="text" value={line.notes} onChange={e => updateLine(i, 'notes', e.target.value)}
+                        placeholder="Optional" disabled={line.qty_remaining <= 0}
+                        className="w-full border border-gray-300 rounded px-2 py-1.5 text-sm focus:outline-none focus:ring-1 focus:ring-green-500 disabled:bg-gray-100" />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Delivery Notes (overall)</label>
+            <textarea value={deliveryNotes} onChange={e => setDeliveryNotes(e.target.value)} rows={2} placeholder="General notes about this delivery..."
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 resize-none" />
+          </div>
+
+          <div className="flex items-center justify-between bg-green-50 border border-green-200 rounded-lg px-4 py-3">
+            <span className="text-sm text-green-800 font-medium">Total receiving this delivery:</span>
+            <span className="text-sm font-bold text-green-700">{totalReceivingNow} items</span>
+          </div>
+        </div>
+
+        <div className="flex justify-end gap-3 px-6 py-4 border-t border-gray-200 bg-gray-50 rounded-b-xl">
+          <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800 font-medium">Cancel</button>
+          <button onClick={handleSave} disabled={saving || totalReceivingNow <= 0}
+            className="px-6 py-2 bg-green-600 text-white text-sm font-semibold rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors flex items-center gap-2">
+            <Truck size={14} />{saving ? 'Logging...' : 'Log Receipt'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// ADD SUPPLIER MODAL
+
+function AddSupplierModal({ onClose, onCreated, currentRole }: { onClose: () => void; onCreated: () => void; currentRole: string | null }) {
+  const [saving, setSaving] = React.useState(false)
+  const [form, setForm] = React.useState({
+    company_name: '',
+    contact_person: '',
+    phone: '',
+    email: '',
+    account_number: '',
+    payment_terms: '',
+  })
+
+  const set = (field: string, value: string) => setForm(f => ({ ...f, [field]: value }))
+
+  const handleSave = async () => {
+    if (!form.company_name.trim()) { alert('Company Name is required'); return }
+    setSaving(true)
+    try {
+      const { data, error } = await supabase.from('suppliers').insert({
+        company_name: form.company_name.trim(),
+        contact_person: form.contact_person.trim() || null,
+        phone: form.phone.trim() || null,
+        email: form.email.trim() || null,
+        account_number: form.account_number.trim() || null,
+        payment_terms: form.payment_terms.trim() || null,
+        is_active: true,
+      }).select('id').single()
+      if (error) throw error
+
+      await supabase.from('activity_log').insert({
+        event_type: 'supplier_added',
+        entity_type: 'supplier',
+        entity_id: data.id,
+        metadata: {
+          company_name: form.company_name.trim(),
+          account_number: form.account_number.trim() || null,
+          added_by: currentRole,
+        },
+        user_id: currentRole,
+      })
+
+      onCreated()
+      onClose()
+    } catch (e: any) { alert('Error: ' + e.message) }
+    finally { setSaving(false) }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-start justify-center overflow-y-auto py-8">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg mx-4">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+          <h2 className="text-lg font-bold text-gray-900">Add Supplier</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={18} /></button>
+        </div>
+        <div className="px-6 py-5 space-y-4">
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Company Name <span className="text-red-500">*</span></label>
+            <input type="text" value={form.company_name} onChange={e => set('company_name', e.target.value)} placeholder="Enter company name"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Contact Person</label>
+              <input type="text" value={form.contact_person} onChange={e => set('contact_person', e.target.value)} placeholder="Name"
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Phone</label>
+              <input type="text" value={form.phone} onChange={e => set('phone', e.target.value)} placeholder="Phone number"
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Email</label>
+            <input type="email" value={form.email} onChange={e => set('email', e.target.value)} placeholder="email@company.com"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Account Number</label>
+              <input type="text" value={form.account_number} onChange={e => set('account_number', e.target.value)} placeholder="Supplier account no."
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Payment Terms</label>
+              <input type="text" value={form.payment_terms} onChange={e => set('payment_terms', e.target.value)} placeholder="e.g. 30 days"
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
+            </div>
+          </div>
+        </div>
+        <div className="flex justify-end gap-3 px-6 py-4 border-t border-gray-200 bg-gray-50 rounded-b-xl">
+          <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800 font-medium">Cancel</button>
+          <button onClick={handleSave} disabled={saving} className="px-6 py-2 bg-green-600 text-white text-sm font-semibold rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors">
+            {saving ? 'Saving...' : 'Add Supplier'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// EDIT SUPPLIER MODAL
+
+function EditSupplierModal({ supplier, onClose, onUpdated, currentRole }: { supplier: Supplier; onClose: () => void; onUpdated: () => void; currentRole: string | null }) {
+  const [saving, setSaving] = React.useState(false)
+  const [form, setForm] = React.useState({
+    company_name: supplier.company_name || '',
+    contact_person: supplier.contact_person || '',
+    phone: supplier.phone || '',
+    email: supplier.email || '',
+    account_number: supplier.account_number || '',
+    payment_terms: supplier.payment_terms || '',
+  })
+
+  const set = (field: string, value: string) => setForm(f => ({ ...f, [field]: value }))
+
+  const handleSave = async () => {
+    if (!form.company_name.trim()) { alert('Company Name is required'); return }
+    setSaving(true)
+    try {
+      const changes: { field: string; old_value: string | null; new_value: string | null }[] = []
+      const original: Record<string, string | null> = {
+        company_name: supplier.company_name,
+        contact_person: supplier.contact_person,
+        phone: supplier.phone,
+        email: supplier.email,
+        account_number: supplier.account_number,
+        payment_terms: supplier.payment_terms,
+      }
+      for (const key of Object.keys(form)) {
+        const oldVal = original[key] || ''
+        const newVal = (form as any)[key]?.trim() || ''
+        if (oldVal !== newVal) {
+          changes.push({ field: key, old_value: original[key], new_value: newVal || null })
+        }
+      }
+
+      if (changes.length === 0) { onClose(); return }
+
+      const { error } = await supabase.from('suppliers').update({
+        company_name: form.company_name.trim(),
+        contact_person: form.contact_person.trim() || null,
+        phone: form.phone.trim() || null,
+        email: form.email.trim() || null,
+        account_number: form.account_number.trim() || null,
+        payment_terms: form.payment_terms.trim() || null,
+      }).eq('id', supplier.id)
+      if (error) throw error
+
+      await supabase.from('activity_log').insert({
+        event_type: 'supplier_updated',
+        entity_type: 'supplier',
+        entity_id: supplier.id,
+        metadata: {
+          changes,
+          updated_by: currentRole,
+        },
+        user_id: currentRole,
+      })
+
+      onUpdated()
+      onClose()
+    } catch (e: any) { alert('Error: ' + e.message) }
+    finally { setSaving(false) }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-start justify-center overflow-y-auto py-8">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg mx-4">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+          <h2 className="text-lg font-bold text-gray-900">Edit Supplier</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={18} /></button>
+        </div>
+        <div className="px-6 py-5 space-y-4">
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Company Name <span className="text-red-500">*</span></label>
+            <input type="text" value={form.company_name} onChange={e => set('company_name', e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Contact Person</label>
+              <input type="text" value={form.contact_person} onChange={e => set('contact_person', e.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Phone</label>
+              <input type="text" value={form.phone} onChange={e => set('phone', e.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
+            </div>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Email</label>
+            <input type="email" value={form.email} onChange={e => set('email', e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Account Number</label>
+              <input type="text" value={form.account_number} onChange={e => set('account_number', e.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
+            </div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Payment Terms</label>
+              <input type="text" value={form.payment_terms} onChange={e => set('payment_terms', e.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
+            </div>
+          </div>
+        </div>
+        <div className="flex justify-end gap-3 px-6 py-4 border-t border-gray-200 bg-gray-50 rounded-b-xl">
+          <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800 font-medium">Cancel</button>
+          <button onClick={handleSave} disabled={saving} className="px-6 py-2 bg-green-600 text-white text-sm font-semibold rounded-lg hover:bg-green-700 disabled:opacity-50 transition-colors">
+            {saving ? 'Saving...' : 'Save Changes'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// DEACTIVATE SUPPLIER MODAL
+
+function DeactivateSupplierModal({ supplier, onClose, onDeactivated, currentRole }: { supplier: Supplier; onClose: () => void; onDeactivated: () => void; currentRole: string | null }) {
+  const [saving, setSaving] = React.useState(false)
+  const [reason, setReason] = React.useState('')
+
+  const handleDeactivate = async () => {
+    if (!reason.trim()) { alert('Please provide a reason for deactivation'); return }
+    setSaving(true)
+    try {
+      const { error } = await supabase.from('suppliers').update({
+        is_active: false,
+        deactivation_reason: reason.trim(),
+      }).eq('id', supplier.id)
+      if (error) throw error
+
+      await supabase.from('activity_log').insert({
+        event_type: 'supplier_deactivated',
+        entity_type: 'supplier',
+        entity_id: supplier.id,
+        metadata: {
+          company_name: supplier.company_name,
+          reason: reason.trim(),
+          deactivated_by: currentRole,
+        },
+        user_id: currentRole,
+      })
+
+      onDeactivated()
+      onClose()
+    } catch (e: any) { alert('Error: ' + e.message) }
+    finally { setSaving(false) }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center py-8">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-md mx-4">
+        <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
+          <h2 className="text-lg font-bold text-gray-900">Deactivate Supplier</h2>
+          <button onClick={onClose} className="text-gray-400 hover:text-gray-600"><X size={18} /></button>
+        </div>
+        <div className="px-6 py-5 space-y-4">
+          <div className="bg-red-50 border border-red-200 rounded-lg p-3">
+            <p className="text-sm text-red-700 font-medium">You are about to deactivate:</p>
+            <p className="text-sm text-red-900 font-bold mt-1">{supplier.company_name}</p>
+          </div>
+          <div>
+            <label className="block text-xs font-medium text-gray-600 mb-1">Reason for Deactivation <span className="text-red-500">*</span></label>
+            <textarea value={reason} onChange={e => setReason(e.target.value)} rows={3} placeholder="Provide a reason for deactivating this supplier..."
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-500 resize-none" />
+          </div>
+        </div>
+        <div className="flex justify-end gap-3 px-6 py-4 border-t border-gray-200 bg-gray-50 rounded-b-xl">
+          <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800 font-medium">Cancel</button>
+          <button onClick={handleDeactivate} disabled={saving || !reason.trim()} className="px-6 py-2 bg-red-600 text-white text-sm font-semibold rounded-lg hover:bg-red-700 disabled:opacity-50 transition-colors">
+            {saving ? 'Deactivating...' : 'Deactivate Supplier'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// INVOICES TAB
+
+const INVOICE_STATUS_BADGE: Record<string, string> = {
+  CAPTURED: 'bg-yellow-100 text-yellow-700',
+  MATCHED: 'bg-blue-100 text-blue-700',
+  APPROVED: 'bg-green-100 text-green-700',
+  PAID: 'bg-emerald-100 text-emerald-700',
+  DISPUTED: 'bg-red-100 text-red-700',
+}
+
+function InvoicesTab({ invoices, loading, onRefresh, currentRole }: { invoices: SupplierInvoice[]; loading: boolean; onRefresh: () => void; currentRole: string | null }) {
+  const [searchTerm, setSearchTerm] = React.useState('')
+  const [statusFilter, setStatusFilter] = React.useState<string>('ALL')
+
+  const filtered = React.useMemo(() => {
+    let result = [...invoices]
+    if (statusFilter !== 'ALL') result = result.filter(inv => inv.status === statusFilter)
+    if (searchTerm.trim()) {
+      const term = searchTerm.toLowerCase()
+      result = result.filter(inv =>
+        inv.invoice_number?.toLowerCase().includes(term) ||
+        inv.suppliers?.company_name?.toLowerCase().includes(term) ||
+        inv.purchase_orders?.po_number?.toLowerCase().includes(term))
+    }
+    return result
+  }, [invoices, statusFilter, searchTerm])
+
+  if (loading) return <div className="flex items-center justify-center h-64 gap-3 text-gray-400"><div className="w-5 h-5 border-2 border-gray-300 border-t-green-500 rounded-full animate-spin" /><span>Loading invoices...</span></div>
+
+  return (
+    <div className="flex-1 flex flex-col min-h-0">
+      <div className="mb-4">
+        <div className="flex items-center gap-2 mb-1">
+          <h2 className="text-lg font-bold text-gray-900">Supplier Invoices</h2>
+          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-700">{invoices.length} total</span>
+        </div>
+        <p className="text-sm text-gray-500">Invoices received from suppliers against purchase orders</p>
+      </div>
+
+      <div className="flex items-center gap-3 mb-4">
+        <div className="relative flex-1 max-w-md">
+          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+          <input type="text" placeholder="Search by invoice number, supplier or PO..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)}
+            className="w-full pl-9 pr-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500" />
+        </div>
+        <select value={statusFilter} onChange={e => setStatusFilter(e.target.value)}
+          className="px-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500">
+          <option value="ALL">All Statuses</option>
+          <option value="CAPTURED">Captured</option>
+          <option value="MATCHED">Matched</option>
+          <option value="APPROVED">Approved</option>
+          <option value="PAID">Paid</option>
+          <option value="DISPUTED">Disputed</option>
+        </select>
+        <button onClick={onRefresh} className="flex items-center gap-2 px-3 py-2 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors border border-gray-300">
+          <RefreshCw size={14} />Refresh
+        </button>
+      </div>
+
+      <div className="flex-1 overflow-auto bg-white rounded-xl border border-gray-200 shadow-sm">
+        <table className="w-full text-sm">
+          <thead className="bg-gray-50 sticky top-0">
+            <tr>
+              <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Invoice #</th>
+              <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Supplier</th>
+              <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">PO Ref</th>
+              <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Invoice Date</th>
+              <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Value</th>
+              <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Payment Due</th>
+              <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Status</th>
+              <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Captured By</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {filtered.length === 0 ? (
+              <tr><td colSpan={8} className="px-4 py-12 text-center text-gray-400">
+                {searchTerm || statusFilter !== 'ALL' ? 'No invoices match your filter' : 'No invoices captured yet.'}
+              </td></tr>
+            ) : filtered.map(inv => (
+              <tr key={inv.id} className="hover:bg-gray-50 transition-colors">
+                <td className="px-4 py-3 font-medium text-gray-900 font-mono text-xs">{inv.invoice_number}</td>
+                <td className="px-4 py-3 text-gray-700">{inv.suppliers?.company_name || '-'}</td>
+                <td className="px-4 py-3 text-gray-600 font-mono text-xs">{inv.purchase_orders?.po_number || '-'}</td>
+                <td className="px-4 py-3 text-gray-600">{formatDate(inv.invoice_date)}</td>
+                <td className="px-4 py-3 text-right text-gray-700 font-medium">R {(inv.invoice_value || 0).toLocaleString('en-ZA', { minimumFractionDigits: 2 })}</td>
+                <td className="px-4 py-3 text-gray-600">{formatDate(inv.payment_due_date)}</td>
+                <td className="px-4 py-3">
+                  <span className={`inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold ${INVOICE_STATUS_BADGE[inv.status] || 'bg-gray-100 text-gray-500'}`}>
+                    {inv.status?.replace(/_/g, ' ') || '-'}
+                  </span>
+                </td>
+                <td className="px-4 py-3 text-gray-600">{inv.captured_by || '-'}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
       </div>
     </div>
   )

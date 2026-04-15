@@ -157,7 +157,7 @@ function RoleSelector({ onSelect }: any) {
               <span className="text-blue-600 font-bold text-sm">JU</span>
             </div>
             <div className="text-left">
-              <p className="font-semibold text-gray-900">Juanic</p>
+              <p className="font-semibold text-gray-900">Jeanic</p>
               <p className="text-xs text-gray-400">Admin - RFQ management</p>
             </div>
           </button>
