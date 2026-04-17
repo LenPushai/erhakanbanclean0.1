@@ -1,11 +1,30 @@
 ﻿import React from 'react';
 import { useState, useEffect } from 'react'
-import { ClipboardList, Briefcase, ChevronRight, ChevronDown, ChevronUp, Factory, Building2, Calendar, Hash, RefreshCw, ArrowDownToLine, ArrowUpFromLine, X, Mail, FileText, Paperclip, Send, Plus, Check, Printer, Upload, Package, Search, Filter, Edit3, XCircle, Trash2, Eye, CheckCircle, ShoppingCart, Download, Truck, DollarSign, AlertTriangle, Receipt }  from 'lucide-react'
+import { ClipboardList, Briefcase, ChevronRight, ChevronDown, ChevronUp, Factory, Building2, Calendar, Hash, RefreshCw, ArrowDownToLine, ArrowUpFromLine, X, Mail, FileText, Paperclip, Send, Plus, Check, Printer, Upload, Package, Search, Filter, Edit3, XCircle, Trash2, Eye, CheckCircle, ShoppingCart, Download, Truck, DollarSign, AlertTriangle, Receipt, Users, Settings }  from 'lucide-react'
 import { supabase } from './lib/supabase'
 import { emailRFQCreated, emailQuoterAssigned, emailQuoteReady, emailOrderWon, emailJobInReview, emailJobReadyToPrint, emailJobPrinted, emailChildJobSpawned, emailJobStarted, emailJobQCCheck, emailJobComplete, emailJobDispatched } from './emailService'
 import { format } from 'date-fns'
 
-type Board = 'rfq' | 'job' | 'workshop' | 'procurement'
+type Board = 'rfq' | 'job' | 'workshop' | 'procurement' | 'clients' | 'settings'
+
+interface Client {
+  id: string
+  company_name: string
+  is_active: boolean
+  deactivation_reason?: string | null
+  created_at?: string
+}
+
+interface ClientContact {
+  id: string
+  client_id: string
+  contact_name: string
+  contact_phone: string | null
+  contact_email: string | null
+  department: string | null
+  is_primary: boolean
+  created_at?: string
+}
 
 interface Supplier {
   id: string
@@ -240,12 +259,66 @@ const STATUS_LABELS: Record<string, string> = {
 }
 
 const QUOTERS = ['Hendrik', 'Dewald', 'Estimator', 'Jaco']
-const DEPARTMENTS_CG = ['MELTSHOP', 'MILLS', 'SHARON', 'OREN', 'STORES', 'GENERAL', 'MRSTO']
-const ACTIONS_LIST = ['MANUFACTURE', 'SANDBLAST', 'SERVICE', 'PAINT', 'REPAIR', 'INSTALLATION', 'CUT', 'MODIFY']
-const MEDIA_OPTIONS = ['Email', 'WhatsApp', 'Phone', 'Walk-in']
+const DEPARTMENTS_CG_FALLBACK = ['MELTSHOP', 'MILLS', 'SHARON', 'OREN', 'STORES', 'GENERAL', 'MRSTO']
+const ACTIONS_LIST_FALLBACK = ['Manufacture', 'Sandblast', 'Service', 'Paint', 'Repair', 'Installation', 'Cutting', 'Modification', 'Machining', 'Supply']
+
+// Maps dynamic action labels to legacy action_* column names (for backward compat)
+const ACTION_LABEL_TO_COLUMN: Record<string, string> = {
+  'Manufacture': 'action_manufacture', 'Sandblast': 'action_sandblast',
+  'Service': 'action_service', 'Paint': 'action_paint',
+  'Repair': 'action_repair', 'Installation': 'action_installation',
+  'Cutting': 'action_cut', 'Cut': 'action_cut',
+  'Modification': 'action_modify', 'Modify': 'action_modify',
+}
+const ACTION_COLUMN_TO_LABEL: Record<string, string> = Object.fromEntries(
+  Object.entries(ACTION_LABEL_TO_COLUMN).map(([k, v]) => [v, k])
+)
+
+// Build legacy action_* fields from a selected-labels set, plus actions_required_dynamic JSONB
+function buildActionFields(selectedLabels: Set<string>) {
+  const legacy: Record<string, boolean> = {
+    action_manufacture: false, action_sandblast: false, action_service: false,
+    action_paint: false, action_repair: false, action_installation: false,
+    action_cut: false, action_modify: false, action_other: false, action_prepare_material: false,
+  }
+  const dynamicArr: string[] = []
+  selectedLabels.forEach(label => {
+    const col = ACTION_LABEL_TO_COLUMN[label]
+    if (col) legacy[col] = true
+    dynamicArr.push(label)
+  })
+  return { ...legacy, actions_required_dynamic: dynamicArr }
+}
+
+// Read legacy action_* columns into a Set of labels
+function readActionLabels(job: any): Set<string> {
+  const labels = new Set<string>()
+  // Read from dynamic column first
+  if (job.actions_required_dynamic && Array.isArray(job.actions_required_dynamic)) {
+    job.actions_required_dynamic.forEach((l: string) => labels.add(l))
+  }
+  // Fallback: also read legacy columns
+  Object.entries(ACTION_COLUMN_TO_LABEL).forEach(([col, label]) => {
+    if (job[col]) labels.add(label)
+  })
+  return labels
+}
+const MEDIA_OPTIONS_FALLBACK = ['Email', 'WhatsApp', 'Phone', 'Walk-in']
+
+function useDropdownOptions(dropdownType: string, fallback: string[]) {
+  const [options, setOptions] = React.useState<string[]>(fallback)
+  React.useEffect(() => {
+    supabase.from('system_dropdowns').select('option_label').eq('dropdown_type', dropdownType).eq('is_active', true).order('sort_order')
+      .then(({ data }) => { if (data && data.length > 0) setOptions(data.map(d => d.option_label)) })
+  }, [dropdownType])
+  return options
+}
 const UOM_OPTIONS = ['EA', 'M', 'KG', 'L', 'HR', 'TRIP', 'SET', 'M2', 'M3', 'TON']
 const ITEM_TYPES = ['MATERIAL', 'LABOUR', 'TRANSPORT', 'EQUIPMENT', 'SUBCONTRACT', 'OTHER']
-const OPERATING_ENTITIES = ['ERHA FC', 'ERHA CC']
+const OPERATING_ENTITIES = [
+  { value: 'ERHA_FC', label: 'ERHA F&C' },
+  { value: 'ERHA_SS', label: 'ERHA S&S' },
+]
 
 const EMAIL_TEMPLATES: Record<string, { subject: string; body: string }> = {
   NEW:              { subject: 'Enquiry Received - {enq}', body: 'Dear {contact},\n\nThank you for your enquiry {enq}. We have received your request and will be in touch shortly.\n\nKind regards\nERHA Fabrication & Construction' },
@@ -273,61 +346,29 @@ function RoleSelector({ onSelect }: any) {
           <h1 className="text-white font-bold text-xl">Operations Board</h1>
           <p className="text-orange-100 text-sm mt-1">Who are you?</p>
         </div>
-        <div className="p-6 space-y-3">
-          <button onClick={() => onSelect('HENDRIK')}
-            className="w-full flex items-center gap-4 px-5 py-4 border-2 border-gray-200 rounded-xl hover:border-orange-400 hover:bg-orange-50 transition-all group">
-            <div className="w-10 h-10 bg-orange-100 rounded-full flex items-center justify-center shrink-0 group-hover:bg-orange-200">
-              <span className="text-orange-600 font-bold text-sm">HK</span>
-            </div>
-            <div className="text-left">
-              <p className="font-semibold text-gray-900">Hendrik — Managing Director</p>
-            </div>
-          </button>
-          <button onClick={() => onSelect('JUANIC')}
-            className="w-full flex items-center gap-4 px-5 py-4 border-2 border-gray-200 rounded-xl hover:border-blue-400 hover:bg-blue-50 transition-all group">
-            <div className="w-10 h-10 bg-blue-100 rounded-full flex items-center justify-center shrink-0 group-hover:bg-blue-200">
-              <span className="text-blue-600 font-bold text-sm">JU</span>
-            </div>
-            <div className="text-left">
-              <p className="font-semibold text-gray-900">Jeanic — Operations System Manager</p>
-            </div>
-          </button>
-          <button onClick={() => onSelect('SONJA')}
-            className="w-full flex items-center gap-4 px-5 py-4 border-2 border-gray-200 rounded-xl hover:border-green-400 hover:bg-green-50 transition-all group">
-            <div className="w-10 h-10 bg-green-100 rounded-full flex items-center justify-center shrink-0 group-hover:bg-green-200">
-              <span className="text-green-600 font-bold text-sm">SN</span>
-            </div>
-            <div className="text-left">
-              <p className="font-semibold text-gray-900">Sonja — Procurement and Buying</p>
-            </div>
-          </button>
-          <button onClick={() => onSelect('CHARLES')}
-            className="w-full flex items-center gap-4 px-5 py-4 border-2 border-gray-200 rounded-xl hover:border-amber-400 hover:bg-amber-50 transition-all group">
-            <div className="w-10 h-10 bg-amber-100 rounded-full flex items-center justify-center shrink-0 group-hover:bg-amber-200">
-              <span className="text-amber-600 font-bold text-sm">CH</span>
-            </div>
-            <div className="text-left">
-              <p className="font-semibold text-gray-900">Charles — Store Manager</p>
-            </div>
-          </button>
-          <button onClick={() => onSelect('DEWALD')}
-            className="w-full flex items-center gap-4 px-5 py-4 border-2 border-gray-200 rounded-xl hover:border-purple-400 hover:bg-purple-50 transition-all group">
-            <div className="w-10 h-10 bg-purple-100 rounded-full flex items-center justify-center shrink-0 group-hover:bg-purple-200">
-              <span className="text-purple-600 font-bold text-sm">DW</span>
-            </div>
-            <div className="text-left">
-              <p className="font-semibold text-gray-900">Dewald — General Manager</p>
-            </div>
-          </button>
-          <button onClick={() => onSelect('JACO')}
-            className="w-full flex items-center gap-4 px-5 py-4 border-2 border-gray-200 rounded-xl hover:border-teal-400 hover:bg-teal-50 transition-all group">
-            <div className="w-10 h-10 bg-teal-100 rounded-full flex items-center justify-center shrink-0 group-hover:bg-teal-200">
-              <span className="text-teal-600 font-bold text-sm">JC</span>
-            </div>
-            <div className="text-left">
-              <p className="font-semibold text-gray-900">Jaco — Site Manager</p>
-            </div>
-          </button>
+        <div className="p-6 space-y-2 max-h-[60vh] overflow-y-auto">
+          {([
+            { key: 'HENDRIK', label: 'Managing Director', initials: 'MD', color: 'orange' },
+            { key: 'JUANIC', label: 'Operations System Manager', initials: 'OS', color: 'blue' },
+            { key: 'SONJA', label: 'Procurement and Buying', initials: 'PB', color: 'green' },
+            { key: 'CHARLES', label: 'Store Manager', initials: 'SM', color: 'amber' },
+            { key: 'DEWALD', label: 'General Manager', initials: 'GM', color: 'purple' },
+            { key: 'JACO', label: 'Site Manager', initials: 'SI', color: 'teal' },
+            { key: 'ELSJE', label: 'Site Admin', initials: 'SA', color: 'rose' },
+            { key: 'ALWYN', label: 'Site Foreman', initials: 'SF', color: 'indigo' },
+            { key: 'CHERISE', label: 'Reception', initials: 'RC', color: 'cyan' },
+            { key: 'ZACH', label: 'Shop Foreman', initials: 'SH', color: 'lime' },
+          ] as const).map(role => (
+            <button key={role.key} onClick={() => onSelect(role.key)}
+              className={`w-full flex items-center gap-4 px-5 py-3 border-2 border-gray-200 rounded-xl hover:border-${role.color}-400 hover:bg-${role.color}-50 transition-all group`}>
+              <div className={`w-10 h-10 bg-${role.color}-100 rounded-full flex items-center justify-center shrink-0 group-hover:bg-${role.color}-200`}>
+                <span className={`text-${role.color}-600 font-bold text-sm`}>{role.initials}</span>
+              </div>
+              <div className="text-left">
+                <p className="font-semibold text-gray-900">{role.label}</p>
+              </div>
+            </button>
+          ))}
         </div>
         <p className="text-center text-xs text-gray-400 pb-4">PUSH AI Labs</p>
       </div>
@@ -421,6 +462,8 @@ App() {
   const [jobsLoading, setJobsLoading] = useState(false)
   const [suppliers, setSuppliers] = useState<Supplier[]>([])
   const [suppliersLoading, setSuppliersLoading] = useState(false)
+  const [clientsList, setClientsList] = useState<Client[]>([])
+  const [clientsLoading, setClientsLoading] = useState(false)
 
   const fetchSuppliers = async () => {
     setSuppliersLoading(true)
@@ -430,6 +473,16 @@ App() {
       setSuppliers(data || [])
     } catch (e: any) { console.error('Failed to fetch suppliers:', e.message) }
     finally { setSuppliersLoading(false) }
+  }
+
+  const fetchClients = async () => {
+    setClientsLoading(true)
+    try {
+      const { data, error } = await supabase.from('clients').select('*').order('company_name')
+      if (error) throw error
+      setClientsList(data || [])
+    } catch (e: any) { console.error('Failed to fetch clients:', e.message) }
+    finally { setClientsLoading(false) }
   }
 
   const fetchRFQs = async () => {
@@ -605,7 +658,21 @@ table { border-collapse:collapse; width:100%; }
     setWorkshopLoading(true)
     try {
       const { data } = await supabase.from('jobs').select('*').order('created_at',{ascending:false})
-      setWorkshopJobs(data || [])
+      if (data && data.length > 0) {
+        // Fetch line item dispatch stats for progress badges
+        const { data: liStats } = await supabase.from('job_line_items').select('job_id, dispatched')
+        const statsMap: Record<string, { total: number; dispatched: number }> = {}
+        if (liStats) {
+          liStats.forEach((li: any) => {
+            if (!statsMap[li.job_id]) statsMap[li.job_id] = { total: 0, dispatched: 0 }
+            statsMap[li.job_id].total++
+            if (li.dispatched) statsMap[li.job_id].dispatched++
+          })
+        }
+        setWorkshopJobs(data.map((j: any) => ({ ...j, _liStats: statsMap[j.id] || null })))
+      } else {
+        setWorkshopJobs([])
+      }
     } finally { setWorkshopLoading(false) }
   }
 
@@ -650,6 +717,17 @@ table { border-collapse:collapse; width:100%; }
           emailOrderWon({ id: job.rfq_id, description: job.description || '' } as any, job.job_number || '')
         }
       }
+      // Activity log for status transitions
+      const logJob = workshopJobs.find((j:any) => j.id === jobId)
+      if (logJob) {
+        const oldStatus = logJob.workshop_status || 'NOT_STARTED'
+        const eventMap: Record<string,string> = { DELIVERED: 'job_delivered', COMPLETED: 'job_completed' }
+        const eventType = eventMap[newStatus] || 'workshop_status_changed'
+        await supabase.from('activity_log').insert({
+          event_type: eventType, entity_type: 'job', entity_id: jobId,
+          metadata: { job_number: logJob.job_number, old_status: oldStatus, new_status: newStatus, changed_by: 'user', changed_at: new Date().toISOString() },
+        }).then(({ error: logErr }) => { if (logErr) console.error('Activity log error:', logErr.message) })
+      }
       fetchWorkshopJobs()
       // Email triggers
       const updatedJob = workshopJobs.find((j:any) => j.id === jobId)
@@ -684,10 +762,12 @@ table { border-collapse:collapse; width:100%; }
           <NavItem icon={<Factory size={18} />} label="Workshop Board" description="Floor execution" active={activeBoard === 'workshop'} accentColor="text-orange-400" onClick={() => { setActiveBoard('workshop'); fetchWorkshopJobs() }} />
           <p className="text-gray-500 text-xs font-semibold uppercase tracking-widest px-3 mb-3 mt-6">Management</p>
           <NavItem icon={<Package size={18} />} label="Procurement" description="Suppliers & purchasing" active={activeBoard === 'procurement'} accentColor="text-green-400" onClick={() => { setActiveBoard('procurement'); fetchSuppliers() }} />
+          <NavItem icon={<Users size={18} />} label="Clients" description="Client management" active={activeBoard === 'clients'} accentColor="text-blue-400" onClick={() => { setActiveBoard('clients'); fetchClients() }} />
           <button className="w-full flex items-center gap-3 px-3 py-3 rounded-lg text-left text-gray-500 cursor-not-allowed opacity-50">
             <Package size={18} />
             <div className="flex-1 min-w-0"><p className="text-sm font-semibold leading-tight">Internal Store</p><p className="text-xs text-gray-500 leading-tight mt-0.5">Stock management</p></div>
           </button>
+          <NavItem icon={<Settings size={18} />} label="Settings" description="System configuration" active={activeBoard === 'settings'} accentColor="text-gray-400" onClick={() => setActiveBoard('settings')} />
         </nav>
         <div className="px-6 py-4 border-t border-gray-700">
           <p className="text-gray-500 text-xs">PUSH AI Labs</p>
@@ -698,11 +778,11 @@ table { border-collapse:collapse; width:100%; }
       <main className="flex-1 flex flex-col overflow-hidden">
         <header className="bg-white border-b border-gray-200 px-8 py-4 flex items-center justify-between shrink-0">
           <div>
-            <h1 className="text-xl font-bold text-gray-900">{activeBoard === 'rfq' ? 'RFQ Board' : activeBoard === 'job' ? 'Job Board' : activeBoard === 'procurement' ? 'Procurement' : 'Workshop Board'}</h1>
-            <p className="text-sm text-gray-500 mt-0.5">{activeBoard === 'rfq' ? 'RFQ to job creation - sales pipeline' : activeBoard === 'job' ? 'Job created to paid - project tracking' : activeBoard === 'procurement' ? 'Supplier register & purchasing' : 'Workshop floor execution tracking'}</p>
+            <h1 className="text-xl font-bold text-gray-900">{activeBoard === 'rfq' ? 'RFQ Board' : activeBoard === 'job' ? 'Job Board' : activeBoard === 'procurement' ? 'Procurement' : activeBoard === 'clients' ? 'Client Management' : activeBoard === 'settings' ? 'Settings' : 'Workshop Board'}</h1>
+            <p className="text-sm text-gray-500 mt-0.5">{activeBoard === 'rfq' ? 'RFQ to job creation - sales pipeline' : activeBoard === 'job' ? 'Job created to paid - project tracking' : activeBoard === 'procurement' ? 'Supplier register & purchasing' : activeBoard === 'clients' ? 'Manage clients & contacts' : activeBoard === 'settings' ? 'System configuration & dropdown management' : 'Workshop floor execution tracking'}</p>
           </div>
           <div className="flex items-center gap-3">
-            {activeBoard !== 'procurement' && (
+            {activeBoard !== 'procurement' && activeBoard !== 'clients' && activeBoard !== 'settings' && (
               <button onClick={() => { fetchRFQs(); fetchJobs() }} className="flex items-center gap-2 px-3 py-1.5 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors">
                 <RefreshCw size={14} />Refresh
               </button>
@@ -720,8 +800,8 @@ table { border-collapse:collapse; width:100%; }
                 <Plus size={15} />New Job
               </button>
             </>)}
-            <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold ${activeBoard === 'rfq' ? 'bg-blue-100 text-blue-700' : activeBoard === 'job' ? 'bg-green-100 text-green-700' : activeBoard === 'procurement' ? 'bg-green-100 text-green-700' : 'bg-orange-100 text-orange-700'}`}>
-              {activeBoard === 'rfq' ? 'RFQ Board' : activeBoard === 'job' ? 'Job Board' : activeBoard === 'procurement' ? 'Procurement' : 'Workshop Board'}
+            <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold ${activeBoard === 'rfq' ? 'bg-blue-100 text-blue-700' : activeBoard === 'job' ? 'bg-green-100 text-green-700' : activeBoard === 'procurement' ? 'bg-green-100 text-green-700' : activeBoard === 'clients' ? 'bg-blue-100 text-blue-700' : activeBoard === 'settings' ? 'bg-gray-100 text-gray-700' : 'bg-orange-100 text-orange-700'}`}>
+              {activeBoard === 'rfq' ? 'RFQ Board' : activeBoard === 'job' ? 'Job Board' : activeBoard === 'procurement' ? 'Procurement' : activeBoard === 'clients' ? 'Clients' : activeBoard === 'settings' ? 'Settings' : 'Workshop Board'}
             </span>
           </div>
         </header>
@@ -734,6 +814,10 @@ table { border-collapse:collapse; width:100%; }
               ? <JobBoard jobs={jobs} loading={jobsLoading} onStatusChange={handleJobStatusChange} onPrintCard={handlePrintJobCard} onCardClick={setSelectedJob} selectedId={selectedJob?.id} />
               : activeBoard === 'procurement'
               ? <SupplierManagement suppliers={suppliers} loading={suppliersLoading} onRefresh={fetchSuppliers} currentRole={currentRole} />
+              : activeBoard === 'clients'
+              ? <ClientManagement clients={clientsList} loading={clientsLoading} onRefresh={fetchClients} />
+              : activeBoard === 'settings'
+              ? <SettingsPage />
               : <WorkshopBoard jobs={workshopJobs} loading={workshopLoading} onRefresh={fetchWorkshopJobs} onStatusChange={handleWorkshopStatusChange} />}
           </div>
           {selectedRFQ && <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4"><RFQDetailPanel rfq={selectedRFQ} onClose={() => setSelectedRFQ(null)} onUpdate={handleRFQUpdate} role={currentRole} onJobCreated={fetchJobs} onNavigateToJob={(jobNumber) => { setSelectedRFQ(null); setActiveBoard('job'); const job = jobs.find(j => j.job_number === jobNumber); if (job) setSelectedJob(job); }} /></div>}
@@ -743,7 +827,7 @@ table { border-collapse:collapse; width:100%; }
       {showCreateModal && <CreateRFQModal onClose={() => setShowCreateModal(false)} onCreated={handleRFQCreated} />}
       {showCreateDirectJob && <CreateDirectJobModal key={directJobModalKey} onClose={() => setShowCreateDirectJob(false)} onCreated={fetchJobs} />}
       {showJarisonImport && <JarisonImportModal onClose={() => setShowJarisonImport(false)} onImported={fetchJobs} />}
-      {selectedJob && <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4"><JobDetailPanel job={selectedJob} parentJobNumber={jobs.find(j=>j.id===selectedJob?.parent_job_id)?.job_number} onClose={() => setSelectedJob(null)} onUpdate={(j) => { setSelectedJob(j); fetchJobs() }} /></div>}
+      {selectedJob && <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4"><JobDetailPanel key={selectedJob.id} job={selectedJob} parentJobNumber={jobs.find(j=>j.id===selectedJob?.parent_job_id)?.job_number} onClose={() => setSelectedJob(null)} onUpdate={(j) => { setSelectedJob(j); fetchJobs() }} /></div>}
     </div>
   )
 }
@@ -842,19 +926,12 @@ function JarisonImportModal({ onClose, onImported }: { onClose: () => void; onIm
     if (csvRows.length === 0) return
     setImporting(true)
     let success = 0, errors = 0
-    const yr = new Date().getFullYear().toString().slice(-2)
-    const { default: { createClient } } = await import('@supabase/supabase-js') as any
     const sb = (await import('./lib/supabase')).supabase
-
-    // Get current job count for numbering
-    const { count: jc } = await sb.from('jobs').select('*', { count: 'exact', head: true })
-    let seq = (jc || 0) + 1
 
     for (const row of csvRows) {
       try {
-        const jobNumber = row.JobNumber || `JOB-${yr}-${String(seq).padStart(3, '0')}`
         const { error } = await sb.from('jobs').insert({
-          job_number: jobNumber,
+          ...(row.JobNumber ? { job_number: row.JobNumber } : {}),
           description: row.Description || 'Imported from Jarison',
           client_name: row.ClientName || 'Unknown Client',
           due_date: row.DueDate || null,
@@ -867,7 +944,7 @@ function JarisonImportModal({ onClose, onImported }: { onClose: () => void; onIm
           has_info_for_quote: false,
         })
         if (error) { errors++; console.error('Import row error:', error) }
-        else { success++; seq++ }
+        else { success++ }
       } catch (err) { errors++; console.error('Import exception:', err) }
     }
 
@@ -1087,6 +1164,7 @@ function JobBoard({ jobs, loading, onCardClick, selectedId, onStatusChange, onPr
 // JOB DETAIL PANEL
 
 function JobDetailPanel({ job, parentJobNumber, onClose, onUpdate }: { job: Job; parentJobNumber?: string; onClose: () => void; onUpdate: (j: Job) => void }) {
+  const actionTypeOptions = useDropdownOptions('action_types', ACTIONS_LIST_FALLBACK)
   const [saving, setSaving] = React.useState(false)
   const [status, setStatus] = React.useState(job.status)
   const [priority, setPriority] = React.useState(job.priority || 'NORMAL')
@@ -1171,16 +1249,7 @@ function JobDetailPanel({ job, parentJobNumber, onClose, onUpdate }: { job: Job;
         compiled_by: (job as any).compiled_by || null,
         notes: 'Spawned from ' + (job.job_number || 'parent job') + ' - ' + lineItem.description,
         date_received: new Date().toISOString().split('T')[0],
-        action_manufacture: false,
-        action_service: false,
-        action_repair: false,
-        action_sandblast: false,
-        action_paint: false,
-        action_installation: false,
-        action_cut: false,
-        action_modify: false,
-        action_other: false,
-        action_prepare_material: false,
+        ...buildActionFields(new Set()),
         has_info_for_quote: false,
       }).select().single()
       if (jobError) throw jobError
@@ -1278,7 +1347,7 @@ function JobDetailPanel({ job, parentJobNumber, onClose, onUpdate }: { job: Job;
         </div>
         <div className="grid grid-cols-2 gap-4 text-sm">
           {job.site_req && <div><span className="text-xs text-gray-500 block">Site Req / PO</span><span className="font-medium">{job.site_req}</span></div>}
-          {(job.client_rfq_number || job.rfq_no) && <div><span className="text-xs text-gray-500 block">Client RFQ No</span><span className="font-medium text-blue-600">{job.client_rfq_number || job.rfq_no}</span></div>}
+          {job.entry_type !== 'DIRECT' && (job.client_rfq_number || job.rfq_no) && <div><span className="text-xs text-gray-500 block">Client RFQ No</span><span className="font-medium text-blue-600">{job.client_rfq_number || job.rfq_no}</span></div>}
           {job.due_date && <div><span className="text-xs text-gray-500 block">Due Date</span><span className="font-medium">{new Date(job.due_date).toLocaleDateString('en-ZA')}</span></div>}
           {job.created_at && <div><span className="text-xs text-gray-500 block">Created</span><span className="font-medium">{new Date(job.created_at).toLocaleDateString('en-ZA')}</span></div>}
           {job.parent_job_id && <div><span className="text-xs text-gray-500 block">Parent Job</span><span className="font-medium text-purple-600">{parentJobNumber || job.parent_job_id.slice(0,8)}</span></div>}
@@ -1304,18 +1373,27 @@ function JobDetailPanel({ job, parentJobNumber, onClose, onUpdate }: { job: Job;
         <div>
           <label className="block text-xs font-medium text-gray-500 mb-2">Actions Required</label>
           <div className="grid grid-cols-3 gap-2 mb-3">
-            {([
-              ['action_manufacture','Manufacture'],['action_service','Service'],['action_repair','Repair'],
-              ['action_sandblast','Sandblast'],['action_paint','Paint'],['action_installation','Installation'],
-              ['action_cut','Cut'],['action_modify','Modify'],
-            ] as [string, string][]).map(([key, label]) => (
-              <label key={key} className="flex items-center gap-2 text-xs cursor-pointer">
-                <input type="checkbox" defaultChecked={!!(job as any)[key]}
-                  onChange={async (e) => { await supabase.from('jobs').update({ [key]: e.target.checked }).eq('id', job.id) }}
-                  className="w-3.5 h-3.5 text-green-600 rounded" />
-                <span className="text-gray-700">{label}</span>
-              </label>
-            ))}
+            {actionTypeOptions.map(label => {
+              const col = ACTION_LABEL_TO_COLUMN[label]
+              const isChecked = col ? !!(job as any)[col] : ((job as any).actions_required_dynamic || []).includes(label)
+              return (
+                <label key={label} className="flex items-center gap-2 text-xs cursor-pointer">
+                  <input type="checkbox" defaultChecked={isChecked}
+                    onChange={async (e) => {
+                      const update: Record<string, any> = {}
+                      if (col) update[col] = e.target.checked
+                      // Also update dynamic column
+                      const current: string[] = (job as any).actions_required_dynamic || []
+                      update.actions_required_dynamic = e.target.checked
+                        ? [...new Set([...current, label])]
+                        : current.filter((l: string) => l !== label)
+                      await supabase.from('jobs').update(update).eq('id', job.id)
+                    }}
+                    className="w-3.5 h-3.5 text-green-600 rounded" />
+                  <span className="text-gray-700">{label}</span>
+                </label>
+              )
+            })}
           </div>
         </div>
         <div>
@@ -1360,6 +1438,9 @@ function JobDetailPanel({ job, parentJobNumber, onClose, onUpdate }: { job: Job;
                   <th className="px-3 py-2 text-left text-gray-500 font-medium">Description</th>
                   <th className="px-3 py-2 text-left text-gray-500 font-medium w-14">Qty</th>
                   <th className="px-3 py-2 text-left text-gray-500 font-medium w-16">UOM</th>
+                  <th className="px-2 py-2 text-center text-gray-500 font-medium w-10">QC</th>
+                  <th className="px-2 py-2 text-center text-gray-500 font-medium w-10">Ready</th>
+                  <th className="px-2 py-2 text-center text-gray-500 font-medium w-10">Disp</th>
                   <th className="px-3 py-2 text-left text-gray-500 font-medium w-24">Child Job</th>
                 </tr></thead>
                 <tbody>
@@ -1367,8 +1448,33 @@ function JobDetailPanel({ job, parentJobNumber, onClose, onUpdate }: { job: Job;
                     <tr key={item.id} className="border-t border-gray-100">
                       <td className="px-3 py-2 text-gray-400">{i + 1}</td>
                       <td className="px-3 py-2 text-gray-800">{item.description}</td>
-                      <td className="px-3 py-2 text-gray-600">{item.quantity}</td>
+                      <td className="px-3 py-2">
+                        <input type="number" min={1} defaultValue={item.quantity}
+                          className="w-16 border border-gray-300 rounded-md px-2 py-1 text-xs text-gray-800 bg-white focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500 hover:border-gray-400"
+                          onBlur={async (e) => {
+                            const newQty = parseFloat(e.target.value) || 1
+                            if (newQty === item.quantity) return
+                            const oldQty = item.quantity
+                            await supabase.from('job_line_items').update({ quantity: newQty }).eq('id', item.id)
+                            // If this is a child job, sync quantity back to parent line item
+                            if (job.is_child_job && job.parent_job_id) {
+                              const { data: parentItems } = await supabase.from('job_line_items').select('id, quantity').eq('child_job_id', job.id)
+                              if (parentItems && parentItems.length > 0) {
+                                await supabase.from('job_line_items').update({ quantity: newQty }).eq('id', parentItems[0].id)
+                                await supabase.from('activity_log').insert({
+                                  event_type: 'parent_job_quantity_synced', entity_type: 'job', entity_id: job.parent_job_id,
+                                  metadata: { child_job_id: job.id, parent_job_id: job.parent_job_id, old_qty: oldQty, new_qty: newQty, synced_at: new Date().toISOString() },
+                                }).then(({ error: logErr }) => { if (logErr) console.error('Activity log error:', logErr.message) })
+                              }
+                            }
+                            setLineItems(prev => prev.map(li => li.id === item.id ? { ...li, quantity: newQty } : li))
+                            showMsg('Quantity updated' + (job.is_child_job ? ' & synced to parent' : ''))
+                          }} />
+                      </td>
                       <td className="px-3 py-2 text-gray-600">{item.uom}</td>
+                      <td className="px-2 py-2 text-center">{item.qc_done ? <span className="inline-block w-4 h-4 bg-green-500 rounded-full text-white text-xs leading-4">✓</span> : <span className="inline-block w-4 h-4 bg-gray-200 rounded-full" />}</td>
+                      <td className="px-2 py-2 text-center">{item.ready_for_delivery ? <span className="inline-block w-4 h-4 bg-amber-500 rounded-full text-white text-xs leading-4">✓</span> : <span className="inline-block w-4 h-4 bg-gray-200 rounded-full" />}</td>
+                      <td className="px-2 py-2 text-center">{item.dispatched ? <span className="inline-block w-4 h-4 bg-[#1d3461] rounded-full text-white text-xs leading-4">✓</span> : <span className="inline-block w-4 h-4 bg-gray-200 rounded-full" />}</td>
                       <td className="px-3 py-2">
                         {item.child_job_id ? (
                           <span className="text-xs font-bold text-green-600 bg-green-50 px-2 py-0.5 rounded">
@@ -1485,19 +1591,22 @@ function CreateDirectJobModal({ onClose, onCreated }: { onClose: () => void; onC
   const [dueDate, setDueDate] = React.useState('')
   const [hasDrawing, setHasDrawing] = React.useState(false)
   const [drawingNumber, setDrawingNumber] = React.useState('')
-  const [rfqReference, setRfqReference] = React.useState('')
   const [directAttachments, setDirectAttachments] = React.useState<Array<{name:string;path:string;size:number}>>( [])
   const [uploadingDirect, setUploadingDirect] = React.useState(false)
-  const defaultActions = { manufacture: false, sandblast: false, prepare_material: false, service: false, paint: false, other: false, repair: false, installation: false, cut: false, modify: false }
-  const [actions, setActions] = React.useState(defaultActions)
+  const actionTypeOptions = useDropdownOptions('action_types', ACTIONS_LIST_FALLBACK)
+  const [selectedActions, setSelectedActions] = React.useState<Set<string>>(new Set())
   const [lineItems, setLineItems] = React.useState([{ description: '', quantity: 1, uom: 'Each', notes: '' }])
 
   // Reset all form state on mount to prevent state bleed between modal opens
   React.useEffect(() => {
-    setActions({ manufacture: false, sandblast: false, prepare_material: false, service: false, paint: false, other: false, repair: false, installation: false, cut: false, modify: false })
+    setSelectedActions(new Set())
   }, [])
 
-  const toggleAction = (key: keyof typeof actions) => setActions(a => ({ ...a, [key]: !a[key] }))
+  const toggleDirectAction = (label: string) => setSelectedActions(prev => {
+    const next = new Set(prev)
+    if (next.has(label)) next.delete(label); else next.add(label)
+    return next
+  })
   const addLineItem = () => setLineItems(li => [...li, { description: '', quantity: 1, uom: 'Each', notes: '' }])
   const removeLineItem = (i: number) => setLineItems(li => li.filter((_, idx) => idx !== i))
   const updateLineItem = (i: number, field: string, val: any) => setLineItems(li => li.map((item, idx) => idx === i ? { ...item, [field]: val } : item))
@@ -1506,13 +1615,7 @@ function CreateDirectJobModal({ onClose, onCreated }: { onClose: () => void; onC
     if (!clientName.trim()) { alert('Client name is required'); return }
     setSaving(true)
     try {
-      const yr = new Date().getFullYear().toString().slice(-2)
-      const { count: jc } = await supabase.from('jobs').select('*', { count: 'exact', head: true })
-      const jseq = String((jc || 0) + 1).padStart(3, '0')
-      const directJobNumber = `JOB-${yr}-${jseq}`
-
       const { data: job, error } = await supabase.from('jobs').insert({
-        job_number: directJobNumber,
         description: description.trim() || null,
         client_name: clientName.trim(), site_req: siteReq.trim() || null,
         is_contract_work: workType === 'contract', is_quoted_work: workType === 'quoted',
@@ -1522,11 +1625,8 @@ function CreateDirectJobModal({ onClose, onCreated }: { onClose: () => void; onC
         notes: notes.trim() || null, date_received: dateReceived, due_date: dueDate || null,
         has_drawing: hasDrawing,
         drawing_number: drawingNumber.trim() || null,
-        client_rfq_number: rfqReference.trim() || null,
-        action_manufacture: actions.manufacture, action_sandblast: actions.sandblast,
-        action_prepare_material: actions.prepare_material, action_service: actions.service,
-        action_paint: actions.paint, action_other: actions.other, action_repair: actions.repair,
-        action_installation: actions.installation, action_cut: actions.cut, action_modify: actions.modify,
+        client_rfq_number: null,
+        ...buildActionFields(selectedActions),
         entry_type: 'DIRECT', status: 'PENDING', workshop_status: 'NOT_STARTED',
         has_info_for_quote: false,
       }).select().single()
@@ -1556,12 +1656,7 @@ function CreateDirectJobModal({ onClose, onCreated }: { onClose: () => void; onC
   }
 
   const uomOptions = ['Each', 'Meter', 'kg', 'Liter', 'Hour', 'Set', 'm2', 'm3']
-  const actionList = [
-    { key: 'manufacture' as const, label: 'Manufacture' }, { key: 'sandblast' as const, label: 'Sandblast' },
-    { key: 'service' as const, label: 'Service' }, { key: 'paint' as const, label: 'Paint' },
-    { key: 'repair' as const, label: 'Repair' }, { key: 'installation' as const, label: 'Installation' },
-    { key: 'cut' as const, label: 'Cut' }, { key: 'modify' as const, label: 'Modify' },
-  ]
+  // actionList is now dynamic from actionTypeOptions
 
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-center justify-center p-4">
@@ -1594,10 +1689,10 @@ function CreateDirectJobModal({ onClose, onCreated }: { onClose: () => void; onC
           </div>
           <div>
             <label className="block text-xs font-medium text-gray-600 mb-2">Actions Required</label>
-            <div className="grid grid-cols-5 gap-2">
-              {actionList.map(({ key, label }) => (
-                <label key={key} className="flex items-center gap-2 text-sm cursor-pointer">
-                  <input type="checkbox" checked={actions[key]} onChange={() => toggleAction(key)} className="w-4 h-4 text-indigo-600 rounded" />
+            <div className="grid grid-cols-3 gap-2">
+              {actionTypeOptions.map(label => (
+                <label key={label} className="flex items-center gap-2 text-sm cursor-pointer">
+                  <input type="checkbox" checked={selectedActions.has(label)} onChange={() => toggleDirectAction(label)} className="w-4 h-4 text-indigo-600 rounded" />
                   <span className="text-gray-700">{label}</span>
                 </label>
               ))}
@@ -1669,9 +1764,11 @@ function CreateRFQModal({ onClose, onCreated }: { onClose: () => void; onCreated
   const [showNewClient, setShowNewClient] = React.useState(false)
   const [newClientName, setNewClientName] = React.useState('')
   const [attachments, setAttachments] = React.useState<Array<{ name: string; path: string; size: number }>>([])
+  const mediaOptions = useDropdownOptions('media_received', MEDIA_OPTIONS_FALLBACK)
+  const actionTypeOptions = useDropdownOptions('action_types', ACTIONS_LIST_FALLBACK)
   const [form, setForm] = React.useState({
     rfq_direction: 'INCOMING',
-    operating_entity: 'ERHA FC',
+    operating_entity: 'ERHA_FC',
     rfq_no: '',
     client_rfq_number: '',
     priority: 'MEDIUM',
@@ -1853,7 +1950,7 @@ function CreateRFQModal({ onClose, onCreated }: { onClose: () => void; onCreated
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">Operating Entity</label>
                 <select value={form.operating_entity} onChange={e => set('operating_entity', e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-                  {OPERATING_ENTITIES.map(e => <option key={e}>{e}</option>)}
+                  {OPERATING_ENTITIES.map(e => <option key={e.value} value={e.value}>{e.label}</option>)}
                 </select>
               </div>
               <div>
@@ -1869,7 +1966,7 @@ function CreateRFQModal({ onClose, onCreated }: { onClose: () => void; onCreated
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">Media Received</label>
                 <select value={form.media_received} onChange={e => set('media_received', e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-                  {MEDIA_OPTIONS.map(m => <option key={m}>{m}</option>)}
+                  {mediaOptions.map(m => <option key={m}>{m}</option>)}
                 </select>
               </div>
               <div>
@@ -1913,13 +2010,6 @@ function CreateRFQModal({ onClose, onCreated }: { onClose: () => void; onCreated
             <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Job Detail</p>
             <div className="grid grid-cols-2 gap-3 mb-3">
               <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Department</label>
-                <select value={form.department_cg} onChange={e => set('department_cg', e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-                  <option value="">Select department...</option>
-                  {DEPARTMENTS_CG.map(d => <option key={d}>{d}</option>)}
-                </select>
-              </div>
-              <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">Drawing Number</label>
                 <input type="text" value={form.drawing_number} onChange={e => set('drawing_number', e.target.value)} placeholder="DWG-001" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500" />
               </div>
@@ -1927,7 +2017,7 @@ function CreateRFQModal({ onClose, onCreated }: { onClose: () => void; onCreated
             <div className="mb-3">
               <label className="block text-xs font-medium text-gray-600 mb-2">Actions Required</label>
               <div className="flex flex-wrap gap-1.5">
-                {ACTIONS_LIST.map(a => (
+                {actionTypeOptions.map(a => (
                   <button key={a} type="button" onClick={() => toggleAction(a)}
                     className={`px-2.5 py-1 rounded text-xs font-medium border transition-all ${form.actions_required.includes(a) ? 'bg-blue-600 text-white border-blue-600' : 'bg-white text-gray-600 border-gray-300 hover:border-blue-400 hover:text-blue-600'}`}>
                     {a}
@@ -2015,6 +2105,8 @@ function CreateRFQModal({ onClose, onCreated }: { onClose: () => void; onCreated
 // RFQ DETAIL PANEL
 
 function RFQDetailPanel({ rfq, onClose, onUpdate, role, onJobCreated, onNavigateToJob }: { rfq: RFQ; onClose: () => void; onUpdate: (rfq: RFQ) => void; role: string | null; onJobCreated?: () => void; onNavigateToJob?: (jobNumber: string) => void }) {
+  const mediaOptions = useDropdownOptions('media_received', MEDIA_OPTIONS_FALLBACK)
+  const actionTypeOptions = useDropdownOptions('action_types', ACTIONS_LIST_FALLBACK)
   const [lineItems, setLineItems] = React.useState<LineItem[]>([])
   const [panelLineItems, setPanelLineItems] = React.useState<any[]>([])
   const [loadingItems, setLoadingItems] = React.useState(true)
@@ -2033,11 +2125,11 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, onJobCreated, onNavigate
   const [editDrawingNumber, setEditDrawingNumber] = React.useState(rfq.drawing_number || '')
   const [editRequestedBy, setEditRequestedBy] = React.useState(rfq.requested_by || '')
   const [editMediaReceived, setEditMediaReceived] = React.useState(rfq.media_received || '')
-  const [editOperatingEntity, setEditOperatingEntity] = React.useState(rfq.operating_entity || 'ERHA FC')
+  const [editOperatingEntity, setEditOperatingEntity] = React.useState(rfq.operating_entity || 'ERHA_FC')
   const [editDateReceived, setEditDateReceived] = React.useState(rfq.request_date || '')
   const [editRequiredBy, setEditRequiredBy] = React.useState(rfq.required_date || '')
   const [editPriority, setEditPriority] = React.useState(rfq.priority || 'MEDIUM')
-  const [editDepartmentCG, setEditDepartmentCG] = React.useState(rfq.department_cg || '')
+  const [editDepartmentCG] = React.useState(rfq.department_cg || '')
   const [editActions, setEditActions] = React.useState<string[]>((rfq.actions_required || '').split(',').filter(Boolean))
   const [editDescription, setEditDescription] = React.useState(rfq.description || '')
   const [editSpecialReqs, setEditSpecialReqs] = React.useState(rfq.special_requirements || '')
@@ -2162,14 +2254,8 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, onJobCreated, onNavigate
         if (error) throw error
         onUpdate(data)
 
-        // 2. Create job record with all RFQ fields
-        const year = new Date().getFullYear().toString().slice(-2)
-        const { count: jobCount } = await supabase.from('jobs').select('*', { count: 'exact', head: true })
-        const seq = String((jobCount || 0) + 1).padStart(3, '0')
-        const newJobNumber = `JOB-${year}-${seq}`
-
+        // 2. Create job record with all RFQ fields (job_number auto-set by DB trigger)
         const { data: jobData, error: jobError } = await supabase.from('jobs').insert({
-          job_number: newJobNumber,
           rfq_id: rfq.id,
           rfq_no: rfq.rfq_no || null,
           rfq_number: rfq.rfq_no || null,
@@ -2197,23 +2283,15 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, onJobCreated, onNavigate
           client_rfq_number: rfq.client_rfq_number || null,
           is_parent: false,
           is_child_job: false,
-          action_manufacture: false,
-          action_service: false,
-          action_repair: false,
-          action_sandblast: false,
-          action_paint: false,
-          action_installation: false,
-          action_cut: false,
-          action_modify: false,
-          action_other: false,
-          action_prepare_material: false,
+          ...buildActionFields(new Set()),
           has_info_for_quote: false,
-        }).select('id').single()
+        }).select('id, job_number').single()
 
         if (jobError) {
           console.error('Job creation error:', jobError.message)
           showMsg('Order saved but job creation failed - check console')
         } else {
+          const newJobNumber = jobData.job_number
           // LOCK: Store job_number on RFQ immediately (Order Won = ACCEPTED)
           await supabase.from('rfqs').update({ job_number: newJobNumber, status: 'ACCEPTED' }).eq('id', rfq.id)
 
@@ -2281,6 +2359,17 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, onJobCreated, onNavigate
       const { data, error } = await supabase.from('rfqs').update({ invoice_number: invoiceNumber.trim(), invoice_date: invoiceDate || null, invoice_value: invoiceValue ? parseFloat(invoiceValue) : null, payment_status: paymentStatus || null, status: 'JOB_CREATED' }).eq('id', rfq.id).select('*, clients(company_name)').single()
       if (error) throw error
       onUpdate(data)
+      // Auto-trigger: move linked job to INVOICED on Workshop Board
+      const { data: linkedJobs } = await supabase.from('jobs').select('id, job_number, workshop_status').eq('rfq_id', rfq.id)
+      if (linkedJobs && linkedJobs.length > 0) {
+        for (const lj of linkedJobs) {
+          await supabase.from('jobs').update({ workshop_status: 'INVOICED' }).eq('id', lj.id)
+          await supabase.from('activity_log').insert({
+            event_type: 'job_auto_invoiced', entity_type: 'job', entity_id: lj.id,
+            metadata: { rfq_id: rfq.id, job_number: lj.job_number, invoice_number: invoiceNumber.trim(), invoiced_at: new Date().toISOString() },
+          }).then(({ error: logErr }) => { if (logErr) console.error('Activity log error:', logErr.message) })
+        }
+      }
       showMsg('Invoice saved - card moved to Complete')
     } catch (e: any) { alert('Error: ' + e.message) }
     finally { setSaving(false) }
@@ -2330,7 +2419,7 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, onJobCreated, onNavigate
             </button>
           </div>
 
-          {(status === 'PENDING' || status === 'QUOTED') && (
+          {(['PENDING', 'QUOTED', 'SENT_TO_CUSTOMER', 'ACCEPTED'].includes(status)) && (
             <div className="px-5 py-4 border-b border-gray-100">
               <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-3">Quote Information (from Pastel)</p>
               <div className="grid grid-cols-3 gap-3 mb-3">
@@ -2369,13 +2458,8 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, onJobCreated, onNavigate
                 return
               }
 
-              const year = new Date().getFullYear().toString().slice(-2)
-              const { count: jobCount } = await supabase.from('jobs').select('*', { count: 'exact', head: true })
-              const seq = String((jobCount || 0) + 1).padStart(3, '0')
-              const newJobNumber = 'JOB-' + year + '-' + seq
               const pendingPO = 'PENDING-' + new Date().toISOString().slice(0,10)
               const { data: jobData, error: jobError } = await supabase.from('jobs').insert({
-                job_number: newJobNumber,
                 rfq_id: rfq.id,
                 rfq_no: rfq.rfq_no || null,
                 enq_number: rfq.enq_number || null,
@@ -2401,19 +2485,11 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, onJobCreated, onNavigate
                 is_contract_work: rfq.is_contract_work || false,
                 is_parent: false,
                 is_child_job: false,
-                action_manufacture: false,
-                action_service: false,
-                action_repair: false,
-                action_sandblast: false,
-                action_paint: false,
-                action_installation: false,
-                action_cut: false,
-                action_modify: false,
-                action_other: false,
-                action_prepare_material: false,
+                ...buildActionFields(new Set()),
                 has_info_for_quote: false,
-              }).select('id').single()
+              }).select('id, job_number').single()
               if (jobError) throw jobError
+              const newJobNumber = jobData.job_number
 
               // LOCK: Store job_number on RFQ record immediately + move to Order Won (ACCEPTED)
               const { data: updatedRfq, error: lockError } = await supabase.from('rfqs').update({
@@ -2480,7 +2556,39 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, onJobCreated, onNavigate
             {saving ? 'Saving...' : 'Save Order - Move to Order Won'}
           </button>
         )}
-              {status === 'ACCEPTED' && poNumber && <div className="flex items-center gap-2 text-sm text-green-700 bg-green-50 px-3 py-2 rounded-lg"><FileText size={14} /> PO: {poNumber}</div>}
+              {status === 'ACCEPTED' && (
+                <button onClick={async () => {
+                  setSaving(true)
+                  try {
+                    const fieldsUpdated: string[] = []
+                    const rfqUpdate: Record<string, any> = {}
+                    const jobUpdate: Record<string, any> = {}
+                    if (poNumber.trim()) { rfqUpdate.po_number = poNumber.trim(); jobUpdate.po_number = poNumber.trim(); jobUpdate.order_number = poNumber.trim(); fieldsUpdated.push('po_number') }
+                    if (orderDate) { rfqUpdate.order_date = orderDate; jobUpdate.order_date = orderDate; fieldsUpdated.push('order_date') }
+                    if (quoteNumber.trim()) { rfqUpdate.quote_number = quoteNumber.trim(); fieldsUpdated.push('quote_number') }
+                    if (quoteValue) { rfqUpdate.quote_value_excl_vat = parseFloat(quoteValue); rfqUpdate.quote_value_incl_vat = parseFloat(quoteValue) * 1.15; fieldsUpdated.push('quote_value') }
+                    if (validUntil) { rfqUpdate.valid_until = validUntil; fieldsUpdated.push('valid_until') }
+                    if (Object.keys(rfqUpdate).length === 0) { showMsg('No changes to save'); setSaving(false); return }
+                    const { data, error } = await supabase.from('rfqs').update(rfqUpdate).eq('id', rfq.id).select('*, clients(company_name)').single()
+                    if (error) throw error
+                    onUpdate(data)
+                    if (Object.keys(jobUpdate).length > 0) {
+                      await supabase.from('jobs').update(jobUpdate).eq('rfq_id', rfq.id)
+                    }
+                    await supabase.from('activity_log').insert({
+                      event_type: 'rfq_updated_post_fasttrack',
+                      entity_type: 'rfq',
+                      entity_id: rfq.id,
+                      metadata: { fields_updated: fieldsUpdated, updated_by: rfq.assigned_quoter_name || 'user', updated_at: new Date().toISOString(), job_number: rfq.job_number },
+                    }).then(({ error: logErr }) => { if (logErr) console.error('Activity log error:', logErr.message) })
+                    showMsg('Order details updated on RFQ & linked job.')
+                    if (onJobCreated) onJobCreated()
+                  } catch (err: any) { alert('Error: ' + err.message) }
+                  finally { setSaving(false) }
+                }} disabled={saving} className="w-full py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-lg disabled:opacity-50">
+                  {saving ? 'Saving...' : 'Save Order Details'}
+                </button>
+              )}
             </div>
           )}
 
@@ -2522,27 +2630,16 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, onJobCreated, onNavigate
             <div className="grid grid-cols-2 gap-2 mb-3">
               <div><label className="text-xs text-gray-500 block mb-1">Drawing Number</label><input value={editDrawingNumber} onChange={e => setEditDrawingNumber(e.target.value)} className="w-full border border-gray-200 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-blue-400" /></div>
               <div><label className="text-xs text-gray-500 block mb-1">Requested / Received By</label><input value={editRequestedBy} onChange={e => setEditRequestedBy(e.target.value)} className="w-full border border-gray-200 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-blue-400" /></div>
-              <div><label className="text-xs text-gray-500 block mb-1">Media Received</label><select value={editMediaReceived} onChange={e => setEditMediaReceived(e.target.value)} className="w-full border border-gray-200 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-blue-400 bg-white"><option value="">Select...</option>{['Email','WhatsApp','Phone','Walk-in'].map(m => <option key={m} value={m}>{m}</option>)}</select></div>
-              <div><label className="text-xs text-gray-500 block mb-1">Operating Entity</label><select value={editOperatingEntity} onChange={e => setEditOperatingEntity(e.target.value)} className="w-full border border-gray-200 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-blue-400 bg-white">{OPERATING_ENTITIES.map(e => <option key={e} value={e}>{e}</option>)}</select></div>
+              <div><label className="text-xs text-gray-500 block mb-1">Media Received</label><select value={editMediaReceived} onChange={e => setEditMediaReceived(e.target.value)} className="w-full border border-gray-200 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-blue-400 bg-white"><option value="">Select...</option>{mediaOptions.map(m => <option key={m} value={m}>{m}</option>)}</select></div>
+              <div><label className="text-xs text-gray-500 block mb-1">Operating Entity</label><select value={editOperatingEntity} onChange={e => setEditOperatingEntity(e.target.value)} className="w-full border border-gray-200 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-blue-400 bg-white">{OPERATING_ENTITIES.map(e => <option key={e.value} value={e.value}>{e.label}</option>)}</select></div>
               <div><label className="text-xs text-gray-500 block mb-1">Date Received</label><input type="date" value={editDateReceived} onChange={e => setEditDateReceived(e.target.value)} className="w-full border border-gray-200 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-blue-400" /></div>
               <div><label className="text-xs text-gray-500 block mb-1">Required By</label><input type="date" value={editRequiredBy} onChange={e => setEditRequiredBy(e.target.value)} className="w-full border border-gray-200 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-blue-400" /></div>
               <div><label className="text-xs text-gray-500 block mb-1">Priority</label><select value={editPriority} onChange={e => setEditPriority(e.target.value)} className="w-full border border-gray-200 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-blue-400 bg-white">{['LOW','MEDIUM','HIGH','URGENT'].map(p => <option key={p} value={p}>{p}</option>)}</select></div>
             </div>
             <div className="mb-3">
-              <label className="text-xs text-gray-500 block mb-1">Department CG</label>
-              <div className="flex flex-wrap gap-3">
-                {['MELTSHOP','MILLS','SHARON','OREN','STORES','GENERAL','MRSTO'].map(d => (
-                  <label key={d} className="flex items-center gap-1 cursor-pointer">
-                    <input type="radio" name="editDeptCG" value={d} checked={editDepartmentCG === d} onChange={() => setEditDepartmentCG(d)} className="accent-orange-500" />
-                    <span className="text-xs text-gray-700">{d}</span>
-                  </label>
-                ))}
-              </div>
-            </div>
-            <div className="mb-3">
               <label className="text-xs text-gray-500 block mb-1">Actions Required</label>
               <div className="flex flex-wrap gap-1.5">
-                {ACTIONS_LIST.map(a => (
+                {actionTypeOptions.map(a => (
                   <button key={a} onClick={() => setEditActions(prev => prev.includes(a) ? prev.filter(x => x !== a) : [...prev, a])}
                     className={`px-2 py-0.5 rounded text-xs font-medium border transition-all ${editActions.includes(a) ? 'bg-orange-500 text-white border-orange-500' : 'bg-white text-gray-600 border-gray-300 hover:border-orange-300'}`}>
                     {a}
@@ -2753,17 +2850,18 @@ function SpawnJobModal({ lineItem, parentJob, onClose, onSpawned }: {
   const [priority, setPriority] = React.useState(parentJob.priority || 'NORMAL')
   const [dueDate, setDueDate] = React.useState(parentJob.due_date || '')
   const [notes, setNotes] = React.useState('')
-  const [actions, setActions] = React.useState({
-    manufacture: false, service: false, repair: false,
-    sandblast: false, paint: false, installation: false,
-    cut: false, modify: false, other: false
+  const [quantity, setQuantity] = React.useState(lineItem.quantity || 1)
+  const actionTypeOptions = useDropdownOptions('action_types', ACTIONS_LIST_FALLBACK)
+  const [selectedActions, setSelectedActions] = React.useState<Set<string>>(new Set())
+  const toggleSpawnAction = (label: string) => setSelectedActions(prev => {
+    const next = new Set(prev)
+    if (next.has(label)) next.delete(label); else next.add(label)
+    return next
   })
-  const toggleAction = (key: keyof typeof actions) => setActions(a => ({ ...a, [key]: !a[key] }))
-  const actionList: [keyof typeof actions, string][] = [
-    ['manufacture','Manufacture'],['service','Service'],['repair','Repair'],
-    ['sandblast','Sandblast'],['paint','Paint'],['installation','Installation'],
-    ['cut','Cut'],['modify','Modify'],['other','Other']
-  ]
+  const [docs, setDocs] = React.useState({
+    has_info_for_quote: false, has_service_schedule: false, has_qcp: false, has_internal_order: false
+  })
+  const toggleDoc = (key: keyof typeof docs) => setDocs(d => ({ ...d, [key]: !d[key] }))
 
   const handleCreate = async () => {
     if (!description.trim()) { alert('Description is required'); return }
@@ -2795,22 +2893,24 @@ function SpawnJobModal({ lineItem, parentJob, onClose, onSpawned }: {
         drawing_number:           drawingNumber || null,
         date_received:            new Date().toISOString().split('T')[0],
         is_contract_work:         parentJob.is_contract_work || false,
-        action_manufacture:       actions.manufacture,
-        action_service:           actions.service,
-        action_repair:            actions.repair,
-        action_sandblast:         actions.sandblast,
-        action_paint:             actions.paint,
-        action_installation:      actions.installation,
-        action_cut:               actions.cut,
-        action_modify:            actions.modify,
-        action_other:             actions.other,
-        has_info_for_quote:       false,
+        ...buildActionFields(selectedActions),
+        has_info_for_quote:       docs.has_info_for_quote,
+        has_service_schedule:     docs.has_service_schedule,
+        has_qcp:                  docs.has_qcp,
+        has_internal_order:       docs.has_internal_order,
       }).select().single()
       if (error) throw error
       // Create line item for child job so it prints on the card
-      await supabase.from('job_line_items').insert({ job_id: childJob.id, description: lineItem.description || description.trim(), quantity: lineItem.quantity || 1, uom: lineItem.uom || 'EA', item_type: lineItem.item_type || 'MATERIAL', cost_price: 0, sell_price: 0, line_total: 0, status: 'PENDING', sort_order: 0, can_spawn_job: false })
-      await supabase.from('job_line_items').update({ child_job_id: childJob.id }).eq('id', lineItem.id)
+      await supabase.from('job_line_items').insert({ job_id: childJob.id, description: lineItem.description || description.trim(), quantity: quantity, uom: lineItem.uom || 'EA', item_type: lineItem.item_type || 'MATERIAL', cost_price: 0, sell_price: 0, line_total: 0, status: 'PENDING', sort_order: 0, can_spawn_job: false })
+      await supabase.from('job_line_items').update({ child_job_id: childJob.id, quantity: quantity }).eq('id', lineItem.id)
       await supabase.from('jobs').update({ is_parent: true }).eq('id', parentJob.id)
+      // Sync quantity to parent line item + log
+      if (quantity !== (lineItem.quantity || 1)) {
+        await supabase.from('activity_log').insert({
+          event_type: 'parent_job_quantity_synced', entity_type: 'job', entity_id: parentJob.id,
+          metadata: { child_job_id: childJob.id, parent_job_id: parentJob.id, old_qty: lineItem.quantity || 1, new_qty: quantity, synced_at: new Date().toISOString() },
+        }).then(({ error: logErr }) => { if (logErr) console.error('Activity log error:', logErr.message) })
+      }
       // LOG: child_job_spawned ML event
       await supabase.from('import_events').insert({
         source: 'child_job_spawned',
@@ -2857,6 +2957,10 @@ function SpawnJobModal({ lineItem, parentJob, onClose, onSpawned }: {
               <input value={drawingNumber} onChange={e => setDrawingNumber(e.target.value)}
                 placeholder="DWG-001" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
             </div>
+            <div><label className="block text-xs font-medium text-gray-600 mb-1">Quantity</label>
+              <input type="number" min={1} value={quantity} onChange={e => setQuantity(Math.max(1, parseInt(e.target.value) || 1))}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"/>
+            </div>
             <div><label className="block text-xs font-medium text-gray-600 mb-1">Priority</label>
               <select value={priority} onChange={e => setPriority(e.target.value)}
                 className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
@@ -2870,9 +2974,23 @@ function SpawnJobModal({ lineItem, parentJob, onClose, onSpawned }: {
           </div>
           <div><label className="block text-xs font-medium text-gray-600 mb-2">Actions Required</label>
             <div className="grid grid-cols-3 gap-2">
-              {actionList.map(([key, label]) => (
+              {actionTypeOptions.map(label => (
+                <label key={label} className="flex items-center gap-2 text-xs cursor-pointer">
+                  <input type="checkbox" checked={selectedActions.has(label)} onChange={() => toggleSpawnAction(label)}
+                    className="w-3.5 h-3.5 text-indigo-600 rounded"/>
+                  <span className="text-gray-700">{label}</span>
+                </label>
+              ))}
+            </div>
+          </div>
+          <div><label className="block text-xs font-medium text-gray-600 mb-2">Attached Documents</label>
+            <div className="grid grid-cols-2 gap-2">
+              {([
+                ['has_info_for_quote','Info for Quote'],['has_service_schedule','Service Schedule / QCP'],
+                ['has_qcp','QCP'],['has_internal_order','Internal Order'],
+              ] as [keyof typeof docs, string][]).map(([key, label]) => (
                 <label key={key} className="flex items-center gap-2 text-xs cursor-pointer">
-                  <input type="checkbox" checked={actions[key]} onChange={() => toggleAction(key)}
+                  <input type="checkbox" checked={docs[key]} onChange={() => toggleDoc(key)}
                     className="w-3.5 h-3.5 text-indigo-600 rounded"/>
                   <span className="text-gray-700">{label}</span>
                 </label>
@@ -2912,14 +3030,19 @@ function WorkshopBoard({ jobs, loading, onRefresh, onStatusChange }: {
     { key: 'QUALITY_CHECK', label: 'Quality Check', color: 'bg-purple-500' },
     { key: 'COMPLETE',      label: 'Complete',      color: 'bg-teal-500'   },
     { key: 'DISPATCHED',    label: 'Dispatched',    color: 'bg-green-600'  },
+    { key: 'DELIVERED',     label: 'Delivered',     color: 'bg-cyan-600'   },
+    { key: 'INVOICED',      label: 'Invoiced',      color: 'bg-violet-600' },
+    { key: 'COMPLETED',     label: 'Completed',     color: 'bg-green-700'  },
   ]
   const nextStatus: Record<string,string> = {
     NOT_STARTED:'IN_PROGRESS', IN_PROGRESS:'QUALITY_CHECK',
     ON_HOLD:'IN_PROGRESS', QUALITY_CHECK:'COMPLETE', COMPLETE:'DISPATCHED',
+    DISPATCHED:'DELIVERED', INVOICED:'COMPLETED',
   }
   const nextLabel: Record<string,string> = {
     NOT_STARTED:'Start', IN_PROGRESS:'QC Check',
     ON_HOLD:'Resume', QUALITY_CHECK:'Complete', COMPLETE:'Dispatch',
+    DISPATCHED:'Mark Delivered', INVOICED:'Mark Completed',
   }
   if (loading) return <div className="flex items-center justify-center h-64"><p className="text-gray-400">Loading workshop jobs...</p></div>
   return (
@@ -2958,10 +3081,18 @@ function WorkshopBoard({ jobs, loading, onRefresh, onStatusChange }: {
                       <p className="text-sm font-medium text-gray-800 line-clamp-2 mb-1">{job.description||'No description'}</p>
                       <p className="text-xs text-gray-500 truncate mb-2">{job.client_name||'-'}</p>
                       {job.due_date && <p className="text-xs text-red-500 mb-2">Due: {new Date(job.due_date).toLocaleDateString('en-ZA')}</p>}
+                      {(job as any)._liStats && (job as any)._liStats.total > 0 && (
+                        <div className="flex items-center gap-1.5 mb-2">
+                          <div className="flex-1 bg-gray-200 rounded-full h-1.5">
+                            <div className="bg-[#1d3461] h-1.5 rounded-full transition-all" style={{ width: `${((job as any)._liStats.dispatched / (job as any)._liStats.total) * 100}%` }} />
+                          </div>
+                          <span className="text-xs font-semibold text-[#1d3461]">{(job as any)._liStats.dispatched}/{(job as any)._liStats.total}</span>
+                        </div>
+                      )}
                       <div className="flex gap-1" onClick={e => e.stopPropagation()}>
                         {nextStatus[col.key] && (
                           <button onClick={() => onStatusChange(job.id, nextStatus[col.key])}
-                            className="flex-1 py-1 text-xs font-semibold text-white rounded bg-orange-500 hover:bg-orange-600 transition-colors">
+                            className={`flex-1 py-1 text-xs font-semibold text-white rounded transition-colors ${col.key === 'DISPATCHED' ? 'bg-cyan-600 hover:bg-cyan-700' : col.key === 'INVOICED' ? 'bg-green-700 hover:bg-green-800' : 'bg-orange-500 hover:bg-orange-600'}`}>
                             {nextLabel[col.key]}
                           </button>
                         )}
@@ -3024,7 +3155,7 @@ function WorkshopBoard({ jobs, loading, onRefresh, onStatusChange }: {
 function JobExecutionPanel({ job, onClose, onStatusChange, onRefresh }: {
   job: any; onClose: () => void; onStatusChange: (id: string, status: string) => void; onRefresh: () => void
 }) {
-  const [activeTab, setActiveTab] = React.useState<'workers'|'time'|'qc'|'materials'|'reconcile'>('workers')
+  const [activeTab, setActiveTab] = React.useState<'workers'|'time'|'qc'|'materials'|'reconcile'|'line_items'>('workers')
   const [workshopStatus, setWorkshopStatus] = React.useState(job.workshop_status || 'NOT_STARTED')
   const [notes, setNotes] = React.useState(job.workshop_notes || '')
   const [savingNotes, setSavingNotes] = React.useState(false)
@@ -3048,6 +3179,63 @@ function JobExecutionPanel({ job, onClose, onStatusChange, onRefresh }: {
   const [showMatModal, setShowMatModal] = React.useState(false)
   const [matForm, setMatForm] = React.useState({ description: '', quantity: '', unit: 'EA', logged_by: '' })
   const [savingMat, setSavingMat] = React.useState(false)
+  const [execLineItems, setExecLineItems] = React.useState<any[]>([])
+  const [loadingExecLines, setLoadingExecLines] = React.useState(false)
+
+  const loadExecLineItems = React.useCallback(async () => {
+    setLoadingExecLines(true)
+    const { data } = await supabase.from('job_line_items').select('*').eq('job_id', job.id).order('sort_order')
+    setExecLineItems(data || [])
+    setLoadingExecLines(false)
+  }, [job.id])
+
+  const handleLineItemToggle = async (li: any, field: 'qc_done' | 'ready_for_delivery' | 'dispatched', value: boolean) => {
+    const update: Record<string, any> = { [field]: value }
+    const now = new Date().toISOString()
+    if (field === 'qc_done') {
+      update.qc_done_at = value ? now : null
+      update.qc_done_by = value ? 'user' : null
+      if (!value) { update.ready_for_delivery = false; update.ready_for_delivery_at = null; update.dispatched = false; update.dispatched_at = null }
+    }
+    if (field === 'ready_for_delivery') {
+      update.ready_for_delivery_at = value ? now : null
+      update.ready_for_delivery_by = value ? 'user' : null
+      if (!value) { update.dispatched = false; update.dispatched_at = null }
+    }
+    if (field === 'dispatched') {
+      update.dispatched_at = value ? now : null
+      update.dispatched_by = value ? 'user' : null
+    }
+    await supabase.from('job_line_items').update(update).eq('id', li.id)
+    // Activity log
+    const eventMap: Record<string, string> = { qc_done: 'line_item_qc_done', ready_for_delivery: 'line_item_ready_for_delivery', dispatched: 'line_item_dispatched' }
+    if (value) {
+      await supabase.from('activity_log').insert({
+        event_type: eventMap[field], entity_type: 'job_line_item', entity_id: li.id,
+        metadata: { job_id: job.id, line_item_description: li.description, [`${field}_by`]: 'user', [`${field}_at`]: now },
+      }).then(({ error: logErr }) => { if (logErr) console.error('Activity log error:', logErr.message) })
+    }
+    // Reload and check cross-board updates
+    const { data: freshItems } = await supabase.from('job_line_items').select('*').eq('job_id', job.id).order('sort_order')
+    if (freshItems) {
+      setExecLineItems(freshItems)
+      const allQC = freshItems.length > 0 && freshItems.every((i: any) => i.qc_done)
+      const allDispatched = freshItems.length > 0 && freshItems.every((i: any) => i.dispatched)
+      if (allQC && (job.workshop_status === 'IN_PROGRESS' || job.workshop_status === 'ON_HOLD')) {
+        await supabase.from('jobs').update({ workshop_status: 'QUALITY_CHECK' }).eq('id', job.id)
+        onRefresh()
+      }
+      if (allDispatched && job.workshop_status !== 'DISPATCHED' && job.workshop_status !== 'DELIVERED' && job.workshop_status !== 'INVOICED' && job.workshop_status !== 'COMPLETED') {
+        await supabase.from('jobs').update({ workshop_status: 'DISPATCHED' }).eq('id', job.id)
+        onRefresh()
+      }
+    }
+  }
+
+  const handleDeliveryField = async (li: any, field: 'delivery_number' | 'delivery_date', value: string) => {
+    await supabase.from('job_line_items').update({ [field]: value || null }).eq('id', li.id)
+    setExecLineItems(prev => prev.map(x => x.id === li.id ? { ...x, [field]: value || null } : x))
+  }
 
   const MAT_UNITS = ['EA', 'M', 'KG', 'L', 'M2', 'M3', 'SET', 'HR', 'PCS']
 
@@ -3188,6 +3376,7 @@ function JobExecutionPanel({ job, onClose, onStatusChange, onRefresh }: {
   React.useEffect(() => { loadWorkers() }, [job.id])
   React.useEffect(() => { if (activeTab === 'qc') loadQCCheckpoints() }, [activeTab, loadQCCheckpoints])
   React.useEffect(() => { if (activeTab === 'materials') loadMaterials() }, [activeTab, loadMaterials])
+  React.useEffect(() => { if (activeTab === 'line_items') loadExecLineItems() }, [activeTab, loadExecLineItems])
 
   const STATUSES = [
     { key: 'NOT_STARTED',   label: 'Not Started'   },
@@ -3212,11 +3401,12 @@ function JobExecutionPanel({ job, onClose, onStatusChange, onRefresh }: {
   }
 
   const tabs = [
-    { key: 'workers',   label: 'Workers'   },
-    { key: 'time',      label: 'Time'      },
-    { key: 'qc',        label: 'QC'        },
-    { key: 'materials', label: 'Materials' },
-    { key: 'reconcile', label: 'Reconcile' },
+    { key: 'workers',    label: 'Workers'    },
+    { key: 'time',       label: 'Time'       },
+    { key: 'qc',         label: 'QC'         },
+    { key: 'materials',  label: 'Materials'  },
+    { key: 'line_items', label: 'Line Items' },
+    { key: 'reconcile',  label: 'Reconcile'  },
   ]
 
   return (
@@ -3551,6 +3741,87 @@ function JobExecutionPanel({ job, onClose, onStatusChange, onRefresh }: {
 
         
         {/* RECONCILE TAB */}
+        {activeTab === 'line_items' && (
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px' }}>
+              <div>
+                <div style={{ fontSize: '16px', fontWeight: 700, color: '#1d3461' }}>Line Item Tracking</div>
+                <div style={{ fontSize: '12px', color: '#8896a8', marginTop: '2px' }}>Track QC, delivery readiness, and dispatch per line item</div>
+              </div>
+              <button onClick={loadExecLineItems} style={{ background: '#f1f5f9', color: '#64748b', border: '1px solid #e2e8f0', borderRadius: '6px', padding: '8px 16px', fontSize: '12px', fontWeight: 600, cursor: 'pointer' }}>
+                Refresh
+              </button>
+            </div>
+            {loadingExecLines ? (
+              <div style={{ textAlign: 'center', padding: '60px', color: '#8896a8' }}>Loading line items...</div>
+            ) : execLineItems.length === 0 ? (
+              <div style={{ textAlign: 'center', padding: '60px 20px', color: '#8896a8', fontSize: '13px' }}>
+                <div style={{ fontSize: '36px', marginBottom: '12px' }}>📋</div>
+                <div style={{ fontWeight: 600 }}>No line items on this job</div>
+              </div>
+            ) : (
+              <div style={{ background: 'white', border: '1px solid #dde3ec', borderRadius: '8px', overflow: 'auto' }}>
+                <table style={{ width: '100%', borderCollapse: 'collapse', fontSize: '13px', minWidth: '700px' }}>
+                  <thead><tr style={{ background: '#f8fafc' }}>
+                    <th style={{ padding: '10px 12px', textAlign: 'left', fontSize: '11px', fontWeight: 700, color: '#8896a8', textTransform: 'uppercase' }}>Line</th>
+                    <th style={{ padding: '10px 12px', textAlign: 'left', fontSize: '11px', fontWeight: 700, color: '#8896a8', textTransform: 'uppercase' }}>Description</th>
+                    <th style={{ padding: '10px 12px', textAlign: 'center', fontSize: '11px', fontWeight: 700, color: '#8896a8', textTransform: 'uppercase' }}>Qty</th>
+                    <th style={{ padding: '10px 12px', textAlign: 'center', fontSize: '11px', fontWeight: 700, color: '#4db848', textTransform: 'uppercase' }}>QC Done</th>
+                    <th style={{ padding: '10px 12px', textAlign: 'center', fontSize: '11px', fontWeight: 700, color: '#d97706', textTransform: 'uppercase' }}>Ready for Delivery</th>
+                    <th style={{ padding: '10px 12px', textAlign: 'center', fontSize: '11px', fontWeight: 700, color: '#1d3461', textTransform: 'uppercase' }}>Dispatched (Delivery No)</th>
+                    <th style={{ padding: '10px 12px', textAlign: 'center', fontSize: '11px', fontWeight: 700, color: '#8896a8', textTransform: 'uppercase' }}>Delivery Date</th>
+                  </tr></thead>
+                  <tbody>{execLineItems.map((li, idx) => (
+                    <tr key={li.id} style={{ borderTop: idx > 0 ? '1px solid #f1f5f9' : 'none' }}>
+                      <td style={{ padding: '10px 12px', color: '#64748b', fontWeight: 600 }}>{idx + 1}</td>
+                      <td style={{ padding: '10px 12px', color: '#1d3461', fontWeight: 500 }}>{li.description}</td>
+                      <td style={{ padding: '10px 12px', textAlign: 'center', color: '#64748b' }}>{li.quantity}</td>
+                      <td style={{ padding: '10px 12px', textAlign: 'center' }}>
+                        <input type="checkbox" checked={!!li.qc_done}
+                          onChange={e => handleLineItemToggle(li, 'qc_done', e.target.checked)}
+                          style={{ width: '18px', height: '18px', accentColor: '#4db848', cursor: 'pointer' }} />
+                      </td>
+                      <td style={{ padding: '10px 12px', textAlign: 'center' }}>
+                        <input type="checkbox" checked={!!li.ready_for_delivery}
+                          disabled={!li.qc_done}
+                          onChange={e => handleLineItemToggle(li, 'ready_for_delivery', e.target.checked)}
+                          style={{ width: '18px', height: '18px', accentColor: '#d97706', cursor: li.qc_done ? 'pointer' : 'not-allowed', opacity: li.qc_done ? 1 : 0.35 }} />
+                      </td>
+                      <td style={{ padding: '10px 12px', textAlign: 'center' }}>
+                        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
+                          <input type="checkbox" checked={!!li.dispatched}
+                            disabled={!li.ready_for_delivery}
+                            onChange={e => handleLineItemToggle(li, 'dispatched', e.target.checked)}
+                            style={{ width: '18px', height: '18px', accentColor: '#1d3461', cursor: li.ready_for_delivery ? 'pointer' : 'not-allowed', opacity: li.ready_for_delivery ? 1 : 0.35 }} />
+                          {li.dispatched && (
+                            <input type="text" placeholder="DEL-001" defaultValue={li.delivery_number || ''}
+                              onBlur={e => handleDeliveryField(li, 'delivery_number', e.target.value)}
+                              style={{ width: '90px', border: '1px solid #dde3ec', borderRadius: '4px', padding: '3px 6px', fontSize: '11px', color: '#1d3461' }} />
+                          )}
+                        </div>
+                      </td>
+                      <td style={{ padding: '10px 12px', textAlign: 'center' }}>
+                        {li.dispatched ? (
+                          <input type="date" defaultValue={li.delivery_date || ''}
+                            onBlur={e => handleDeliveryField(li, 'delivery_date', e.target.value)}
+                            style={{ border: '1px solid #dde3ec', borderRadius: '4px', padding: '3px 6px', fontSize: '11px', color: '#1d3461' }} />
+                        ) : (
+                          <span style={{ color: '#cbd5e1', fontSize: '11px' }}>—</span>
+                        )}
+                      </td>
+                    </tr>
+                  ))}</tbody>
+                </table>
+                <div style={{ padding: '12px 16px', background: '#f8fafc', borderTop: '1px solid #dde3ec', display: 'flex', justifyContent: 'space-between', fontSize: '12px', color: '#64748b' }}>
+                  <span>QC: <strong style={{ color: '#4db848' }}>{execLineItems.filter((i: any) => i.qc_done).length}/{execLineItems.length}</strong></span>
+                  <span>Ready: <strong style={{ color: '#d97706' }}>{execLineItems.filter((i: any) => i.ready_for_delivery).length}/{execLineItems.length}</strong></span>
+                  <span>Dispatched: <strong style={{ color: '#1d3461' }}>{execLineItems.filter((i: any) => i.dispatched).length}/{execLineItems.length}</strong></span>
+                </div>
+              </div>
+            )}
+          </div>
+        )}
+
         {activeTab === 'reconcile' && (
           <div>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px' }}>
@@ -5566,6 +5837,930 @@ function InvoicesTab({ invoices, loading, onRefresh, currentRole }: { invoices: 
             ))}
           </tbody>
         </table>
+      </div>
+    </div>
+  )
+}
+
+// ═══════════════════════════════════════════════════════════════
+// ═══════════════════════════════════════════════════════════════
+// SETTINGS PAGE
+// ═══════════════════════════════════════════════════════════════
+
+interface SystemDropdown {
+  id: string
+  dropdown_type: string
+  option_value: string
+  option_label: string
+  sort_order: number
+  is_active: boolean
+}
+
+const DROPDOWN_TYPES: { key: string; label: string }[] = [
+  { key: 'media_received', label: 'Media Received' },
+  { key: 'departments', label: 'Departments' },
+  { key: 'action_types', label: 'Action Types' },
+]
+
+function SettingsPage() {
+  const [settingsTab, setSettingsTab] = React.useState<'dropdowns'>('dropdowns')
+
+  return (
+    <div className="h-full flex flex-col">
+      <div className="flex items-center gap-1 mb-4 border-b border-gray-200">
+        <button onClick={() => setSettingsTab('dropdowns')}
+          className={`px-4 py-2.5 text-sm font-semibold border-b-2 transition-colors -mb-px ${settingsTab === 'dropdowns' ? 'border-green-500 text-green-700' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+          Dropdown Management
+        </button>
+      </div>
+      {settingsTab === 'dropdowns' && <DropdownManagementTab />}
+    </div>
+  )
+}
+
+function DropdownManagementTab() {
+  const [selectedType, setSelectedType] = React.useState(DROPDOWN_TYPES[0].key)
+  const [options, setOptions] = React.useState<SystemDropdown[]>([])
+  const [loading, setLoading] = React.useState(true)
+  const [showAddModal, setShowAddModal] = React.useState(false)
+  const [editingOption, setEditingOption] = React.useState<SystemDropdown | null>(null)
+
+  const fetchOptions = React.useCallback(async () => {
+    setLoading(true)
+    try {
+      const { data, error } = await supabase.from('system_dropdowns').select('*').eq('dropdown_type', selectedType).order('sort_order')
+      if (error) throw error
+      setOptions(data || [])
+    } catch (e: any) { console.error('Failed to fetch dropdown options:', e.message) }
+    finally { setLoading(false) }
+  }, [selectedType])
+
+  React.useEffect(() => { fetchOptions() }, [fetchOptions])
+
+  const handleMoveUp = async (opt: SystemDropdown, idx: number) => {
+    if (idx === 0) return
+    const prev = options[idx - 1]
+    await supabase.from('system_dropdowns').update({ sort_order: prev.sort_order }).eq('id', opt.id)
+    await supabase.from('system_dropdowns').update({ sort_order: opt.sort_order }).eq('id', prev.id)
+    fetchOptions()
+  }
+
+  const handleMoveDown = async (opt: SystemDropdown, idx: number) => {
+    if (idx >= options.length - 1) return
+    const next = options[idx + 1]
+    await supabase.from('system_dropdowns').update({ sort_order: next.sort_order }).eq('id', opt.id)
+    await supabase.from('system_dropdowns').update({ sort_order: opt.sort_order }).eq('id', next.id)
+    fetchOptions()
+  }
+
+  const handleDeactivate = async (opt: SystemDropdown) => {
+    if (!confirm('Deactivate "' + opt.option_label + '"? It will no longer appear in dropdowns across the app.')) return
+    try {
+      const { error } = await supabase.from('system_dropdowns').update({ is_active: false }).eq('id', opt.id)
+      if (error) throw error
+      await supabase.from('activity_log').insert({
+        event_type: 'dropdown_option_deactivated', entity_type: 'system_dropdown', entity_id: opt.id,
+        metadata: { dropdown_type: opt.dropdown_type, option_label: opt.option_label, deactivated_by: 'user', deactivated_at: new Date().toISOString() },
+      }).then(({ error: logErr }) => { if (logErr) console.error('Activity log error:', logErr.message) })
+      fetchOptions()
+    } catch (err: any) { alert('Error: ' + err.message) }
+  }
+
+  const handleReactivate = async (opt: SystemDropdown) => {
+    try {
+      const { error } = await supabase.from('system_dropdowns').update({ is_active: true }).eq('id', opt.id)
+      if (error) throw error
+      fetchOptions()
+    } catch (err: any) { alert('Error: ' + err.message) }
+  }
+
+  const selectedLabel = DROPDOWN_TYPES.find(t => t.key === selectedType)?.label || selectedType
+
+  return (
+    <div className="flex-1 flex gap-6 min-h-0">
+      <div className="w-56 shrink-0">
+        <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-3">Dropdown Types</p>
+        <div className="space-y-1">
+          {DROPDOWN_TYPES.map(t => (
+            <button key={t.key} onClick={() => setSelectedType(t.key)}
+              className={`w-full text-left px-3 py-2.5 rounded-lg text-sm font-medium transition-colors ${selectedType === t.key ? 'bg-[#1d3461] text-white' : 'text-gray-700 hover:bg-gray-100'}`}>
+              {t.label}
+            </button>
+          ))}
+        </div>
+      </div>
+
+      <div className="flex-1 flex flex-col min-h-0">
+        <div className="flex items-center justify-between mb-4">
+          <div>
+            <h2 className="text-lg font-bold text-gray-900">{selectedLabel}</h2>
+            <p className="text-sm text-gray-500">Manage options for the {selectedLabel} dropdown</p>
+          </div>
+          <button onClick={() => setShowAddModal(true)} className="flex items-center gap-2 px-4 py-2 bg-[#4db848] hover:bg-[#3fa63b] text-white text-sm font-semibold rounded-lg transition-colors">
+            <Plus size={15} />Add Option
+          </button>
+        </div>
+
+        {loading ? (
+          <div className="flex items-center justify-center h-64 gap-3 text-gray-400"><div className="w-5 h-5 border-2 border-gray-300 border-t-green-500 rounded-full animate-spin" /><span>Loading...</span></div>
+        ) : (
+          <div className="flex-1 overflow-auto bg-white rounded-xl border border-gray-200 shadow-sm">
+            <table className="w-full text-sm">
+              <thead className="bg-gray-50 sticky top-0">
+                <tr>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Label</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Value</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Order</th>
+                  <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Status</th>
+                  <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Actions</th>
+                </tr>
+              </thead>
+              <tbody className="divide-y divide-gray-100">
+                {options.length === 0 ? (
+                  <tr><td colSpan={5} className="px-4 py-12 text-center text-gray-400">No options configured. Add your first option.</td></tr>
+                ) : options.map((opt, idx) => (
+                  <tr key={opt.id} className="hover:bg-gray-50 transition-colors">
+                    <td className="px-4 py-3 font-medium text-gray-900">{opt.option_label}</td>
+                    <td className="px-4 py-3 text-gray-500 font-mono text-xs">{opt.option_value}</td>
+                    <td className="px-4 py-3 text-gray-500">{opt.sort_order}</td>
+                    <td className="px-4 py-3">
+                      {opt.is_active
+                        ? <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-green-100 text-green-700">ACTIVE</span>
+                        : <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-gray-100 text-gray-500">INACTIVE</span>}
+                    </td>
+                    <td className="px-4 py-3 text-right">
+                      <div className="flex items-center justify-end gap-1">
+                        <button onClick={() => handleMoveUp(opt, idx)} disabled={idx === 0} className="p-1.5 text-gray-400 hover:text-gray-700 disabled:opacity-30 rounded transition-colors" title="Move up">
+                          <ChevronUp size={14} />
+                        </button>
+                        <button onClick={() => handleMoveDown(opt, idx)} disabled={idx >= options.length - 1} className="p-1.5 text-gray-400 hover:text-gray-700 disabled:opacity-30 rounded transition-colors" title="Move down">
+                          <ChevronDown size={14} />
+                        </button>
+                        <button onClick={() => setEditingOption(opt)} className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors" title="Edit">
+                          <Edit3 size={14} />
+                        </button>
+                        {opt.is_active ? (
+                          <button onClick={() => handleDeactivate(opt)} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors" title="Deactivate">
+                            <XCircle size={14} />
+                          </button>
+                        ) : (
+                          <button onClick={() => handleReactivate(opt)} className="p-1.5 text-gray-400 hover:text-green-600 hover:bg-green-50 rounded transition-colors" title="Reactivate">
+                            <CheckCircle size={14} />
+                          </button>
+                        )}
+                      </div>
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </div>
+
+      {showAddModal && <AddDropdownOptionModal dropdownType={selectedType} dropdownLabel={selectedLabel} existingCount={options.length} onClose={() => setShowAddModal(false)} onAdded={() => { setShowAddModal(false); fetchOptions() }} />}
+      {editingOption && <EditDropdownOptionModal option={editingOption} onClose={() => setEditingOption(null)} onUpdated={() => { setEditingOption(null); fetchOptions() }} />}
+    </div>
+  )
+}
+
+function AddDropdownOptionModal({ dropdownType, dropdownLabel, existingCount, onClose, onAdded }: { dropdownType: string; dropdownLabel: string; existingCount: number; onClose: () => void; onAdded: () => void }) {
+  const [saving, setSaving] = React.useState(false)
+  const [label, setLabel] = React.useState('')
+  const [value, setValue] = React.useState('')
+  const [sortOrder, setSortOrder] = React.useState(existingCount + 1)
+  const [autoValue, setAutoValue] = React.useState(true)
+
+  const handleLabelChange = (v: string) => {
+    setLabel(v)
+    if (autoValue) setValue(v.toLowerCase().replace(/[^a-z0-9]+/g, '_').replace(/^_|_$/g, ''))
+  }
+
+  const handleSave = async () => {
+    if (!label.trim()) { alert('Label is required'); return }
+    if (!value.trim()) { alert('Value is required'); return }
+    setSaving(true)
+    try {
+      const { data, error } = await supabase.from('system_dropdowns').insert({
+        dropdown_type: dropdownType, option_value: value.trim(), option_label: label.trim(), sort_order: sortOrder, is_active: true,
+      }).select().single()
+      if (error) throw error
+      await supabase.from('activity_log').insert({
+        event_type: 'dropdown_option_added', entity_type: 'system_dropdown', entity_id: data.id,
+        metadata: { dropdown_type: dropdownType, option_label: label.trim(), option_value: value.trim(), added_by: 'user', added_at: new Date().toISOString() },
+      }).then(({ error: logErr }) => { if (logErr) console.error('Activity log error:', logErr.message) })
+      onAdded()
+    } catch (err: any) { alert('Error: ' + err.message) }
+    finally { setSaving(false) }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-md">
+        <div className="bg-[#1d3461] text-white px-6 py-4 rounded-t-xl flex items-center justify-between">
+          <h2 className="text-base font-bold">Add Option — {dropdownLabel}</h2>
+          <button onClick={onClose} className="text-gray-300 hover:text-white"><X size={18}/></button>
+        </div>
+        <div className="p-5 space-y-4">
+          <div><label className="block text-xs font-medium text-gray-600 mb-1">Label *</label>
+            <input value={label} onChange={e => handleLabelChange(e.target.value)} placeholder="Display label"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1d3461]"/>
+          </div>
+          <div><label className="block text-xs font-medium text-gray-600 mb-1">Value {autoValue && <span className="text-gray-400">(auto-generated)</span>}</label>
+            <input value={value} onChange={e => { setValue(e.target.value); setAutoValue(false) }} placeholder="Internal value"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm font-mono focus:outline-none focus:ring-2 focus:ring-[#1d3461] bg-gray-50"/>
+          </div>
+          <div><label className="block text-xs font-medium text-gray-600 mb-1">Sort Order</label>
+            <input type="number" value={sortOrder} onChange={e => setSortOrder(parseInt(e.target.value) || 0)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1d3461]"/>
+          </div>
+        </div>
+        <div className="flex items-center justify-end gap-3 px-5 py-4 border-t border-gray-100">
+          <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
+          <button onClick={handleSave} disabled={saving}
+            className="px-5 py-2 bg-[#4db848] hover:bg-[#3fa63b] disabled:opacity-50 text-white text-sm font-semibold rounded-lg transition-colors">
+            {saving ? 'Saving...' : 'Add Option'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+function EditDropdownOptionModal({ option, onClose, onUpdated }: { option: SystemDropdown; onClose: () => void; onUpdated: () => void }) {
+  const [saving, setSaving] = React.useState(false)
+  const [label, setLabel] = React.useState(option.option_label)
+  const [sortOrder, setSortOrder] = React.useState(option.sort_order)
+
+  const handleSave = async () => {
+    if (!label.trim()) { alert('Label is required'); return }
+    setSaving(true)
+    try {
+      const changes: string[] = []
+      const update: Record<string, any> = {}
+      if (label.trim() !== option.option_label) { update.option_label = label.trim(); changes.push('option_label') }
+      if (sortOrder !== option.sort_order) { update.sort_order = sortOrder; changes.push('sort_order') }
+      if (Object.keys(update).length > 0) {
+        const { error } = await supabase.from('system_dropdowns').update(update).eq('id', option.id)
+        if (error) throw error
+        await supabase.from('activity_log').insert({
+          event_type: 'dropdown_option_updated', entity_type: 'system_dropdown', entity_id: option.id,
+          metadata: { dropdown_type: option.dropdown_type, field_changed: changes, updated_by: 'user', updated_at: new Date().toISOString() },
+        }).then(({ error: logErr }) => { if (logErr) console.error('Activity log error:', logErr.message) })
+      }
+      onUpdated()
+    } catch (err: any) { alert('Error: ' + err.message) }
+    finally { setSaving(false) }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-md">
+        <div className="bg-[#1d3461] text-white px-6 py-4 rounded-t-xl flex items-center justify-between">
+          <h2 className="text-base font-bold">Edit Option</h2>
+          <button onClick={onClose} className="text-gray-300 hover:text-white"><X size={18}/></button>
+        </div>
+        <div className="p-5 space-y-4">
+          <div><label className="block text-xs font-medium text-gray-600 mb-1">Label *</label>
+            <input value={label} onChange={e => setLabel(e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1d3461]"/>
+          </div>
+          <div><label className="block text-xs font-medium text-gray-600 mb-1">Value <span className="text-gray-400">(read-only)</span></label>
+            <input value={option.option_value} disabled
+              className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm font-mono bg-gray-100 text-gray-500"/>
+          </div>
+          <div><label className="block text-xs font-medium text-gray-600 mb-1">Sort Order</label>
+            <input type="number" value={sortOrder} onChange={e => setSortOrder(parseInt(e.target.value) || 0)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1d3461]"/>
+          </div>
+        </div>
+        <div className="flex items-center justify-end gap-3 px-5 py-4 border-t border-gray-100">
+          <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
+          <button onClick={handleSave} disabled={saving}
+            className="px-5 py-2 bg-[#4db848] hover:bg-[#3fa63b] disabled:opacity-50 text-white text-sm font-semibold rounded-lg transition-colors">
+            {saving ? 'Saving...' : 'Save Changes'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// CLIENT MANAGEMENT
+// ═══════════════════════════════════════════════════════════════
+
+function ClientManagement({ clients, loading, onRefresh }: { clients: Client[]; loading: boolean; onRefresh: () => void }) {
+  const [tab, setTab] = React.useState<'register' | 'contacts'>('register')
+  const [contactClient, setContactClient] = React.useState<Client | null>(null)
+
+  return (
+    <div className="h-full flex flex-col">
+      <div className="flex items-center gap-1 mb-4 border-b border-gray-200">
+        <button onClick={() => { setTab('register'); setContactClient(null) }}
+          className={`px-4 py-2.5 text-sm font-semibold border-b-2 transition-colors -mb-px ${tab === 'register' ? 'border-green-500 text-green-700' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+          Client Register
+        </button>
+        {contactClient && (
+          <button onClick={() => setTab('contacts')}
+            className={`px-4 py-2.5 text-sm font-semibold border-b-2 transition-colors -mb-px ${tab === 'contacts' ? 'border-green-500 text-green-700' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+            Contacts — {contactClient.company_name}
+          </button>
+        )}
+      </div>
+      {tab === 'register'
+        ? <ClientRegisterTab clients={clients} loading={loading} onRefresh={onRefresh} onViewContacts={(c) => { setContactClient(c); setTab('contacts') }} />
+        : contactClient
+        ? <ClientContactsTab client={contactClient} onBack={() => setTab('register')} />
+        : null}
+    </div>
+  )
+}
+
+// CLIENT REGISTER TAB
+
+function ClientRegisterTab({ clients, loading, onRefresh, onViewContacts }: { clients: Client[]; loading: boolean; onRefresh: () => void; onViewContacts: (c: Client) => void }) {
+  const [searchTerm, setSearchTerm] = React.useState('')
+  const [activeOnly, setActiveOnly] = React.useState(true)
+  const [showAddModal, setShowAddModal] = React.useState(false)
+  const [editingClient, setEditingClient] = React.useState<Client | null>(null)
+  const [deactivatingClient, setDeactivatingClient] = React.useState<Client | null>(null)
+  const [primaryContacts, setPrimaryContacts] = React.useState<Record<string, ClientContact>>({})
+
+  React.useEffect(() => {
+    const fetchPrimaries = async () => {
+      const { data } = await supabase.from('client_contacts').select('*').eq('is_primary', true)
+      if (data) {
+        const map: Record<string, ClientContact> = {}
+        data.forEach((c: ClientContact) => { map[c.client_id] = c })
+        setPrimaryContacts(map)
+      }
+    }
+    fetchPrimaries()
+  }, [clients])
+
+  const filtered = clients.filter(c => {
+    if (activeOnly && !c.is_active) return false
+    if (!searchTerm.trim()) return true
+    const term = searchTerm.toLowerCase()
+    const primary = primaryContacts[c.id]
+    return (c.company_name?.toLowerCase().includes(term) ||
+      primary?.contact_name?.toLowerCase().includes(term))
+  })
+
+  const activeCount = clients.filter(c => c.is_active).length
+
+  if (loading) return <div className="flex items-center justify-center h-64 gap-3 text-gray-400"><div className="w-5 h-5 border-2 border-gray-300 border-t-green-500 rounded-full animate-spin" /><span>Loading clients...</span></div>
+
+  return (
+    <div className="flex-1 flex flex-col min-h-0">
+      <div className="mb-4">
+        <div className="flex items-center gap-2 mb-1">
+          <h2 className="text-lg font-bold text-gray-900">Client Register</h2>
+          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-green-100 text-green-700">{activeCount} active</span>
+        </div>
+        <p className="text-sm text-gray-500">Manage clients and their contact details</p>
+      </div>
+
+      <div className="flex items-center gap-3 mb-4">
+        <div className="relative flex-1 max-w-md">
+          <Search size={16} className="absolute left-3 top-1/2 -translate-y-1/2 text-gray-400" />
+          <input type="text" placeholder="Search by company or contact name..." value={searchTerm} onChange={e => setSearchTerm(e.target.value)}
+            className="w-full pl-9 pr-3 py-2 border border-gray-300 rounded-lg text-sm focus:outline-none focus:ring-2 focus:ring-green-500 focus:border-green-500" />
+        </div>
+        <button onClick={() => setActiveOnly(!activeOnly)}
+          className={`flex items-center gap-2 px-3 py-2 rounded-lg text-sm font-medium border transition-colors ${activeOnly ? 'bg-green-50 border-green-300 text-green-700' : 'bg-gray-50 border-gray-300 text-gray-600'}`}>
+          <Filter size={14} />{activeOnly ? 'Active Only' : 'Show All'}
+        </button>
+        <button onClick={onRefresh} className="flex items-center gap-2 px-3 py-2 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors border border-gray-300">
+          <RefreshCw size={14} />Refresh
+        </button>
+        <button onClick={() => setShowAddModal(true)} className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-lg transition-colors ml-auto">
+          <Plus size={15} />Add Client
+        </button>
+      </div>
+
+      <div className="flex-1 overflow-auto bg-white rounded-xl border border-gray-200 shadow-sm">
+        <table className="w-full text-sm">
+          <thead className="bg-gray-50 sticky top-0">
+            <tr>
+              <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Company Name</th>
+              <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Primary Contact</th>
+              <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Phone</th>
+              <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Email</th>
+              <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Status</th>
+              <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Actions</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {filtered.length === 0 ? (
+              <tr><td colSpan={6} className="px-4 py-12 text-center text-gray-400">
+                {searchTerm ? 'No clients match your search' : 'No clients found. Add your first client to get started.'}
+              </td></tr>
+            ) : filtered.map(client => {
+              const primary = primaryContacts[client.id]
+              return (
+                <tr key={client.id} className="hover:bg-gray-50 transition-colors">
+                  <td className="px-4 py-3 font-medium text-gray-900">{client.company_name}</td>
+                  <td className="px-4 py-3 text-gray-600">{primary?.contact_name || '-'}</td>
+                  <td className="px-4 py-3 text-gray-600">{primary?.contact_phone || '-'}</td>
+                  <td className="px-4 py-3 text-gray-600">{primary?.contact_email || '-'}</td>
+                  <td className="px-4 py-3">
+                    {client.is_active
+                      ? <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-green-100 text-green-700">ACTIVE</span>
+                      : <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-gray-100 text-gray-500">INACTIVE</span>}
+                  </td>
+                  <td className="px-4 py-3 text-right">
+                    <div className="flex items-center justify-end gap-1">
+                      <button onClick={() => setEditingClient(client)} className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors" title="Edit">
+                        <Edit3 size={14} />
+                      </button>
+                      <button onClick={() => onViewContacts(client)} className="p-1.5 text-gray-400 hover:text-[#1d3461] hover:bg-blue-50 rounded transition-colors" title="Contacts">
+                        <Users size={14} />
+                      </button>
+                      {client.is_active && (
+                        <button onClick={() => setDeactivatingClient(client)} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors" title="Deactivate">
+                          <XCircle size={14} />
+                        </button>
+                      )}
+                    </div>
+                  </td>
+                </tr>
+              )
+            })}
+          </tbody>
+        </table>
+      </div>
+
+      {showAddModal && <AddClientModal onClose={() => setShowAddModal(false)} onAdded={() => { setShowAddModal(false); onRefresh() }} />}
+      {editingClient && <EditClientModal client={editingClient} primaryContact={primaryContacts[editingClient.id] || null} onClose={() => setEditingClient(null)} onUpdated={() => { setEditingClient(null); onRefresh() }} />}
+      {deactivatingClient && <DeactivateClientModal client={deactivatingClient} onClose={() => setDeactivatingClient(null)} onDeactivated={() => { setDeactivatingClient(null); onRefresh() }} />}
+    </div>
+  )
+}
+
+// ADD CLIENT MODAL
+
+function AddClientModal({ onClose, onAdded }: { onClose: () => void; onAdded: () => void }) {
+  const [saving, setSaving] = React.useState(false)
+  const [companyName, setCompanyName] = React.useState('')
+  const [contactName, setContactName] = React.useState('')
+  const [contactPhone, setContactPhone] = React.useState('')
+  const [contactEmail, setContactEmail] = React.useState('')
+  const [contactDept, setContactDept] = React.useState('')
+
+  const handleSave = async () => {
+    if (!companyName.trim()) { alert('Company name is required'); return }
+    setSaving(true)
+    try {
+      const { data: client, error } = await supabase.from('clients').insert({ company_name: companyName.trim(), is_active: true }).select().single()
+      if (error) throw error
+      if (contactName.trim()) {
+        await supabase.from('client_contacts').insert({
+          client_id: client.id, contact_name: contactName.trim(),
+          contact_phone: contactPhone.trim() || null, contact_email: contactEmail.trim() || null,
+          department: contactDept.trim() || null, is_primary: true,
+        })
+      }
+      await supabase.from('activity_log').insert({
+        event_type: 'client_added', entity_type: 'client', entity_id: client.id,
+        metadata: { company_name: companyName.trim(), added_by: 'user', added_at: new Date().toISOString() },
+      }).then(({ error: logErr }) => { if (logErr) console.error('Activity log error:', logErr.message) })
+      onAdded()
+    } catch (err: any) { alert('Error: ' + err.message) }
+    finally { setSaving(false) }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg">
+        <div className="bg-[#1d3461] text-white px-6 py-4 rounded-t-xl flex items-center justify-between">
+          <h2 className="text-base font-bold">Add Client</h2>
+          <button onClick={onClose} className="text-gray-300 hover:text-white"><X size={18}/></button>
+        </div>
+        <div className="p-5 space-y-4">
+          <div><label className="block text-xs font-medium text-gray-600 mb-1">Company Name *</label>
+            <input value={companyName} onChange={e => setCompanyName(e.target.value)} placeholder="Company name"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1d3461]"/>
+          </div>
+          <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest">Primary Contact</p>
+          <div className="grid grid-cols-2 gap-3">
+            <div><label className="block text-xs font-medium text-gray-600 mb-1">Name</label>
+              <input value={contactName} onChange={e => setContactName(e.target.value)} placeholder="Contact name"
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1d3461]"/>
+            </div>
+            <div><label className="block text-xs font-medium text-gray-600 mb-1">Department</label>
+              <input value={contactDept} onChange={e => setContactDept(e.target.value)} placeholder="e.g. Procurement"
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1d3461]"/>
+            </div>
+            <div><label className="block text-xs font-medium text-gray-600 mb-1">Phone</label>
+              <input value={contactPhone} onChange={e => setContactPhone(e.target.value)} placeholder="Phone number"
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1d3461]"/>
+            </div>
+            <div><label className="block text-xs font-medium text-gray-600 mb-1">Email</label>
+              <input type="email" value={contactEmail} onChange={e => setContactEmail(e.target.value)} placeholder="Email address"
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1d3461]"/>
+            </div>
+          </div>
+        </div>
+        <div className="flex items-center justify-end gap-3 px-5 py-4 border-t border-gray-100">
+          <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
+          <button onClick={handleSave} disabled={saving}
+            className="px-5 py-2 bg-[#4db848] hover:bg-[#3fa63b] disabled:opacity-50 text-white text-sm font-semibold rounded-lg transition-colors">
+            {saving ? 'Saving...' : 'Add Client'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// EDIT CLIENT MODAL
+
+function EditClientModal({ client, primaryContact, onClose, onUpdated }: { client: Client; primaryContact: ClientContact | null; onClose: () => void; onUpdated: () => void }) {
+  const [saving, setSaving] = React.useState(false)
+  const [companyName, setCompanyName] = React.useState(client.company_name)
+  const [contactName, setContactName] = React.useState(primaryContact?.contact_name || '')
+  const [contactPhone, setContactPhone] = React.useState(primaryContact?.contact_phone || '')
+  const [contactEmail, setContactEmail] = React.useState(primaryContact?.contact_email || '')
+  const [contactDept, setContactDept] = React.useState(primaryContact?.department || '')
+
+  const handleSave = async () => {
+    if (!companyName.trim()) { alert('Company name is required'); return }
+    setSaving(true)
+    try {
+      const changes: string[] = []
+      if (companyName.trim() !== client.company_name) {
+        await supabase.from('clients').update({ company_name: companyName.trim() }).eq('id', client.id)
+        changes.push('company_name')
+      }
+      if (primaryContact) {
+        const contactUpdate: Record<string, any> = {}
+        if (contactName.trim() !== (primaryContact.contact_name || '')) { contactUpdate.contact_name = contactName.trim(); changes.push('contact_name') }
+        if (contactPhone.trim() !== (primaryContact.contact_phone || '')) { contactUpdate.contact_phone = contactPhone.trim() || null; changes.push('contact_phone') }
+        if (contactEmail.trim() !== (primaryContact.contact_email || '')) { contactUpdate.contact_email = contactEmail.trim() || null; changes.push('contact_email') }
+        if (contactDept.trim() !== (primaryContact.department || '')) { contactUpdate.department = contactDept.trim() || null; changes.push('department') }
+        if (Object.keys(contactUpdate).length > 0) {
+          await supabase.from('client_contacts').update(contactUpdate).eq('id', primaryContact.id)
+        }
+      } else if (contactName.trim()) {
+        await supabase.from('client_contacts').insert({
+          client_id: client.id, contact_name: contactName.trim(),
+          contact_phone: contactPhone.trim() || null, contact_email: contactEmail.trim() || null,
+          department: contactDept.trim() || null, is_primary: true,
+        })
+        changes.push('primary_contact_added')
+      }
+      if (changes.length > 0) {
+        await supabase.from('activity_log').insert({
+          event_type: 'client_updated', entity_type: 'client', entity_id: client.id,
+          metadata: { field_changed: changes, updated_by: 'user', updated_at: new Date().toISOString() },
+        }).then(({ error: logErr }) => { if (logErr) console.error('Activity log error:', logErr.message) })
+      }
+      onUpdated()
+    } catch (err: any) { alert('Error: ' + err.message) }
+    finally { setSaving(false) }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-lg">
+        <div className="bg-[#1d3461] text-white px-6 py-4 rounded-t-xl flex items-center justify-between">
+          <h2 className="text-base font-bold">Edit Client</h2>
+          <button onClick={onClose} className="text-gray-300 hover:text-white"><X size={18}/></button>
+        </div>
+        <div className="p-5 space-y-4">
+          <div><label className="block text-xs font-medium text-gray-600 mb-1">Company Name *</label>
+            <input value={companyName} onChange={e => setCompanyName(e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1d3461]"/>
+          </div>
+          <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest">Primary Contact</p>
+          <div className="grid grid-cols-2 gap-3">
+            <div><label className="block text-xs font-medium text-gray-600 mb-1">Name</label>
+              <input value={contactName} onChange={e => setContactName(e.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1d3461]"/>
+            </div>
+            <div><label className="block text-xs font-medium text-gray-600 mb-1">Department</label>
+              <input value={contactDept} onChange={e => setContactDept(e.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1d3461]"/>
+            </div>
+            <div><label className="block text-xs font-medium text-gray-600 mb-1">Phone</label>
+              <input value={contactPhone} onChange={e => setContactPhone(e.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1d3461]"/>
+            </div>
+            <div><label className="block text-xs font-medium text-gray-600 mb-1">Email</label>
+              <input type="email" value={contactEmail} onChange={e => setContactEmail(e.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1d3461]"/>
+            </div>
+          </div>
+        </div>
+        <div className="flex items-center justify-end gap-3 px-5 py-4 border-t border-gray-100">
+          <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
+          <button onClick={handleSave} disabled={saving}
+            className="px-5 py-2 bg-[#4db848] hover:bg-[#3fa63b] disabled:opacity-50 text-white text-sm font-semibold rounded-lg transition-colors">
+            {saving ? 'Saving...' : 'Save Changes'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// DEACTIVATE CLIENT MODAL
+
+function DeactivateClientModal({ client, onClose, onDeactivated }: { client: Client; onClose: () => void; onDeactivated: () => void }) {
+  const [saving, setSaving] = React.useState(false)
+  const [reason, setReason] = React.useState('')
+
+  const handleDeactivate = async () => {
+    if (!reason.trim()) { alert('Please provide a reason for deactivation'); return }
+    setSaving(true)
+    try {
+      const { error } = await supabase.from('clients').update({ is_active: false, deactivation_reason: reason.trim() }).eq('id', client.id)
+      if (error) throw error
+      await supabase.from('activity_log').insert({
+        event_type: 'client_deactivated', entity_type: 'client', entity_id: client.id,
+        metadata: { company_name: client.company_name, reason: reason.trim(), deactivated_by: 'user', deactivated_at: new Date().toISOString() },
+      }).then(({ error: logErr }) => { if (logErr) console.error('Activity log error:', logErr.message) })
+      onDeactivated()
+    } catch (err: any) { alert('Error: ' + err.message) }
+    finally { setSaving(false) }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-md">
+        <div className="bg-red-600 text-white px-6 py-4 rounded-t-xl flex items-center justify-between">
+          <h2 className="text-base font-bold">Deactivate Client</h2>
+          <button onClick={onClose} className="text-red-200 hover:text-white"><X size={18}/></button>
+        </div>
+        <div className="p-5 space-y-4">
+          <p className="text-sm text-gray-700">Are you sure you want to deactivate <strong>{client.company_name}</strong>? This client will no longer appear in active lists.</p>
+          <div><label className="block text-xs font-medium text-gray-600 mb-1">Reason for deactivation *</label>
+            <textarea value={reason} onChange={e => setReason(e.target.value)} rows={3} placeholder="Enter reason..."
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-red-500 resize-none"/>
+          </div>
+        </div>
+        <div className="flex items-center justify-end gap-3 px-5 py-4 border-t border-gray-100">
+          <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
+          <button onClick={handleDeactivate} disabled={saving}
+            className="px-5 py-2 bg-red-600 hover:bg-red-700 disabled:opacity-50 text-white text-sm font-semibold rounded-lg transition-colors">
+            {saving ? 'Deactivating...' : 'Deactivate Client'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// CLIENT CONTACTS TAB
+
+function ClientContactsTab({ client, onBack }: { client: Client; onBack: () => void }) {
+  const [contacts, setContacts] = React.useState<ClientContact[]>([])
+  const [loading, setLoading] = React.useState(true)
+  const [showAddModal, setShowAddModal] = React.useState(false)
+  const [editingContact, setEditingContact] = React.useState<ClientContact | null>(null)
+
+  const fetchContacts = React.useCallback(async () => {
+    setLoading(true)
+    try {
+      const { data, error } = await supabase.from('client_contacts').select('*').eq('client_id', client.id).order('is_primary', { ascending: false }).order('contact_name')
+      if (error) throw error
+      setContacts(data || [])
+    } catch (e: any) { console.error('Failed to fetch contacts:', e.message) }
+    finally { setLoading(false) }
+  }, [client.id])
+
+  React.useEffect(() => { fetchContacts() }, [fetchContacts])
+
+  const handleRemove = async (contact: ClientContact) => {
+    if (contacts.length <= 1) { alert('Cannot remove the only contact. Add another contact first.'); return }
+    if (contact.is_primary) { alert('Cannot remove the primary contact. Set another contact as primary first.'); return }
+    if (!confirm('Remove contact "' + contact.contact_name + '"?')) return
+    try {
+      const { error } = await supabase.from('client_contacts').delete().eq('id', contact.id)
+      if (error) throw error
+      await supabase.from('activity_log').insert({
+        event_type: 'client_contact_removed', entity_type: 'client_contact', entity_id: contact.id,
+        metadata: { client_id: client.id, contact_name: contact.contact_name, removed_by: 'user', removed_at: new Date().toISOString() },
+      }).then(({ error: logErr }) => { if (logErr) console.error('Activity log error:', logErr.message) })
+      fetchContacts()
+    } catch (err: any) { alert('Error: ' + err.message) }
+  }
+
+  const handleSetPrimary = async (contact: ClientContact) => {
+    try {
+      await supabase.from('client_contacts').update({ is_primary: false }).eq('client_id', client.id)
+      await supabase.from('client_contacts').update({ is_primary: true }).eq('id', contact.id)
+      fetchContacts()
+    } catch (err: any) { alert('Error: ' + err.message) }
+  }
+
+  if (loading) return <div className="flex items-center justify-center h-64 gap-3 text-gray-400"><div className="w-5 h-5 border-2 border-gray-300 border-t-green-500 rounded-full animate-spin" /><span>Loading contacts...</span></div>
+
+  return (
+    <div className="flex-1 flex flex-col min-h-0">
+      <div className="mb-4">
+        <div className="flex items-center gap-2 mb-1">
+          <button onClick={onBack} className="text-gray-400 hover:text-gray-700 mr-1"><ChevronRight size={16} className="rotate-180" /></button>
+          <h2 className="text-lg font-bold text-gray-900">Contacts for {client.company_name}</h2>
+          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-700">{contacts.length} contact{contacts.length !== 1 ? 's' : ''}</span>
+        </div>
+      </div>
+      <div className="flex items-center gap-3 mb-4">
+        <button onClick={() => setShowAddModal(true)} className="flex items-center gap-2 px-4 py-2 bg-[#1d3461] hover:bg-[#162b50] text-white text-sm font-semibold rounded-lg transition-colors ml-auto">
+          <Plus size={15} />Add Contact
+        </button>
+      </div>
+
+      <div className="flex-1 overflow-auto bg-white rounded-xl border border-gray-200 shadow-sm">
+        <table className="w-full text-sm">
+          <thead className="bg-gray-50 sticky top-0">
+            <tr>
+              <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Contact Name</th>
+              <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Phone</th>
+              <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Email</th>
+              <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Department</th>
+              <th className="text-left px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Role</th>
+              <th className="text-right px-4 py-3 text-xs font-semibold text-gray-500 uppercase tracking-wider">Actions</th>
+            </tr>
+          </thead>
+          <tbody className="divide-y divide-gray-100">
+            {contacts.length === 0 ? (
+              <tr><td colSpan={6} className="px-4 py-12 text-center text-gray-400">No contacts yet. Add the first contact for this client.</td></tr>
+            ) : contacts.map(contact => (
+              <tr key={contact.id} className="hover:bg-gray-50 transition-colors">
+                <td className="px-4 py-3 font-medium text-gray-900">{contact.contact_name}</td>
+                <td className="px-4 py-3 text-gray-600">{contact.contact_phone || '-'}</td>
+                <td className="px-4 py-3 text-gray-600">{contact.contact_email || '-'}</td>
+                <td className="px-4 py-3 text-gray-600">{contact.department || '-'}</td>
+                <td className="px-4 py-3">
+                  {contact.is_primary
+                    ? <span className="inline-flex items-center px-2 py-0.5 rounded-full text-xs font-semibold bg-[#1d3461] text-white">PRIMARY</span>
+                    : <button onClick={() => handleSetPrimary(contact)} className="text-xs text-gray-400 hover:text-[#1d3461] hover:underline">Set as primary</button>}
+                </td>
+                <td className="px-4 py-3 text-right">
+                  <div className="flex items-center justify-end gap-1">
+                    <button onClick={() => setEditingContact(contact)} className="p-1.5 text-gray-400 hover:text-blue-600 hover:bg-blue-50 rounded transition-colors" title="Edit">
+                      <Edit3 size={14} />
+                    </button>
+                    <button onClick={() => handleRemove(contact)} className="p-1.5 text-gray-400 hover:text-red-600 hover:bg-red-50 rounded transition-colors" title="Remove">
+                      <Trash2 size={14} />
+                    </button>
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+
+      {showAddModal && <AddContactModal clientId={client.id} onClose={() => setShowAddModal(false)} onAdded={() => { setShowAddModal(false); fetchContacts() }} />}
+      {editingContact && <EditContactModal contact={editingContact} onClose={() => setEditingContact(null)} onUpdated={() => { setEditingContact(null); fetchContacts() }} />}
+    </div>
+  )
+}
+
+// ADD CONTACT MODAL
+
+function AddContactModal({ clientId, onClose, onAdded }: { clientId: string; onClose: () => void; onAdded: () => void }) {
+  const [saving, setSaving] = React.useState(false)
+  const [name, setName] = React.useState('')
+  const [phone, setPhone] = React.useState('')
+  const [email, setEmail] = React.useState('')
+  const [dept, setDept] = React.useState('')
+  const [isPrimary, setIsPrimary] = React.useState(false)
+
+  const handleSave = async () => {
+    if (!name.trim()) { alert('Contact name is required'); return }
+    setSaving(true)
+    try {
+      if (isPrimary) {
+        await supabase.from('client_contacts').update({ is_primary: false }).eq('client_id', clientId)
+      }
+      const { data: contact, error } = await supabase.from('client_contacts').insert({
+        client_id: clientId, contact_name: name.trim(),
+        contact_phone: phone.trim() || null, contact_email: email.trim() || null,
+        department: dept.trim() || null, is_primary: isPrimary,
+      }).select().single()
+      if (error) throw error
+      await supabase.from('activity_log').insert({
+        event_type: 'client_contact_added', entity_type: 'client_contact', entity_id: contact.id,
+        metadata: { client_id: clientId, contact_name: name.trim(), added_by: 'user', added_at: new Date().toISOString() },
+      }).then(({ error: logErr }) => { if (logErr) console.error('Activity log error:', logErr.message) })
+      onAdded()
+    } catch (err: any) { alert('Error: ' + err.message) }
+    finally { setSaving(false) }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-md">
+        <div className="bg-[#1d3461] text-white px-6 py-4 rounded-t-xl flex items-center justify-between">
+          <h2 className="text-base font-bold">Add Contact</h2>
+          <button onClick={onClose} className="text-gray-300 hover:text-white"><X size={18}/></button>
+        </div>
+        <div className="p-5 space-y-4">
+          <div><label className="block text-xs font-medium text-gray-600 mb-1">Contact Name *</label>
+            <input value={name} onChange={e => setName(e.target.value)} placeholder="Full name"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1d3461]"/>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div><label className="block text-xs font-medium text-gray-600 mb-1">Phone</label>
+              <input value={phone} onChange={e => setPhone(e.target.value)} placeholder="Phone number"
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1d3461]"/>
+            </div>
+            <div><label className="block text-xs font-medium text-gray-600 mb-1">Email</label>
+              <input type="email" value={email} onChange={e => setEmail(e.target.value)} placeholder="Email"
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1d3461]"/>
+            </div>
+          </div>
+          <div><label className="block text-xs font-medium text-gray-600 mb-1">Department</label>
+            <input value={dept} onChange={e => setDept(e.target.value)} placeholder="e.g. Procurement, Engineering"
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1d3461]"/>
+          </div>
+          <label className="flex items-center gap-2 cursor-pointer">
+            <input type="checkbox" checked={isPrimary} onChange={e => setIsPrimary(e.target.checked)} className="w-4 h-4 text-[#1d3461] rounded"/>
+            <span className="text-sm text-gray-700">Set as primary contact</span>
+          </label>
+        </div>
+        <div className="flex items-center justify-end gap-3 px-5 py-4 border-t border-gray-100">
+          <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
+          <button onClick={handleSave} disabled={saving}
+            className="px-5 py-2 bg-[#4db848] hover:bg-[#3fa63b] disabled:opacity-50 text-white text-sm font-semibold rounded-lg transition-colors">
+            {saving ? 'Saving...' : 'Add Contact'}
+          </button>
+        </div>
+      </div>
+    </div>
+  )
+}
+
+// EDIT CONTACT MODAL
+
+function EditContactModal({ contact, onClose, onUpdated }: { contact: ClientContact; onClose: () => void; onUpdated: () => void }) {
+  const [saving, setSaving] = React.useState(false)
+  const [name, setName] = React.useState(contact.contact_name)
+  const [phone, setPhone] = React.useState(contact.contact_phone || '')
+  const [email, setEmail] = React.useState(contact.contact_email || '')
+  const [dept, setDept] = React.useState(contact.department || '')
+
+  const handleSave = async () => {
+    if (!name.trim()) { alert('Contact name is required'); return }
+    setSaving(true)
+    try {
+      const changes: string[] = []
+      const update: Record<string, any> = {}
+      if (name.trim() !== contact.contact_name) { update.contact_name = name.trim(); changes.push('contact_name') }
+      if (phone.trim() !== (contact.contact_phone || '')) { update.contact_phone = phone.trim() || null; changes.push('contact_phone') }
+      if (email.trim() !== (contact.contact_email || '')) { update.contact_email = email.trim() || null; changes.push('contact_email') }
+      if (dept.trim() !== (contact.department || '')) { update.department = dept.trim() || null; changes.push('department') }
+      if (Object.keys(update).length > 0) {
+        const { error } = await supabase.from('client_contacts').update(update).eq('id', contact.id)
+        if (error) throw error
+        await supabase.from('activity_log').insert({
+          event_type: 'client_contact_updated', entity_type: 'client_contact', entity_id: contact.id,
+          metadata: { client_id: contact.client_id, field_changed: changes, updated_by: 'user', updated_at: new Date().toISOString() },
+        }).then(({ error: logErr }) => { if (logErr) console.error('Activity log error:', logErr.message) })
+      }
+      onUpdated()
+    } catch (err: any) { alert('Error: ' + err.message) }
+    finally { setSaving(false) }
+  }
+
+  return (
+    <div className="fixed inset-0 bg-black/50 z-[60] flex items-center justify-center p-4">
+      <div className="bg-white rounded-xl shadow-2xl w-full max-w-md">
+        <div className="bg-[#1d3461] text-white px-6 py-4 rounded-t-xl flex items-center justify-between">
+          <h2 className="text-base font-bold">Edit Contact</h2>
+          <button onClick={onClose} className="text-gray-300 hover:text-white"><X size={18}/></button>
+        </div>
+        <div className="p-5 space-y-4">
+          <div><label className="block text-xs font-medium text-gray-600 mb-1">Contact Name *</label>
+            <input value={name} onChange={e => setName(e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1d3461]"/>
+          </div>
+          <div className="grid grid-cols-2 gap-3">
+            <div><label className="block text-xs font-medium text-gray-600 mb-1">Phone</label>
+              <input value={phone} onChange={e => setPhone(e.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1d3461]"/>
+            </div>
+            <div><label className="block text-xs font-medium text-gray-600 mb-1">Email</label>
+              <input type="email" value={email} onChange={e => setEmail(e.target.value)}
+                className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1d3461]"/>
+            </div>
+          </div>
+          <div><label className="block text-xs font-medium text-gray-600 mb-1">Department</label>
+            <input value={dept} onChange={e => setDept(e.target.value)}
+              className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-[#1d3461]"/>
+          </div>
+        </div>
+        <div className="flex items-center justify-end gap-3 px-5 py-4 border-t border-gray-100">
+          <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
+          <button onClick={handleSave} disabled={saving}
+            className="px-5 py-2 bg-[#4db848] hover:bg-[#3fa63b] disabled:opacity-50 text-white text-sm font-semibold rounded-lg transition-colors">
+            {saving ? 'Saving...' : 'Save Changes'}
+          </button>
+        </div>
       </div>
     </div>
   )
