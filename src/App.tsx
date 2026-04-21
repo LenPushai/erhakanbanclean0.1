@@ -4,6 +4,8 @@ import { ClipboardList, Briefcase, ChevronRight, ChevronDown, ChevronUp, Factory
 import { supabase } from './lib/supabase'
 import { emailRFQCreated, emailQuoterAssigned, emailQuoteReady, emailOrderWon, emailJobInReview, emailJobReadyToPrint, emailJobPrinted, emailChildJobSpawned, emailJobStarted, emailJobQCCheck, emailJobComplete, emailJobDispatched } from './emailService'
 import { format } from 'date-fns'
+import { useEntity, type OperatingEntity } from './contexts/EntityContext'
+import { EntitySwitcher } from './components/EntitySwitcher'
 
 type Board = 'rfq' | 'job' | 'workshop' | 'procurement' | 'clients' | 'settings'
 
@@ -52,6 +54,7 @@ interface PurchaseRequest {
   approved_by: string | null
   approved_at: string | null
   rejection_reason: string | null
+  operating_entity: string | null
   created_at: string
   updated_at: string
   suppliers?: { company_name: string } | null
@@ -79,6 +82,7 @@ interface PurchaseOrder {
   issued_by: string | null
   issued_at: string | null
   required_by_date: string | null
+  operating_entity: string | null
   created_at: string
   updated_at: string
   suppliers?: { company_name: string; contact_person: string | null; phone: string | null; email: string | null; account_number: string | null } | null
@@ -166,6 +170,7 @@ interface RFQ {
 interface Job {
   id: string
   job_number: string
+  operating_entity: string | null
   rfq_id: string | null
   rfq_no: string | null
   enq_number: string | null
@@ -315,10 +320,19 @@ function useDropdownOptions(dropdownType: string, fallback: string[]) {
 }
 const UOM_OPTIONS = ['EA', 'M', 'KG', 'L', 'HR', 'TRIP', 'SET', 'M2', 'M3', 'TON']
 const ITEM_TYPES = ['MATERIAL', 'LABOUR', 'TRANSPORT', 'EQUIPMENT', 'SUBCONTRACT', 'OTHER']
-const OPERATING_ENTITIES = [
-  { value: 'ERHA_FC', label: 'ERHA F&C' },
-  { value: 'ERHA_SS', label: 'ERHA S&S' },
-]
+
+const ROLE_STORAGE_KEY = 'erha_current_role'
+const VALID_ROLES = ['HENDRIK', 'JUANIC', 'SONJA', 'CHARLES', 'DEWALD', 'JACO', 'ELSJE', 'ALWYN', 'CHERISE', 'ZACH'] as const
+
+function readStoredRole(): string | null {
+  try {
+    const raw = localStorage.getItem(ROLE_STORAGE_KEY)
+    if (raw && (VALID_ROLES as readonly string[]).includes(raw)) return raw
+  } catch {
+    // localStorage unavailable (private mode, disabled storage) — fall through
+  }
+  return null
+}
 
 const EMAIL_TEMPLATES: Record<string, { subject: string; body: string }> = {
   NEW:              { subject: 'Enquiry Received - {enq}', body: 'Dear {contact},\n\nThank you for your enquiry {enq}. We have received your request and will be in touch shortly.\n\nKind regards\nERHA Fabrication & Construction' },
@@ -445,7 +459,16 @@ function
 
 
 App() {
-  const [currentRole, setCurrentRole] = useState<string | null>(null)
+  const [currentRole, setCurrentRoleState] = useState<string | null>(readStoredRole)
+  const setCurrentRole = (role: string | null) => {
+    setCurrentRoleState(role)
+    try {
+      if (role === null) localStorage.removeItem(ROLE_STORAGE_KEY)
+      else localStorage.setItem(ROLE_STORAGE_KEY, role)
+    } catch {
+      // state still updates in memory even if persistence fails
+    }
+  }
   const [activeBoard, setActiveBoard] = useState<Board>('rfq')
   const [workshopJobs, setWorkshopJobs] = useState<Job[]>([])
   const [workshopLoading, setWorkshopLoading] = useState(false)
@@ -464,6 +487,8 @@ App() {
   const [suppliersLoading, setSuppliersLoading] = useState(false)
   const [clientsList, setClientsList] = useState<Client[]>([])
   const [clientsLoading, setClientsLoading] = useState(false)
+
+  const { activeEntity } = useEntity()
 
   const fetchSuppliers = async () => {
     setSuppliersLoading(true)
@@ -488,7 +513,7 @@ App() {
   const fetchRFQs = async () => {
     setLoading(true); setError(null)
     try {
-      const { data, error } = await supabase.from('rfqs').select('*, clients(company_name)').order('created_at', { ascending: false })
+      const { data, error } = await supabase.from('rfqs').select('*, clients(company_name)').eq('operating_entity', activeEntity).order('created_at', { ascending: false })
       if (error) throw error
       setRfqs(data || [])
     } catch (e: any) { setError(e.message) }
@@ -503,7 +528,7 @@ App() {
     const { data: lineItems } = await supabase.from('job_line_items').select('*').eq('job_id', job.id).order('sort_order')
     const items = lineItems || []
     const { data: childJobsData } = job.is_parent
-      ? await supabase.from('jobs').select('*').eq('parent_job_id', job.id).order('job_number')
+      ? await supabase.from('jobs').select('*').eq('parent_job_id', job.id).eq('operating_entity', activeEntity).order('job_number')
       : { data: null }
     const childJobs = (childJobsData || []) as Job[]
     const childrenHtml = childJobs.length > 0
@@ -648,7 +673,7 @@ table { border-collapse:collapse; width:100%; }
   const fetchJobs = async () => {
     setJobsLoading(true)
     try {
-      const { data, error } = await supabase.from('jobs').select('*').order('created_at', { ascending: false })
+      const { data, error } = await supabase.from('jobs').select('*').eq('operating_entity', activeEntity).order('created_at', { ascending: false })
       if (error) throw error
       setJobs(data || [])
     } catch (e: any) { console.error('Jobs error:', e.message) }
@@ -657,10 +682,12 @@ table { border-collapse:collapse; width:100%; }
   const fetchWorkshopJobs = async () => {
     setWorkshopLoading(true)
     try {
-      const { data } = await supabase.from('jobs').select('*').order('created_at',{ascending:false})
+      const { data } = await supabase.from('jobs').select('*').eq('operating_entity', activeEntity).order('created_at',{ascending:false})
       if (data && data.length > 0) {
-        // Fetch line item dispatch stats for progress badges
-        const { data: liStats } = await supabase.from('job_line_items').select('job_id, dispatched')
+        // Fetch line item dispatch stats for progress badges — scoped to the
+        // entity-filtered jobs fetched above; avoids a cross-entity leak that
+        // an unfiltered job_line_items read would cause.
+        const { data: liStats } = await supabase.from('job_line_items').select('job_id, dispatched').in('job_id', data.map((j: any) => j.id))
         const statsMap: Record<string, { total: number; dispatched: number }> = {}
         if (liStats) {
           liStats.forEach((li: any) => {
@@ -676,7 +703,7 @@ table { border-collapse:collapse; width:100%; }
     } finally { setWorkshopLoading(false) }
   }
 
-  useEffect(() => { fetchRFQs(); fetchJobs() }, [])
+  useEffect(() => { fetchRFQs(); fetchJobs() }, [activeEntity])
 
   const handleRFQUpdate = (updated: RFQ) => {
     setRfqs(prev => prev.map(r => r.id === updated.id ? updated : r))
@@ -724,7 +751,8 @@ table { border-collapse:collapse; width:100%; }
         const eventMap: Record<string,string> = { DELIVERED: 'job_delivered', COMPLETED: 'job_completed' }
         const eventType = eventMap[newStatus] || 'workshop_status_changed'
         await supabase.from('activity_log').insert({
-          event_type: eventType, entity_type: 'job', entity_id: jobId,
+          action_type: eventType, entity_type: 'job', entity_id: jobId,
+          operating_entity: (logJob.operating_entity === 'ERHA_FC' || logJob.operating_entity === 'ERHA_SS') ? logJob.operating_entity : activeEntity,
           metadata: { job_number: logJob.job_number, old_status: oldStatus, new_status: newStatus, changed_by: 'user', changed_at: new Date().toISOString() },
         }).then(({ error: logErr }) => { if (logErr) console.error('Activity log error:', logErr.message) })
       }
@@ -800,6 +828,11 @@ table { border-collapse:collapse; width:100%; }
                 <Plus size={15} />New Job
               </button>
             </>)}
+            <div className="flex items-center gap-1.5 text-xs text-gray-500 pr-1 border-r border-gray-200">
+              <span className="pr-2">Role: <span className="font-semibold text-gray-700">{currentRole}</span></span>
+              <button onClick={() => setCurrentRole(null)} className="text-blue-600 hover:underline font-medium pr-1">Change</button>
+            </div>
+            <EntitySwitcher currentRole={currentRole} />
             <span className={`inline-flex items-center px-3 py-1 rounded-full text-xs font-semibold ${activeBoard === 'rfq' ? 'bg-blue-100 text-blue-700' : activeBoard === 'job' ? 'bg-green-100 text-green-700' : activeBoard === 'procurement' ? 'bg-green-100 text-green-700' : activeBoard === 'clients' ? 'bg-blue-100 text-blue-700' : activeBoard === 'settings' ? 'bg-gray-100 text-gray-700' : 'bg-orange-100 text-orange-700'}`}>
               {activeBoard === 'rfq' ? 'RFQ Board' : activeBoard === 'job' ? 'Job Board' : activeBoard === 'procurement' ? 'Procurement' : activeBoard === 'clients' ? 'Clients' : activeBoard === 'settings' ? 'Settings' : 'Workshop Board'}
             </span>
@@ -820,14 +853,14 @@ table { border-collapse:collapse; width:100%; }
               ? <SettingsPage />
               : <WorkshopBoard jobs={workshopJobs} loading={workshopLoading} onRefresh={fetchWorkshopJobs} onStatusChange={handleWorkshopStatusChange} />}
           </div>
-          {selectedRFQ && <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4"><RFQDetailPanel rfq={selectedRFQ} onClose={() => setSelectedRFQ(null)} onUpdate={handleRFQUpdate} role={currentRole} onJobCreated={fetchJobs} onNavigateToJob={(jobNumber) => { setSelectedRFQ(null); setActiveBoard('job'); const job = jobs.find(j => j.job_number === jobNumber); if (job) setSelectedJob(job); }} /></div>}
+          {selectedRFQ && <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4"><RFQDetailPanel rfq={selectedRFQ} onClose={() => setSelectedRFQ(null)} onUpdate={handleRFQUpdate} role={currentRole} activeEntity={activeEntity} onJobCreated={fetchJobs} onNavigateToJob={(jobNumber) => { setSelectedRFQ(null); setActiveBoard('job'); const job = jobs.find(j => j.job_number === jobNumber); if (job) setSelectedJob(job); }} /></div>}
         </div>
       </main>
 
-      {showCreateModal && <CreateRFQModal onClose={() => setShowCreateModal(false)} onCreated={handleRFQCreated} />}
-      {showCreateDirectJob && <CreateDirectJobModal key={directJobModalKey} onClose={() => setShowCreateDirectJob(false)} onCreated={fetchJobs} />}
-      {showJarisonImport && <JarisonImportModal onClose={() => setShowJarisonImport(false)} onImported={fetchJobs} />}
-      {selectedJob && <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4"><JobDetailPanel key={selectedJob.id} job={selectedJob} parentJobNumber={jobs.find(j=>j.id===selectedJob?.parent_job_id)?.job_number} onClose={() => setSelectedJob(null)} onUpdate={(j) => { setSelectedJob(j); fetchJobs() }} /></div>}
+      {showCreateModal && <CreateRFQModal activeEntity={activeEntity} onClose={() => setShowCreateModal(false)} onCreated={handleRFQCreated} />}
+      {showCreateDirectJob && <CreateDirectJobModal key={directJobModalKey} activeEntity={activeEntity} onClose={() => setShowCreateDirectJob(false)} onCreated={fetchJobs} />}
+      {showJarisonImport && <JarisonImportModal activeEntity={activeEntity} onClose={() => setShowJarisonImport(false)} onImported={fetchJobs} />}
+      {selectedJob && <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4"><JobDetailPanel key={selectedJob.id} job={selectedJob} parentJobNumber={jobs.find(j=>j.id===selectedJob?.parent_job_id)?.job_number} activeEntity={activeEntity} onClose={() => setSelectedJob(null)} onUpdate={(j) => { setSelectedJob(j); fetchJobs() }} /></div>}
     </div>
   )
 }
@@ -889,7 +922,7 @@ function RFQCard({ rfq, hoverColor, onClick, isSelected }: { rfq: RFQ; hoverColo
 // JOB BOARD
 
 
-function JarisonImportModal({ onClose, onImported }: { onClose: () => void; onImported: () => void }) {
+function JarisonImportModal({ activeEntity, onClose, onImported }: { activeEntity: OperatingEntity; onClose: () => void; onImported: () => void }) {
   const [csvRows, setCsvRows] = React.useState<any[]>([])
   const [fileName, setFileName] = React.useState('')
   const [importing, setImporting] = React.useState(false)
@@ -931,6 +964,7 @@ function JarisonImportModal({ onClose, onImported }: { onClose: () => void; onIm
     for (const row of csvRows) {
       try {
         const { error } = await sb.from('jobs').insert({
+          operating_entity: activeEntity,
           ...(row.JobNumber ? { job_number: row.JobNumber } : {}),
           description: row.Description || 'Imported from Jarison',
           client_name: row.ClientName || 'Unknown Client',
@@ -1163,7 +1197,7 @@ function JobBoard({ jobs, loading, onCardClick, selectedId, onStatusChange, onPr
 
 // JOB DETAIL PANEL
 
-function JobDetailPanel({ job, parentJobNumber, onClose, onUpdate }: { job: Job; parentJobNumber?: string; onClose: () => void; onUpdate: (j: Job) => void }) {
+function JobDetailPanel({ job, parentJobNumber, activeEntity, onClose, onUpdate }: { job: Job; parentJobNumber?: string; activeEntity: OperatingEntity; onClose: () => void; onUpdate: (j: Job) => void }) {
   const actionTypeOptions = useDropdownOptions('action_types', ACTIONS_LIST_FALLBACK)
   const [saving, setSaving] = React.useState(false)
   const [status, setStatus] = React.useState(job.status)
@@ -1190,6 +1224,7 @@ function JobDetailPanel({ job, parentJobNumber, onClose, onUpdate }: { job: Job;
       const { data: ex } = await supabase.from('job_line_items').select('sort_order').eq('job_id', job.id).order('sort_order',{ascending:false}).limit(1)
       const next = ((ex?.[0]?.sort_order)||0)+1
       await supabase.from('job_line_items').insert(valid.map((x,idx)=>({job_id:job.id,description:x.description.trim(),quantity:x.quantity,uom:x.uom,item_type:x.item_type,cost_price:0,sell_price:0,line_total:0,status:'PENDING',sort_order:next+idx,can_spawn_job:true})))
+      // TODO(CR-2 RLS): PostgREST embeds don't inherit outer .eq() filters — cross-entity child_job numbers can leak here. Needs RLS.
       const {data:r} = await supabase.from('job_line_items').select('*, child_job:jobs!child_job_id(job_number)').eq('job_id',job.id).order('sort_order')
       if (r) setLineItems(r.map((li)=>({...li,child_job_number:li.child_job?.job_number||null})))
       setNewLineItems([])
@@ -1199,6 +1234,7 @@ function JobDetailPanel({ job, parentJobNumber, onClose, onUpdate }: { job: Job;
   }
 
   React.useEffect(() => {
+    // TODO(CR-2 RLS): PostgREST embeds don't inherit outer .eq() filters — cross-entity child_job numbers can leak here. Needs RLS.
     supabase.from('job_line_items')
       .select('*, child_job:jobs!child_job_id(job_number)')
       .eq('job_id', job.id)
@@ -1226,9 +1262,11 @@ function JobDetailPanel({ job, parentJobNumber, onClose, onUpdate }: { job: Job;
         .from('jobs')
         .select('id')
         .eq('parent_job_id', job.id)
+        .eq('operating_entity', activeEntity)
       const suffix = String.fromCharCode(65 + (existingChildren?.length || 0)) // A, B, C...
       const childJobNumber = (job.job_number || 'JOB') + '-' + suffix
       const { data: childJob, error: jobError } = await supabase.from('jobs').insert({
+        operating_entity: activeEntity,
         parent_job_id: job.id,
         is_child_job: true,
         is_parent: false,
@@ -1462,7 +1500,8 @@ function JobDetailPanel({ job, parentJobNumber, onClose, onUpdate }: { job: Job;
                               if (parentItems && parentItems.length > 0) {
                                 await supabase.from('job_line_items').update({ quantity: newQty }).eq('id', parentItems[0].id)
                                 await supabase.from('activity_log').insert({
-                                  event_type: 'parent_job_quantity_synced', entity_type: 'job', entity_id: job.parent_job_id,
+                                  action_type: 'parent_job_quantity_synced', entity_type: 'job', entity_id: job.parent_job_id,
+                                  operating_entity: (job.operating_entity === 'ERHA_FC' || job.operating_entity === 'ERHA_SS') ? job.operating_entity : activeEntity,
                                   metadata: { child_job_id: job.id, parent_job_id: job.parent_job_id, old_qty: oldQty, new_qty: newQty, synced_at: new Date().toISOString() },
                                 }).then(({ error: logErr }) => { if (logErr) console.error('Activity log error:', logErr.message) })
                               }
@@ -1555,9 +1594,11 @@ function JobDetailPanel({ job, parentJobNumber, onClose, onUpdate }: { job: Job;
         <SpawnJobModal
           lineItem={spawnTarget}
           parentJob={job}
+          activeEntity={activeEntity}
           onClose={() => setSpawnTarget(null)}
           onSpawned={async (childJob) => {
             setSpawnTarget(null)
+            // TODO(CR-2 RLS): PostgREST embeds don't inherit outer .eq() filters — cross-entity child_job numbers can leak here. Needs RLS.
             const { data: updatedItems } = await supabase
               .from('job_line_items')
               .select('*, child_job:jobs!child_job_id(job_number)')
@@ -1575,7 +1616,7 @@ function JobDetailPanel({ job, parentJobNumber, onClose, onUpdate }: { job: Job;
 
 // CREATE DIRECT JOB MODAL
 
-function CreateDirectJobModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
+function CreateDirectJobModal({ activeEntity, onClose, onCreated }: { activeEntity: OperatingEntity; onClose: () => void; onCreated: () => void }) {
   const [saving, setSaving] = React.useState(false)
   const [clientName, setClientName] = React.useState('')
   const [description, setDescription] = React.useState('')
@@ -1616,6 +1657,7 @@ function CreateDirectJobModal({ onClose, onCreated }: { onClose: () => void; onC
     setSaving(true)
     try {
       const { data: job, error } = await supabase.from('jobs').insert({
+        operating_entity: activeEntity,
         description: description.trim() || null,
         client_name: clientName.trim(), site_req: siteReq.trim() || null,
         is_contract_work: workType === 'contract', is_quoted_work: workType === 'quoted',
@@ -1757,7 +1799,7 @@ function CreateDirectJobModal({ onClose, onCreated }: { onClose: () => void; onC
 
 // CREATE RFQ MODAL
 
-function CreateRFQModal({ onClose, onCreated }: { onClose: () => void; onCreated: () => void }) {
+function CreateRFQModal({ activeEntity, onClose, onCreated }: { activeEntity: OperatingEntity; onClose: () => void; onCreated: () => void }) {
   const [saving, setSaving] = React.useState(false)
   const [uploadingFiles, setUploadingFiles] = React.useState(false)
   const [clients, setClients] = React.useState<any[]>([])
@@ -1768,7 +1810,6 @@ function CreateRFQModal({ onClose, onCreated }: { onClose: () => void; onCreated
   const actionTypeOptions = useDropdownOptions('action_types', ACTIONS_LIST_FALLBACK)
   const [form, setForm] = React.useState({
     rfq_direction: 'INCOMING',
-    operating_entity: 'ERHA_FC',
     rfq_no: '',
     client_rfq_number: '',
     priority: 'MEDIUM',
@@ -1857,14 +1898,14 @@ function CreateRFQModal({ onClose, onCreated }: { onClose: () => void; onCreated
         if (nc) clientId = nc.id
       }
 
-      const { count } = await supabase.from('rfqs').select('*', { count: 'exact', head: true })
+      const { count } = await supabase.from('rfqs').select('*', { count: 'exact', head: true }).eq('operating_entity', activeEntity)
       const enqNumber = form.rfq_no
 
       const { data: rfq, error: rfqError } = await supabase.from('rfqs').insert({
         enq_number: enqNumber,
         rfq_no: enqNumber,
         rfq_direction: form.rfq_direction,
-        operating_entity: form.operating_entity,
+        operating_entity: activeEntity,
         client_rfq_number: form.client_rfq_number || null,
         priority: form.priority,
         request_date: form.request_date || null,
@@ -1947,12 +1988,6 @@ function CreateRFQModal({ onClose, onCreated }: { onClose: () => void; onCreated
               ))}
             </div>
             <div className="grid grid-cols-2 gap-3">
-              <div>
-                <label className="block text-xs font-medium text-gray-600 mb-1">Operating Entity</label>
-                <select value={form.operating_entity} onChange={e => set('operating_entity', e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
-                  {OPERATING_ENTITIES.map(e => <option key={e.value} value={e.value}>{e.label}</option>)}
-                </select>
-              </div>
               <div>
                 <label className="block text-xs font-medium text-gray-600 mb-1">Priority</label>
                 <select value={form.priority} onChange={e => set('priority', e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500">
@@ -2104,7 +2139,7 @@ function CreateRFQModal({ onClose, onCreated }: { onClose: () => void; onCreated
 
 // RFQ DETAIL PANEL
 
-function RFQDetailPanel({ rfq, onClose, onUpdate, role, onJobCreated, onNavigateToJob }: { rfq: RFQ; onClose: () => void; onUpdate: (rfq: RFQ) => void; role: string | null; onJobCreated?: () => void; onNavigateToJob?: (jobNumber: string) => void }) {
+function RFQDetailPanel({ rfq, onClose, onUpdate, role, activeEntity, onJobCreated, onNavigateToJob }: { rfq: RFQ; onClose: () => void; onUpdate: (rfq: RFQ) => void; role: string | null; activeEntity: OperatingEntity; onJobCreated?: () => void; onNavigateToJob?: (jobNumber: string) => void }) {
   const mediaOptions = useDropdownOptions('media_received', MEDIA_OPTIONS_FALLBACK)
   const actionTypeOptions = useDropdownOptions('action_types', ACTIONS_LIST_FALLBACK)
   const [lineItems, setLineItems] = React.useState<LineItem[]>([])
@@ -2125,7 +2160,6 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, onJobCreated, onNavigate
   const [editDrawingNumber, setEditDrawingNumber] = React.useState(rfq.drawing_number || '')
   const [editRequestedBy, setEditRequestedBy] = React.useState(rfq.requested_by || '')
   const [editMediaReceived, setEditMediaReceived] = React.useState(rfq.media_received || '')
-  const [editOperatingEntity, setEditOperatingEntity] = React.useState(rfq.operating_entity || 'ERHA_FC')
   const [editDateReceived, setEditDateReceived] = React.useState(rfq.request_date || '')
   const [editRequiredBy, setEditRequiredBy] = React.useState(rfq.required_date || '')
   const [editPriority, setEditPriority] = React.useState(rfq.priority || 'MEDIUM')
@@ -2187,13 +2221,17 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, onJobCreated, onNavigate
     finally { setSaving(false) }
   }
 
+  // Entity reclassification (moving an RFQ between ERHA_FC and ERHA_SS)
+  // is deferred to a future admin tool. Do not reintroduce without
+  // explicit Hendrik sign-off — it creates data-consistency risk with
+  // downstream jobs, POs, and activity_log records.
   const handleSaveRFQDetails = async () => {
     setSaving(true)
     try {
       const { data, error } = await supabase.from('rfqs').update({
         contact_person: editContactPerson || null, contact_email: editContactEmail || null, contact_phone: editContactPhone || null,
         client_rfq_number: editClientRfqNumber || null, drawing_number: editDrawingNumber || null, requested_by: editRequestedBy || null,
-        media_received: editMediaReceived || null, operating_entity: editOperatingEntity, request_date: editDateReceived || null,
+        media_received: editMediaReceived || null, request_date: editDateReceived || null,
         required_date: editRequiredBy || null, priority: editPriority, department_cg: editDepartmentCG || null,
         actions_required: editActions.join(',') || null, description: editDescription.trim(), special_requirements: editSpecialReqs || null, notes: editNotes || null,
       }).eq('id', rfq.id).select('*, clients(company_name)').single()
@@ -2233,18 +2271,18 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, onJobCreated, onNavigate
         if (error) throw error
         onUpdate(data)
         // Update the existing job's PO fields too
-        await supabase.from('jobs').update({ po_number: poNumber.trim(), order_number: poNumber.trim() }).eq('rfq_id', rfq.id)
+        await supabase.from('jobs').update({ po_number: poNumber.trim(), order_number: poNumber.trim() }).eq('rfq_id', rfq.id).eq('operating_entity', activeEntity)
         showMsg('PO updated on existing job ' + lockedJobNumber + '. No new job created.')
         if (onJobCreated) onJobCreated()
       } else {
         // GUARD: Also check jobs table for any linked job (belt & suspenders)
-        const { data: existingJobs } = await supabase.from('jobs').select('job_number').eq('rfq_id', rfq.id)
+        const { data: existingJobs } = await supabase.from('jobs').select('job_number').eq('rfq_id', rfq.id).eq('operating_entity', activeEntity)
         if (existingJobs && existingJobs.length > 0) {
           alert('⚠️ DUPLICATE DETECTED: A job (' + existingJobs[0].job_number + ') already exists for this RFQ. Updating PO on existing job instead.')
           const { data, error } = await supabase.from('rfqs').update({ po_number: poNumber.trim(), order_date: orderDate || null, job_number: existingJobs[0].job_number, status: 'ACCEPTED' }).eq('id', rfq.id).select('*, clients(company_name)').single()
           if (error) throw error
           onUpdate(data)
-          await supabase.from('jobs').update({ po_number: poNumber.trim(), order_number: poNumber.trim() }).eq('rfq_id', rfq.id)
+          await supabase.from('jobs').update({ po_number: poNumber.trim(), order_number: poNumber.trim() }).eq('rfq_id', rfq.id).eq('operating_entity', activeEntity)
           if (onJobCreated) onJobCreated()
           return
         }
@@ -2279,7 +2317,7 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, onJobCreated, onNavigate
           drawing_number: rfq.drawing_number || null,
           has_drawing: rfq.drawing_number ? true : false,
           is_contract_work: rfq.is_contract_work || false,
-          operating_entity: rfq.operating_entity || null,
+          operating_entity: (rfq.operating_entity === 'ERHA_FC' || rfq.operating_entity === 'ERHA_SS') ? rfq.operating_entity : activeEntity,
           client_rfq_number: rfq.client_rfq_number || null,
           is_parent: false,
           is_child_job: false,
@@ -2360,12 +2398,13 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, onJobCreated, onNavigate
       if (error) throw error
       onUpdate(data)
       // Auto-trigger: move linked job to INVOICED on Workshop Board
-      const { data: linkedJobs } = await supabase.from('jobs').select('id, job_number, workshop_status').eq('rfq_id', rfq.id)
+      const { data: linkedJobs } = await supabase.from('jobs').select('id, job_number, workshop_status').eq('rfq_id', rfq.id).eq('operating_entity', activeEntity)
       if (linkedJobs && linkedJobs.length > 0) {
         for (const lj of linkedJobs) {
           await supabase.from('jobs').update({ workshop_status: 'INVOICED' }).eq('id', lj.id)
           await supabase.from('activity_log').insert({
-            event_type: 'job_auto_invoiced', entity_type: 'job', entity_id: lj.id,
+            action_type: 'job_auto_invoiced', entity_type: 'job', entity_id: lj.id,
+            operating_entity: (rfq.operating_entity === 'ERHA_FC' || rfq.operating_entity === 'ERHA_SS') ? rfq.operating_entity : activeEntity,
             metadata: { rfq_id: rfq.id, job_number: lj.job_number, invoice_number: invoiceNumber.trim(), invoiced_at: new Date().toISOString() },
           }).then(({ error: logErr }) => { if (logErr) console.error('Activity log error:', logErr.message) })
         }
@@ -2452,7 +2491,7 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, onJobCreated, onNavigate
                 return
               }
               // GUARD: Check no existing job is linked to this RFQ
-              const { data: existingJobs } = await supabase.from('jobs').select('job_number').eq('rfq_id', rfq.id)
+              const { data: existingJobs } = await supabase.from('jobs').select('job_number').eq('rfq_id', rfq.id).eq('operating_entity', activeEntity)
               if (existingJobs && existingJobs.length > 0) {
                 alert('⚠️ DUPLICATE DETECTED: A job (' + existingJobs[0].job_number + ') already exists for this RFQ. Cannot create a second job.')
                 return
@@ -2460,6 +2499,7 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, onJobCreated, onNavigate
 
               const pendingPO = 'PENDING-' + new Date().toISOString().slice(0,10)
               const { data: jobData, error: jobError } = await supabase.from('jobs').insert({
+                operating_entity: (rfq.operating_entity === 'ERHA_FC' || rfq.operating_entity === 'ERHA_SS') ? rfq.operating_entity : activeEntity,
                 rfq_id: rfq.id,
                 rfq_no: rfq.rfq_no || null,
                 enq_number: rfq.enq_number || null,
@@ -2573,12 +2613,13 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, onJobCreated, onNavigate
                     if (error) throw error
                     onUpdate(data)
                     if (Object.keys(jobUpdate).length > 0) {
-                      await supabase.from('jobs').update(jobUpdate).eq('rfq_id', rfq.id)
+                      await supabase.from('jobs').update(jobUpdate).eq('rfq_id', rfq.id).eq('operating_entity', activeEntity)
                     }
                     await supabase.from('activity_log').insert({
-                      event_type: 'rfq_updated_post_fasttrack',
+                      action_type: 'rfq_updated_post_fasttrack',
                       entity_type: 'rfq',
                       entity_id: rfq.id,
+                      operating_entity: (rfq.operating_entity === 'ERHA_FC' || rfq.operating_entity === 'ERHA_SS') ? rfq.operating_entity : activeEntity,
                       metadata: { fields_updated: fieldsUpdated, updated_by: rfq.assigned_quoter_name || 'user', updated_at: new Date().toISOString(), job_number: rfq.job_number },
                     }).then(({ error: logErr }) => { if (logErr) console.error('Activity log error:', logErr.message) })
                     showMsg('Order details updated on RFQ & linked job.')
@@ -2631,7 +2672,6 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, onJobCreated, onNavigate
               <div><label className="text-xs text-gray-500 block mb-1">Drawing Number</label><input value={editDrawingNumber} onChange={e => setEditDrawingNumber(e.target.value)} className="w-full border border-gray-200 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-blue-400" /></div>
               <div><label className="text-xs text-gray-500 block mb-1">Requested / Received By</label><input value={editRequestedBy} onChange={e => setEditRequestedBy(e.target.value)} className="w-full border border-gray-200 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-blue-400" /></div>
               <div><label className="text-xs text-gray-500 block mb-1">Media Received</label><select value={editMediaReceived} onChange={e => setEditMediaReceived(e.target.value)} className="w-full border border-gray-200 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-blue-400 bg-white"><option value="">Select...</option>{mediaOptions.map(m => <option key={m} value={m}>{m}</option>)}</select></div>
-              <div><label className="text-xs text-gray-500 block mb-1">Operating Entity</label><select value={editOperatingEntity} onChange={e => setEditOperatingEntity(e.target.value)} className="w-full border border-gray-200 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-blue-400 bg-white">{OPERATING_ENTITIES.map(e => <option key={e.value} value={e.value}>{e.label}</option>)}</select></div>
               <div><label className="text-xs text-gray-500 block mb-1">Date Received</label><input type="date" value={editDateReceived} onChange={e => setEditDateReceived(e.target.value)} className="w-full border border-gray-200 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-blue-400" /></div>
               <div><label className="text-xs text-gray-500 block mb-1">Required By</label><input type="date" value={editRequiredBy} onChange={e => setEditRequiredBy(e.target.value)} className="w-full border border-gray-200 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-blue-400" /></div>
               <div><label className="text-xs text-gray-500 block mb-1">Priority</label><select value={editPriority} onChange={e => setEditPriority(e.target.value)} className="w-full border border-gray-200 rounded px-2 py-1.5 text-xs focus:outline-none focus:border-blue-400 bg-white">{['LOW','MEDIUM','HIGH','URGENT'].map(p => <option key={p} value={p}>{p}</option>)}</select></div>
@@ -2841,8 +2881,8 @@ function NavItem({ icon, label, description, active, accentColor, onClick }: Nav
 }
 
 // SPAWN JOB MODAL
-function SpawnJobModal({ lineItem, parentJob, onClose, onSpawned }: {
-  lineItem: any; parentJob: Job; onClose: () => void; onSpawned: (child: any) => void
+function SpawnJobModal({ lineItem, parentJob, activeEntity, onClose, onSpawned }: {
+  lineItem: any; parentJob: Job; activeEntity: OperatingEntity; onClose: () => void; onSpawned: (child: any) => void
 }) {
   const [saving, setSaving] = React.useState(false)
   const [description, setDescription] = React.useState(lineItem.description || '')
@@ -2867,10 +2907,11 @@ function SpawnJobModal({ lineItem, parentJob, onClose, onSpawned }: {
     if (!description.trim()) { alert('Description is required'); return }
     setSaving(true)
     try {
-      const { data: existingChildren } = await supabase.from('jobs').select('id').eq('parent_job_id', parentJob.id)
+      const { data: existingChildren } = await supabase.from('jobs').select('id').eq('parent_job_id', parentJob.id).eq('operating_entity', activeEntity)
       const suffix = String.fromCharCode(65 + (existingChildren?.length || 0))
       const childJobNumber = (parentJob.job_number || 'JOB') + '-' + suffix
       const { data: childJob, error } = await supabase.from('jobs').insert({
+        operating_entity:         activeEntity,
         parent_job_id:            parentJob.id,
         is_child_job:             true,
         is_parent:                false,
@@ -2907,7 +2948,8 @@ function SpawnJobModal({ lineItem, parentJob, onClose, onSpawned }: {
       // Sync quantity to parent line item + log
       if (quantity !== (lineItem.quantity || 1)) {
         await supabase.from('activity_log').insert({
-          event_type: 'parent_job_quantity_synced', entity_type: 'job', entity_id: parentJob.id,
+          action_type: 'parent_job_quantity_synced', entity_type: 'job', entity_id: parentJob.id,
+          operating_entity: (parentJob.operating_entity === 'ERHA_FC' || parentJob.operating_entity === 'ERHA_SS') ? parentJob.operating_entity : activeEntity,
           metadata: { child_job_id: childJob.id, parent_job_id: parentJob.id, old_qty: lineItem.quantity || 1, new_qty: quantity, synced_at: new Date().toISOString() },
         }).then(({ error: logErr }) => { if (logErr) console.error('Activity log error:', logErr.message) })
       }
@@ -3155,6 +3197,7 @@ function WorkshopBoard({ jobs, loading, onRefresh, onStatusChange }: {
 function JobExecutionPanel({ job, onClose, onStatusChange, onRefresh }: {
   job: any; onClose: () => void; onStatusChange: (id: string, status: string) => void; onRefresh: () => void
 }) {
+  const { activeEntity } = useEntity()
   const [activeTab, setActiveTab] = React.useState<'workers'|'time'|'qc'|'materials'|'reconcile'|'line_items'>('workers')
   const [workshopStatus, setWorkshopStatus] = React.useState(job.workshop_status || 'NOT_STARTED')
   const [notes, setNotes] = React.useState(job.workshop_notes || '')
@@ -3211,7 +3254,8 @@ function JobExecutionPanel({ job, onClose, onStatusChange, onRefresh }: {
     const eventMap: Record<string, string> = { qc_done: 'line_item_qc_done', ready_for_delivery: 'line_item_ready_for_delivery', dispatched: 'line_item_dispatched' }
     if (value) {
       await supabase.from('activity_log').insert({
-        event_type: eventMap[field], entity_type: 'job_line_item', entity_id: li.id,
+        action_type: eventMap[field], entity_type: 'job_line_item', entity_id: li.id,
+        operating_entity: (job.operating_entity === 'ERHA_FC' || job.operating_entity === 'ERHA_SS') ? job.operating_entity : activeEntity,
         metadata: { job_id: job.id, line_item_description: li.description, [`${field}_by`]: 'user', [`${field}_at`]: now },
       }).then(({ error: logErr }) => { if (logErr) console.error('Activity log error:', logErr.message) })
     }
@@ -3947,6 +3991,7 @@ const PR_STATUS_BADGE: Record<string, string> = {
 }
 
 function SupplierManagement({ suppliers, loading, onRefresh, currentRole }: { suppliers: Supplier[]; loading: boolean; onRefresh: () => void; currentRole: string | null }) {
+  const { activeEntity } = useEntity()
   const [procurementTab, setProcurementTab] = React.useState<'suppliers' | 'purchase_requests' | 'purchase_orders' | 'invoices'>('suppliers')
   const [purchaseRequests, setPurchaseRequests] = React.useState<PurchaseRequest[]>([])
   const [prsLoading, setPrsLoading] = React.useState(false)
@@ -3961,12 +4006,13 @@ function SupplierManagement({ suppliers, loading, onRefresh, currentRole }: { su
       const { data, error } = await supabase
         .from('purchase_requests')
         .select('*, suppliers(company_name), jobs(job_number, description)')
+        .eq('operating_entity', activeEntity)
         .order('created_at', { ascending: false })
       if (error) throw error
       setPurchaseRequests(data || [])
     } catch (e: any) { console.error('Failed to fetch PRs:', e.message) }
     finally { setPrsLoading(false) }
-  }, [])
+  }, [activeEntity])
 
   const fetchPOs = React.useCallback(async () => {
     setPosLoading(true)
@@ -3974,12 +4020,13 @@ function SupplierManagement({ suppliers, loading, onRefresh, currentRole }: { su
       const { data, error } = await supabase
         .from('purchase_orders')
         .select('*, suppliers(company_name, contact_person, phone, email, account_number), jobs(job_number, description), purchase_requests(pr_number)')
+        .eq('operating_entity', activeEntity)
         .order('created_at', { ascending: false })
       if (error) throw error
       setPurchaseOrders(data || [])
     } catch (e: any) { console.error('Failed to fetch POs:', e.message) }
     finally { setPosLoading(false) }
-  }, [])
+  }, [activeEntity])
 
   const fetchInvoices = React.useCallback(async () => {
     setInvoicesLoading(true)
@@ -3987,12 +4034,13 @@ function SupplierManagement({ suppliers, loading, onRefresh, currentRole }: { su
       const { data, error } = await supabase
         .from('supplier_invoices')
         .select('*, suppliers(company_name), purchase_orders(po_number, total_value)')
+        .eq('operating_entity', activeEntity)
         .order('created_at', { ascending: false })
       if (error) throw error
       setInvoices(data || [])
     } catch (e: any) { console.error('Failed to fetch invoices:', e.message) }
     finally { setInvoicesLoading(false) }
-  }, [])
+  }, [activeEntity])
 
   React.useEffect(() => { if (procurementTab === 'purchase_requests') fetchPRs() }, [procurementTab, fetchPRs])
   React.useEffect(() => { if (procurementTab === 'purchase_orders') fetchPOs() }, [procurementTab, fetchPOs])
@@ -4022,9 +4070,9 @@ function SupplierManagement({ suppliers, loading, onRefresh, currentRole }: { su
       {procurementTab === 'suppliers'
         ? <SupplierRegisterTab suppliers={suppliers} loading={loading} onRefresh={onRefresh} currentRole={currentRole} />
         : procurementTab === 'purchase_requests'
-        ? <PurchaseRequestsTab purchaseRequests={purchaseRequests} loading={prsLoading} onRefresh={fetchPRs} currentRole={currentRole} suppliers={suppliers} />
+        ? <PurchaseRequestsTab purchaseRequests={purchaseRequests} loading={prsLoading} onRefresh={fetchPRs} currentRole={currentRole} suppliers={suppliers} activeEntity={activeEntity} />
         : procurementTab === 'purchase_orders'
-        ? <PurchaseOrdersTab purchaseOrders={purchaseOrders} loading={posLoading} onRefresh={fetchPOs} currentRole={currentRole} />
+        ? <PurchaseOrdersTab purchaseOrders={purchaseOrders} loading={posLoading} onRefresh={fetchPOs} currentRole={currentRole} activeEntity={activeEntity} />
         : <InvoicesTab invoices={invoices} loading={invoicesLoading} onRefresh={fetchInvoices} currentRole={currentRole} />}
     </div>
   )
@@ -4140,7 +4188,7 @@ function SupplierRegisterTab({ suppliers, loading, onRefresh, currentRole }: { s
 
 // PURCHASE REQUESTS TAB
 
-function PurchaseRequestsTab({ purchaseRequests, loading, onRefresh, currentRole, suppliers }: { purchaseRequests: PurchaseRequest[]; loading: boolean; onRefresh: () => void; currentRole: string | null; suppliers: Supplier[] }) {
+function PurchaseRequestsTab({ purchaseRequests, loading, onRefresh, currentRole, suppliers, activeEntity }: { purchaseRequests: PurchaseRequest[]; loading: boolean; onRefresh: () => void; currentRole: string | null; suppliers: Supplier[]; activeEntity: OperatingEntity }) {
   const [searchTerm, setSearchTerm] = React.useState('')
   const [statusFilter, setStatusFilter] = React.useState<string>('ALL')
   const [showCreateModal, setShowCreateModal] = React.useState(false)
@@ -4196,11 +4244,9 @@ function PurchaseRequestsTab({ purchaseRequests, loading, onRefresh, currentRole
         <button onClick={onRefresh} className="flex items-center gap-2 px-3 py-2 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors border border-gray-300">
           <RefreshCw size={14} />Refresh
         </button>
-        {currentRole === 'SONJA' && (
-          <button onClick={() => setShowCreateModal(true)} className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-lg transition-colors ml-auto">
-            <Plus size={15} />New Purchase Request
-          </button>
-        )}
+        <button onClick={() => setShowCreateModal(true)} className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-lg transition-colors ml-auto">
+          <Plus size={15} />New Purchase Request
+        </button>
       </div>
 
       <div className="flex-1 overflow-auto bg-white rounded-xl border border-gray-200 shadow-sm">
@@ -4249,7 +4295,7 @@ function PurchaseRequestsTab({ purchaseRequests, loading, onRefresh, currentRole
       </div>
 
       {showCreateModal && <CreatePurchaseRequestModal suppliers={suppliers} onClose={() => setShowCreateModal(false)} onCreated={onRefresh} currentRole={currentRole} />}
-      {selectedPR && <PurchaseRequestDetailModal pr={selectedPR} onClose={() => setSelectedPR(null)} onUpdated={() => { setSelectedPR(null); onRefresh() }} currentRole={currentRole} />}
+      {selectedPR && <PurchaseRequestDetailModal pr={selectedPR} onClose={() => setSelectedPR(null)} onUpdated={() => { setSelectedPR(null); onRefresh() }} currentRole={currentRole} activeEntity={activeEntity} />}
     </div>
   )
 }
@@ -4257,6 +4303,7 @@ function PurchaseRequestsTab({ purchaseRequests, loading, onRefresh, currentRole
 // CREATE PURCHASE REQUEST MODAL
 
 function CreatePurchaseRequestModal({ suppliers, onClose, onCreated, currentRole }: { suppliers: Supplier[]; onClose: () => void; onCreated: () => void; currentRole: string | null }) {
+  const { activeEntity } = useEntity()
   const [saving, setSaving] = React.useState(false)
   const [activeJobs, setActiveJobs] = React.useState<{ id: string; job_number: string; description: string | null }[]>([])
   const [form, setForm] = React.useState({
@@ -4269,10 +4316,10 @@ function CreatePurchaseRequestModal({ suppliers, onClose, onCreated, currentRole
   ])
 
   React.useEffect(() => {
-    supabase.from('jobs').select('id, job_number, description').order('job_number', { ascending: false }).then(({ data }) => {
+    supabase.from('jobs').select('id, job_number, description').eq('operating_entity', activeEntity).order('job_number', { ascending: false }).then(({ data }) => {
       if (data) setActiveJobs(data)
     })
-  }, [])
+  }, [activeEntity])
 
   const activeSuppliers = suppliers.filter(s => s.is_active)
 
@@ -4294,6 +4341,7 @@ function CreatePurchaseRequestModal({ suppliers, onClose, onCreated, currentRole
     setSaving(true)
     try {
       const { data: pr, error: prError } = await supabase.from('purchase_requests').insert({
+        operating_entity: activeEntity,
         supplier_id: form.supplier_id,
         job_id: form.job_id,
         required_by_date: form.required_by_date || null,
@@ -4319,9 +4367,10 @@ function CreatePurchaseRequestModal({ suppliers, onClose, onCreated, currentRole
       const selectedJob = activeJobs.find(j => j.id === form.job_id)
 
       await supabase.from('activity_log').insert({
-        event_type: 'purchase_request_raised',
+        action_type: 'purchase_request_raised',
         entity_type: 'purchase_request',
         entity_id: pr.id,
+        operating_entity: activeEntity,
         metadata: {
           pr_number: pr.pr_number,
           supplier_name: selectedSupplier?.company_name || null,
@@ -4331,7 +4380,7 @@ function CreatePurchaseRequestModal({ suppliers, onClose, onCreated, currentRole
           raised_by: currentRole,
         },
         user_id: currentRole,
-      })
+      }).then(({ error: logErr }) => { if (logErr) console.error('Activity log error:', logErr.message) })
 
       onCreated()
       onClose()
@@ -4446,7 +4495,7 @@ function CreatePurchaseRequestModal({ suppliers, onClose, onCreated, currentRole
 
 // PURCHASE REQUEST DETAIL MODAL
 
-function PurchaseRequestDetailModal({ pr, onClose, onUpdated, currentRole }: { pr: PurchaseRequest; onClose: () => void; onUpdated: () => void; currentRole: string | null }) {
+function PurchaseRequestDetailModal({ pr, onClose, onUpdated, currentRole, activeEntity }: { pr: PurchaseRequest; onClose: () => void; onUpdated: () => void; currentRole: string | null; activeEntity: OperatingEntity }) {
   const [lineItems, setLineItems] = React.useState<PRLineItem[]>([])
   const [loadingLines, setLoadingLines] = React.useState(true)
   const [showApproveConfirm, setShowApproveConfirm] = React.useState(false)
@@ -4475,6 +4524,7 @@ function PurchaseRequestDetailModal({ pr, onClose, onUpdated, currentRole }: { p
 
       // 2. Create PO (po_number auto-generated by trigger)
       const { data: po, error: poErr } = await supabase.from('purchase_orders').insert({
+        operating_entity: (pr.operating_entity === 'ERHA_FC' || pr.operating_entity === 'ERHA_SS') ? pr.operating_entity : activeEntity,
         purchase_request_id: pr.id,
         supplier_id: pr.supplier_id,
         job_id: pr.job_id,
@@ -4507,9 +4557,10 @@ function PurchaseRequestDetailModal({ pr, onClose, onUpdated, currentRole }: { p
 
       // 5. ML activity log
       await supabase.from('activity_log').insert({
-        event_type: 'purchase_request_approved',
+        action_type: 'purchase_request_approved',
         entity_type: 'purchase_request',
         entity_id: pr.id,
+        operating_entity: (pr.operating_entity === 'ERHA_FC' || pr.operating_entity === 'ERHA_SS') ? pr.operating_entity : activeEntity,
         metadata: {
           pr_number: pr.pr_number,
           supplier_name: pr.suppliers?.company_name || null,
@@ -4518,7 +4569,7 @@ function PurchaseRequestDetailModal({ pr, onClose, onUpdated, currentRole }: { p
           approved_by: currentRole,
         },
         user_id: currentRole,
-      })
+      }).then(({ error: logErr }) => { if (logErr) console.error('Activity log error:', logErr.message) })
 
       onUpdated()
     } catch (e: any) { alert('Error: ' + e.message); setProcessing(false) }
@@ -4535,9 +4586,10 @@ function PurchaseRequestDetailModal({ pr, onClose, onUpdated, currentRole }: { p
       if (error) throw error
 
       await supabase.from('activity_log').insert({
-        event_type: 'purchase_request_rejected',
+        action_type: 'purchase_request_rejected',
         entity_type: 'purchase_request',
         entity_id: pr.id,
+        operating_entity: (pr.operating_entity === 'ERHA_FC' || pr.operating_entity === 'ERHA_SS') ? pr.operating_entity : activeEntity,
         metadata: {
           pr_number: pr.pr_number,
           supplier_name: pr.suppliers?.company_name || null,
@@ -4545,7 +4597,7 @@ function PurchaseRequestDetailModal({ pr, onClose, onUpdated, currentRole }: { p
           rejected_by: currentRole,
         },
         user_id: currentRole,
-      })
+      }).then(({ error: logErr }) => { if (logErr) console.error('Activity log error:', logErr.message) })
 
       onUpdated()
     } catch (e: any) { alert('Error: ' + e.message); setProcessing(false) }
@@ -4703,7 +4755,7 @@ const PO_STATUS_BADGE: Record<string, string> = {
   CLOSED: 'bg-gray-100 text-gray-500 border border-gray-200',
 }
 
-function PurchaseOrdersTab({ purchaseOrders, loading, onRefresh, currentRole }: { purchaseOrders: PurchaseOrder[]; loading: boolean; onRefresh: () => void; currentRole: string | null }) {
+function PurchaseOrdersTab({ purchaseOrders, loading, onRefresh, currentRole, activeEntity }: { purchaseOrders: PurchaseOrder[]; loading: boolean; onRefresh: () => void; currentRole: string | null; activeEntity: OperatingEntity }) {
   const [searchTerm, setSearchTerm] = React.useState('')
   const [statusFilter, setStatusFilter] = React.useState<string>('ACTIVE')
   const [selectedPO, setSelectedPO] = React.useState<PurchaseOrder | null>(null)
@@ -4815,15 +4867,15 @@ function PurchaseOrdersTab({ purchaseOrders, loading, onRefresh, currentRole }: 
         </table>
       </div>
 
-      {selectedPO && <PODetailModal po={selectedPO} onClose={() => setSelectedPO(null)} onUpdated={() => { setSelectedPO(null); onRefresh() }} currentRole={currentRole} />}
-      {deliveryPO && <LogDeliveryModal po={deliveryPO} onClose={() => setDeliveryPO(null)} onSaved={() => { setDeliveryPO(null); onRefresh() }} currentRole={currentRole} />}
+      {selectedPO && <PODetailModal po={selectedPO} onClose={() => setSelectedPO(null)} onUpdated={() => { setSelectedPO(null); onRefresh() }} currentRole={currentRole} activeEntity={activeEntity} />}
+      {deliveryPO && <LogDeliveryModal po={deliveryPO} onClose={() => setDeliveryPO(null)} onSaved={() => { setDeliveryPO(null); onRefresh() }} currentRole={currentRole} activeEntity={activeEntity} />}
     </div>
   )
 }
 
 // PO DETAIL MODAL
 
-function PODetailModal({ po, onClose, onUpdated, currentRole }: { po: PurchaseOrder; onClose: () => void; onUpdated: () => void; currentRole: string | null }) {
+function PODetailModal({ po, onClose, onUpdated, currentRole, activeEntity }: { po: PurchaseOrder; onClose: () => void; onUpdated: () => void; currentRole: string | null; activeEntity: OperatingEntity }) {
   const [lineItems, setLineItems] = React.useState<POLineItem[]>([])
   const [loadingLines, setLoadingLines] = React.useState(true)
   const [showCloseModal, setShowCloseModal] = React.useState(false)
@@ -4838,7 +4890,7 @@ function PODetailModal({ po, onClose, onUpdated, currentRole }: { po: PurchaseOr
     setLoadingLines(true)
     const [liRes, grvRes] = await Promise.all([
       supabase.from('po_line_items').select('*').eq('po_id', po.id),
-      supabase.from('goods_received_vouchers').select('*, grv_line_items(*, po_line_items(description))').eq('po_id', po.id).order('received_at', { ascending: false }),
+      supabase.from('goods_received_vouchers').select('*, grv_line_items(*, po_line_items(description))').eq('po_id', po.id).eq('operating_entity', activeEntity).order('received_at', { ascending: false }),
     ])
     setLineItems(liRes.data || [])
     setGrvHistory(grvRes.data || [])
@@ -4849,12 +4901,13 @@ function PODetailModal({ po, onClose, onUpdated, currentRole }: { po: PurchaseOr
     loadData()
     // Log view event
     supabase.from('activity_log').insert({
-      event_type: 'po_viewed',
+      action_type: 'po_viewed',
       entity_type: 'purchase_order',
       entity_id: po.id,
+      operating_entity: (po.operating_entity === 'ERHA_FC' || po.operating_entity === 'ERHA_SS') ? po.operating_entity : activeEntity,
       metadata: { po_number: po.po_number, supplier_name: po.suppliers?.company_name || null, viewed_by: currentRole },
       user_id: currentRole,
-    })
+    }).then(({ error: logErr }) => { if (logErr) console.error('Activity log error:', logErr.message) })
   }, [po.id, po.po_number, po.suppliers?.company_name, currentRole, loadData, refreshKey])
 
   const totalOrdered = lineItems.reduce((sum, li) => sum + li.quantity_ordered, 0)
@@ -4965,12 +5018,13 @@ function PODetailModal({ po, onClose, onUpdated, currentRole }: { po: PurchaseOr
 
     // Log download event
     supabase.from('activity_log').insert({
-      event_type: 'po_downloaded',
+      action_type: 'po_downloaded',
       entity_type: 'purchase_order',
       entity_id: po.id,
+      operating_entity: (po.operating_entity === 'ERHA_FC' || po.operating_entity === 'ERHA_SS') ? po.operating_entity : activeEntity,
       metadata: { po_number: po.po_number, downloaded_by: currentRole },
       user_id: currentRole,
-    })
+    }).then(({ error: logErr }) => { if (logErr) console.error('Activity log error:', logErr.message) })
   }
 
   const handleClosePO = async () => {
@@ -4981,12 +5035,13 @@ function PODetailModal({ po, onClose, onUpdated, currentRole }: { po: PurchaseOr
       if (error) throw error
 
       await supabase.from('activity_log').insert({
-        event_type: 'po_closed',
+        action_type: 'po_closed',
         entity_type: 'purchase_order',
         entity_id: po.id,
+        operating_entity: (po.operating_entity === 'ERHA_FC' || po.operating_entity === 'ERHA_SS') ? po.operating_entity : activeEntity,
         metadata: { po_number: po.po_number, reason: closeReason.trim(), closed_by: currentRole },
         user_id: currentRole,
-      })
+      }).then(({ error: logErr }) => { if (logErr) console.error('Activity log error:', logErr.message) })
 
       onUpdated()
     } catch (e: any) { alert('Error: ' + e.message); setProcessing(false) }
@@ -5184,7 +5239,7 @@ function PODetailModal({ po, onClose, onUpdated, currentRole }: { po: PurchaseOr
         )}
       </div>
 
-      {showDeliveryModal && <LogDeliveryModal po={po} onClose={() => setShowDeliveryModal(false)} onSaved={() => { setShowDeliveryModal(false); setRefreshKey(k => k + 1) }} currentRole={currentRole} />}
+      {showDeliveryModal && <LogDeliveryModal po={po} onClose={() => setShowDeliveryModal(false)} onSaved={() => { setShowDeliveryModal(false); setRefreshKey(k => k + 1) }} currentRole={currentRole} activeEntity={activeEntity} />}
     </div>
   )
 }
@@ -5197,7 +5252,7 @@ const CONDITION_BADGE: Record<string, string> = {
   SHORT: 'bg-amber-100 text-amber-700',
 }
 
-function LogDeliveryModal({ po, onClose, onSaved, currentRole }: { po: PurchaseOrder; onClose: () => void; onSaved: () => void; currentRole: string | null }) {
+function LogDeliveryModal({ po, onClose, onSaved, currentRole, activeEntity }: { po: PurchaseOrder; onClose: () => void; onSaved: () => void; currentRole: string | null; activeEntity: OperatingEntity }) {
   const [poLineItems, setPoLineItems] = React.useState<POLineItem[]>([])
   const [loading, setLoading] = React.useState(true)
   const [saving, setSaving] = React.useState(false)
@@ -5244,6 +5299,7 @@ function LogDeliveryModal({ po, onClose, onSaved, currentRole }: { po: PurchaseO
     try {
       // 1. Insert GRV
       const { data: grv, error: grvErr } = await supabase.from('goods_received_vouchers').insert({
+        operating_entity: (po.operating_entity === 'ERHA_FC' || po.operating_entity === 'ERHA_SS') ? po.operating_entity : activeEntity,
         po_id: po.id,
         received_by: currentRole,
         received_at: new Date().toISOString(),
@@ -5285,7 +5341,7 @@ function LogDeliveryModal({ po, onClose, onSaved, currentRole }: { po: PurchaseO
       }
 
       // 5. Stock matching — fuzzy match on item_name
-      const { data: stockItems } = await supabase.from('stock_items').select('id, item_name, current_quantity').eq('is_active', true)
+      const { data: stockItems } = await supabase.from('stock_items').select('id, item_name, current_quantity').eq('is_active', true).eq('operating_entity', activeEntity)
       const allStock = stockItems || []
       for (const l of grvLines) {
         const descLower = l.description.toLowerCase().trim()
@@ -5294,6 +5350,7 @@ function LogDeliveryModal({ po, onClose, onSaved, currentRole }: { po: PurchaseO
           const newQty = (match.current_quantity || 0) + l.qty_now
           await supabase.from('stock_items').update({ current_quantity: newQty }).eq('id', match.id)
           await supabase.from('stock_transactions').insert({
+            operating_entity: (po.operating_entity === 'ERHA_FC' || po.operating_entity === 'ERHA_SS') ? po.operating_entity : activeEntity,
             stock_item_id: match.id,
             transaction_type: 'RECEIPT_PO',
             reference_id: po.id,
@@ -5312,9 +5369,10 @@ function LogDeliveryModal({ po, onClose, onSaved, currentRole }: { po: PurchaseO
 
       // 6. ML activity log — GRV logged
       await supabase.from('activity_log').insert({
-        event_type: 'grv_logged',
+        action_type: 'grv_logged',
         entity_type: 'goods_received_voucher',
         entity_id: grv.id,
+        operating_entity: (po.operating_entity === 'ERHA_FC' || po.operating_entity === 'ERHA_SS') ? po.operating_entity : activeEntity,
         metadata: {
           po_number: po.po_number,
           supplier_name: po.suppliers?.company_name || null,
@@ -5324,15 +5382,16 @@ function LogDeliveryModal({ po, onClose, onSaved, currentRole }: { po: PurchaseO
           new_po_status: newStatus,
         },
         user_id: currentRole,
-      })
+      }).then(({ error: logErr }) => { if (logErr) console.error('Activity log error:', logErr.message) })
 
       // 7. ML activity log — discrepancy events
       for (const l of grvLines) {
         if (l.condition === 'DAMAGED' || l.condition === 'SHORT') {
           await supabase.from('activity_log').insert({
-            event_type: 'delivery_discrepancy_flagged',
+            action_type: 'delivery_discrepancy_flagged',
             entity_type: 'goods_received_voucher',
             entity_id: grv.id,
+            operating_entity: (po.operating_entity === 'ERHA_FC' || po.operating_entity === 'ERHA_SS') ? po.operating_entity : activeEntity,
             metadata: {
               po_number: po.po_number,
               po_line_item_id: l.po_line_item_id,
@@ -5343,7 +5402,7 @@ function LogDeliveryModal({ po, onClose, onSaved, currentRole }: { po: PurchaseO
               flagged_by: currentRole,
             },
             user_id: currentRole,
-          })
+          }).then(({ error: logErr }) => { if (logErr) console.error('Activity log error:', logErr.message) })
         }
       }
 
@@ -5460,6 +5519,7 @@ function LogDeliveryModal({ po, onClose, onSaved, currentRole }: { po: PurchaseO
 // ADD SUPPLIER MODAL
 
 function AddSupplierModal({ onClose, onCreated, currentRole }: { onClose: () => void; onCreated: () => void; currentRole: string | null }) {
+  const { activeEntity } = useEntity()
   const [saving, setSaving] = React.useState(false)
   const [form, setForm] = React.useState({
     company_name: '',
@@ -5488,16 +5548,17 @@ function AddSupplierModal({ onClose, onCreated, currentRole }: { onClose: () => 
       if (error) throw error
 
       await supabase.from('activity_log').insert({
-        event_type: 'supplier_added',
+        action_type: 'supplier_added',
         entity_type: 'supplier',
         entity_id: data.id,
+        operating_entity: activeEntity,
         metadata: {
           company_name: form.company_name.trim(),
           account_number: form.account_number.trim() || null,
           added_by: currentRole,
         },
         user_id: currentRole,
-      })
+      }).then(({ error: logErr }) => { if (logErr) console.error('Activity log error:', logErr.message) })
 
       onCreated()
       onClose()
@@ -5562,6 +5623,7 @@ function AddSupplierModal({ onClose, onCreated, currentRole }: { onClose: () => 
 // EDIT SUPPLIER MODAL
 
 function EditSupplierModal({ supplier, onClose, onUpdated, currentRole }: { supplier: Supplier; onClose: () => void; onUpdated: () => void; currentRole: string | null }) {
+  const { activeEntity } = useEntity()
   const [saving, setSaving] = React.useState(false)
   const [form, setForm] = React.useState({
     company_name: supplier.company_name || '',
@@ -5608,15 +5670,16 @@ function EditSupplierModal({ supplier, onClose, onUpdated, currentRole }: { supp
       if (error) throw error
 
       await supabase.from('activity_log').insert({
-        event_type: 'supplier_updated',
+        action_type: 'supplier_updated',
         entity_type: 'supplier',
         entity_id: supplier.id,
+        operating_entity: activeEntity,
         metadata: {
           changes,
           updated_by: currentRole,
         },
         user_id: currentRole,
-      })
+      }).then(({ error: logErr }) => { if (logErr) console.error('Activity log error:', logErr.message) })
 
       onUpdated()
       onClose()
@@ -5681,6 +5744,7 @@ function EditSupplierModal({ supplier, onClose, onUpdated, currentRole }: { supp
 // DEACTIVATE SUPPLIER MODAL
 
 function DeactivateSupplierModal({ supplier, onClose, onDeactivated, currentRole }: { supplier: Supplier; onClose: () => void; onDeactivated: () => void; currentRole: string | null }) {
+  const { activeEntity } = useEntity()
   const [saving, setSaving] = React.useState(false)
   const [reason, setReason] = React.useState('')
 
@@ -5695,16 +5759,17 @@ function DeactivateSupplierModal({ supplier, onClose, onDeactivated, currentRole
       if (error) throw error
 
       await supabase.from('activity_log').insert({
-        event_type: 'supplier_deactivated',
+        action_type: 'supplier_deactivated',
         entity_type: 'supplier',
         entity_id: supplier.id,
+        operating_entity: activeEntity,
         metadata: {
           company_name: supplier.company_name,
           reason: reason.trim(),
           deactivated_by: currentRole,
         },
         user_id: currentRole,
-      })
+      }).then(({ error: logErr }) => { if (logErr) console.error('Activity log error:', logErr.message) })
 
       onDeactivated()
       onClose()
@@ -5879,6 +5944,7 @@ function SettingsPage() {
 }
 
 function DropdownManagementTab() {
+  const { activeEntity } = useEntity()
   const [selectedType, setSelectedType] = React.useState(DROPDOWN_TYPES[0].key)
   const [options, setOptions] = React.useState<SystemDropdown[]>([])
   const [loading, setLoading] = React.useState(true)
@@ -5919,7 +5985,8 @@ function DropdownManagementTab() {
       const { error } = await supabase.from('system_dropdowns').update({ is_active: false }).eq('id', opt.id)
       if (error) throw error
       await supabase.from('activity_log').insert({
-        event_type: 'dropdown_option_deactivated', entity_type: 'system_dropdown', entity_id: opt.id,
+        action_type: 'dropdown_option_deactivated', entity_type: 'system_dropdown', entity_id: opt.id,
+        operating_entity: activeEntity,
         metadata: { dropdown_type: opt.dropdown_type, option_label: opt.option_label, deactivated_by: 'user', deactivated_at: new Date().toISOString() },
       }).then(({ error: logErr }) => { if (logErr) console.error('Activity log error:', logErr.message) })
       fetchOptions()
@@ -6025,6 +6092,7 @@ function DropdownManagementTab() {
 }
 
 function AddDropdownOptionModal({ dropdownType, dropdownLabel, existingCount, onClose, onAdded }: { dropdownType: string; dropdownLabel: string; existingCount: number; onClose: () => void; onAdded: () => void }) {
+  const { activeEntity } = useEntity()
   const [saving, setSaving] = React.useState(false)
   const [label, setLabel] = React.useState('')
   const [value, setValue] = React.useState('')
@@ -6046,7 +6114,8 @@ function AddDropdownOptionModal({ dropdownType, dropdownLabel, existingCount, on
       }).select().single()
       if (error) throw error
       await supabase.from('activity_log').insert({
-        event_type: 'dropdown_option_added', entity_type: 'system_dropdown', entity_id: data.id,
+        action_type: 'dropdown_option_added', entity_type: 'system_dropdown', entity_id: data.id,
+        operating_entity: activeEntity,
         metadata: { dropdown_type: dropdownType, option_label: label.trim(), option_value: value.trim(), added_by: 'user', added_at: new Date().toISOString() },
       }).then(({ error: logErr }) => { if (logErr) console.error('Activity log error:', logErr.message) })
       onAdded()
@@ -6088,6 +6157,7 @@ function AddDropdownOptionModal({ dropdownType, dropdownLabel, existingCount, on
 }
 
 function EditDropdownOptionModal({ option, onClose, onUpdated }: { option: SystemDropdown; onClose: () => void; onUpdated: () => void }) {
+  const { activeEntity } = useEntity()
   const [saving, setSaving] = React.useState(false)
   const [label, setLabel] = React.useState(option.option_label)
   const [sortOrder, setSortOrder] = React.useState(option.sort_order)
@@ -6104,7 +6174,8 @@ function EditDropdownOptionModal({ option, onClose, onUpdated }: { option: Syste
         const { error } = await supabase.from('system_dropdowns').update(update).eq('id', option.id)
         if (error) throw error
         await supabase.from('activity_log').insert({
-          event_type: 'dropdown_option_updated', entity_type: 'system_dropdown', entity_id: option.id,
+          action_type: 'dropdown_option_updated', entity_type: 'system_dropdown', entity_id: option.id,
+          operating_entity: activeEntity,
           metadata: { dropdown_type: option.dropdown_type, field_changed: changes, updated_by: 'user', updated_at: new Date().toISOString() },
         }).then(({ error: logErr }) => { if (logErr) console.error('Activity log error:', logErr.message) })
       }
@@ -6301,6 +6372,7 @@ function ClientRegisterTab({ clients, loading, onRefresh, onViewContacts }: { cl
 // ADD CLIENT MODAL
 
 function AddClientModal({ onClose, onAdded }: { onClose: () => void; onAdded: () => void }) {
+  const { activeEntity } = useEntity()
   const [saving, setSaving] = React.useState(false)
   const [companyName, setCompanyName] = React.useState('')
   const [contactName, setContactName] = React.useState('')
@@ -6322,7 +6394,8 @@ function AddClientModal({ onClose, onAdded }: { onClose: () => void; onAdded: ()
         })
       }
       await supabase.from('activity_log').insert({
-        event_type: 'client_added', entity_type: 'client', entity_id: client.id,
+        action_type: 'client_added', entity_type: 'client', entity_id: client.id,
+        operating_entity: activeEntity,
         metadata: { company_name: companyName.trim(), added_by: 'user', added_at: new Date().toISOString() },
       }).then(({ error: logErr }) => { if (logErr) console.error('Activity log error:', logErr.message) })
       onAdded()
@@ -6377,6 +6450,7 @@ function AddClientModal({ onClose, onAdded }: { onClose: () => void; onAdded: ()
 // EDIT CLIENT MODAL
 
 function EditClientModal({ client, primaryContact, onClose, onUpdated }: { client: Client; primaryContact: ClientContact | null; onClose: () => void; onUpdated: () => void }) {
+  const { activeEntity } = useEntity()
   const [saving, setSaving] = React.useState(false)
   const [companyName, setCompanyName] = React.useState(client.company_name)
   const [contactName, setContactName] = React.useState(primaryContact?.contact_name || '')
@@ -6412,7 +6486,8 @@ function EditClientModal({ client, primaryContact, onClose, onUpdated }: { clien
       }
       if (changes.length > 0) {
         await supabase.from('activity_log').insert({
-          event_type: 'client_updated', entity_type: 'client', entity_id: client.id,
+          action_type: 'client_updated', entity_type: 'client', entity_id: client.id,
+          operating_entity: activeEntity,
           metadata: { field_changed: changes, updated_by: 'user', updated_at: new Date().toISOString() },
         }).then(({ error: logErr }) => { if (logErr) console.error('Activity log error:', logErr.message) })
       }
@@ -6468,6 +6543,7 @@ function EditClientModal({ client, primaryContact, onClose, onUpdated }: { clien
 // DEACTIVATE CLIENT MODAL
 
 function DeactivateClientModal({ client, onClose, onDeactivated }: { client: Client; onClose: () => void; onDeactivated: () => void }) {
+  const { activeEntity } = useEntity()
   const [saving, setSaving] = React.useState(false)
   const [reason, setReason] = React.useState('')
 
@@ -6478,7 +6554,8 @@ function DeactivateClientModal({ client, onClose, onDeactivated }: { client: Cli
       const { error } = await supabase.from('clients').update({ is_active: false, deactivation_reason: reason.trim() }).eq('id', client.id)
       if (error) throw error
       await supabase.from('activity_log').insert({
-        event_type: 'client_deactivated', entity_type: 'client', entity_id: client.id,
+        action_type: 'client_deactivated', entity_type: 'client', entity_id: client.id,
+        operating_entity: activeEntity,
         metadata: { company_name: client.company_name, reason: reason.trim(), deactivated_by: 'user', deactivated_at: new Date().toISOString() },
       }).then(({ error: logErr }) => { if (logErr) console.error('Activity log error:', logErr.message) })
       onDeactivated()
@@ -6515,6 +6592,7 @@ function DeactivateClientModal({ client, onClose, onDeactivated }: { client: Cli
 // CLIENT CONTACTS TAB
 
 function ClientContactsTab({ client, onBack }: { client: Client; onBack: () => void }) {
+  const { activeEntity } = useEntity()
   const [contacts, setContacts] = React.useState<ClientContact[]>([])
   const [loading, setLoading] = React.useState(true)
   const [showAddModal, setShowAddModal] = React.useState(false)
@@ -6540,7 +6618,8 @@ function ClientContactsTab({ client, onBack }: { client: Client; onBack: () => v
       const { error } = await supabase.from('client_contacts').delete().eq('id', contact.id)
       if (error) throw error
       await supabase.from('activity_log').insert({
-        event_type: 'client_contact_removed', entity_type: 'client_contact', entity_id: contact.id,
+        action_type: 'client_contact_removed', entity_type: 'client_contact', entity_id: contact.id,
+        operating_entity: activeEntity,
         metadata: { client_id: client.id, contact_name: contact.contact_name, removed_by: 'user', removed_at: new Date().toISOString() },
       }).then(({ error: logErr }) => { if (logErr) console.error('Activity log error:', logErr.message) })
       fetchContacts()
@@ -6623,6 +6702,7 @@ function ClientContactsTab({ client, onBack }: { client: Client; onBack: () => v
 // ADD CONTACT MODAL
 
 function AddContactModal({ clientId, onClose, onAdded }: { clientId: string; onClose: () => void; onAdded: () => void }) {
+  const { activeEntity } = useEntity()
   const [saving, setSaving] = React.useState(false)
   const [name, setName] = React.useState('')
   const [phone, setPhone] = React.useState('')
@@ -6644,7 +6724,8 @@ function AddContactModal({ clientId, onClose, onAdded }: { clientId: string; onC
       }).select().single()
       if (error) throw error
       await supabase.from('activity_log').insert({
-        event_type: 'client_contact_added', entity_type: 'client_contact', entity_id: contact.id,
+        action_type: 'client_contact_added', entity_type: 'client_contact', entity_id: contact.id,
+        operating_entity: activeEntity,
         metadata: { client_id: clientId, contact_name: name.trim(), added_by: 'user', added_at: new Date().toISOString() },
       }).then(({ error: logErr }) => { if (logErr) console.error('Activity log error:', logErr.message) })
       onAdded()
@@ -6698,6 +6779,7 @@ function AddContactModal({ clientId, onClose, onAdded }: { clientId: string; onC
 // EDIT CONTACT MODAL
 
 function EditContactModal({ contact, onClose, onUpdated }: { contact: ClientContact; onClose: () => void; onUpdated: () => void }) {
+  const { activeEntity } = useEntity()
   const [saving, setSaving] = React.useState(false)
   const [name, setName] = React.useState(contact.contact_name)
   const [phone, setPhone] = React.useState(contact.contact_phone || '')
@@ -6718,7 +6800,8 @@ function EditContactModal({ contact, onClose, onUpdated }: { contact: ClientCont
         const { error } = await supabase.from('client_contacts').update(update).eq('id', contact.id)
         if (error) throw error
         await supabase.from('activity_log').insert({
-          event_type: 'client_contact_updated', entity_type: 'client_contact', entity_id: contact.id,
+          action_type: 'client_contact_updated', entity_type: 'client_contact', entity_id: contact.id,
+          operating_entity: activeEntity,
           metadata: { client_id: contact.client_id, field_changed: changes, updated_by: 'user', updated_at: new Date().toISOString() },
         }).then(({ error: logErr }) => { if (logErr) console.error('Activity log error:', logErr.message) })
       }
