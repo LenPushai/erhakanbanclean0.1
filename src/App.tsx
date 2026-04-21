@@ -334,6 +334,122 @@ function readStoredRole(): string | null {
   return null
 }
 
+// ---------------------------------------------------------------------
+// Procurement Kanban — stage config, derivation, valid transitions
+// Stage is NEVER persisted on any table. It is derived from PR/PO/GRV/Invoice
+// state each render. Stage transitions are logged via activity_log at the
+// action boundaries (see PR approve, GRV log, PO close handlers).
+// ---------------------------------------------------------------------
+
+const PROCUREMENT_STAGES = [
+  { id: 'PR_PENDING',        label: 'PR Pending Approval', colour: 'amber' },
+  { id: 'PO_ISSUED',         label: 'PO Issued',           colour: 'blue' },
+  { id: 'PARTIAL_DELIVERY',  label: 'Partial Delivery',    colour: 'indigo' },
+  { id: 'FULLY_RECEIVED',    label: 'Fully Received',      colour: 'violet' },
+  { id: 'INVOICE_MATCHED',   label: 'Invoice Matched',     colour: 'teal' },
+  { id: 'COMPLETE',          label: 'Complete',            colour: 'green' },
+] as const
+
+type StageId = typeof PROCUREMENT_STAGES[number]['id']
+
+const VALID_TRANSITIONS: Record<StageId, StageId[]> = {
+  PR_PENDING:       ['PO_ISSUED'],
+  PO_ISSUED:        ['PARTIAL_DELIVERY', 'FULLY_RECEIVED'],
+  PARTIAL_DELIVERY: ['FULLY_RECEIVED'],
+  FULLY_RECEIVED:   ['INVOICE_MATCHED'],
+  INVOICE_MATCHED:  ['COMPLETE'],
+  COMPLETE:         [],
+}
+
+// Full Tailwind class strings (not interpolated) so JIT picks them up in the
+// generated CSS. Adding a new stage colour requires an entry here.
+const STAGE_COLOUR_CLASSES: Record<string, { header: string; countPill: string; cardAccent: string }> = {
+  amber:  { header: 'bg-amber-50 border-amber-200',   countPill: 'bg-amber-100 text-amber-800',   cardAccent: 'border-l-amber-400' },
+  blue:   { header: 'bg-blue-50 border-blue-200',     countPill: 'bg-blue-100 text-blue-800',     cardAccent: 'border-l-blue-400' },
+  indigo: { header: 'bg-indigo-50 border-indigo-200', countPill: 'bg-indigo-100 text-indigo-800', cardAccent: 'border-l-indigo-400' },
+  violet: { header: 'bg-violet-50 border-violet-200', countPill: 'bg-violet-100 text-violet-800', cardAccent: 'border-l-violet-400' },
+  teal:   { header: 'bg-teal-50 border-teal-200',     countPill: 'bg-teal-100 text-teal-800',     cardAccent: 'border-l-teal-400' },
+  green:  { header: 'bg-green-50 border-green-200',   countPill: 'bg-green-100 text-green-800',   cardAccent: 'border-l-green-400' },
+}
+
+interface ProcurementThread {
+  pr: PurchaseRequest
+  po: PurchaseOrder | null
+  grvCount: number
+  invoice: SupplierInvoice | null
+  stage: StageId
+  stageSince: string
+}
+
+function deriveStage(
+  pr: PurchaseRequest,
+  po: PurchaseOrder | null,
+  grvCount: number,
+  invoice: SupplierInvoice | null,
+): StageId {
+  if (po?.status === 'CLOSED') return 'COMPLETE'
+  // Treat any non-CAPTURED / non-DISPUTED invoice as matched-onwards.
+  // When an invoice-match handler is built (it doesn't exist yet), narrow this.
+  const invoiceMatched = !!invoice && invoice.status !== 'CAPTURED' && invoice.status !== 'DISPUTED'
+  if (invoiceMatched) return 'INVOICE_MATCHED'
+  if (po?.status === 'FULLY_RECEIVED') return 'FULLY_RECEIVED'
+  if (po?.status === 'PARTIALLY_RECEIVED' || (grvCount > 0 && po?.status === 'ISSUED')) return 'PARTIAL_DELIVERY'
+  if (po) return 'PO_ISSUED'
+  return 'PR_PENDING'
+}
+
+// Best-effort timestamp for "when did this thread enter its current stage".
+// Proxies off the underlying record's timestamps — precise history comes from
+// activity_log once we have enough procurement_stage_changed events.
+function deriveStageSince(pr: PurchaseRequest, po: PurchaseOrder | null, invoice: SupplierInvoice | null, stage: StageId): string {
+  switch (stage) {
+    case 'COMPLETE':         return po?.updated_at || po?.created_at || pr.created_at
+    case 'INVOICE_MATCHED':  return invoice?.updated_at || invoice?.created_at || po?.updated_at || pr.created_at
+    case 'FULLY_RECEIVED':   return po?.updated_at || po?.created_at || pr.created_at
+    case 'PARTIAL_DELIVERY': return po?.updated_at || po?.created_at || pr.created_at
+    case 'PO_ISSUED':        return po?.issued_at || po?.created_at || pr.created_at
+    case 'PR_PENDING':
+    default:                 return pr.created_at
+  }
+}
+
+function daysSince(iso: string): number {
+  const diff = Date.now() - new Date(iso).getTime()
+  return Math.max(0, Math.floor(diff / (1000 * 60 * 60 * 24)))
+}
+
+function logProcurementStageChange(params: {
+  prId: string
+  prNumber: string | null
+  operatingEntity: string
+  fromStage: StageId
+  toStage: StageId
+  durationSeconds: number
+  actorRole: string | null
+  poNumber?: string | null
+  grvId?: string | null
+}): void {
+  const valid = VALID_TRANSITIONS[params.fromStage] || []
+  if (!valid.includes(params.toStage)) {
+    console.warn(`[procurement] unexpected transition ${params.fromStage} → ${params.toStage} for PR ${params.prNumber || params.prId}`)
+  }
+  supabase.from('activity_log').insert({
+    action_type: 'procurement_stage_changed',
+    entity_type: 'procurement_thread',
+    entity_id: params.prId,
+    operating_entity: params.operatingEntity,
+    metadata: {
+      pr_number: params.prNumber,
+      from_stage: params.fromStage,
+      to_stage: params.toStage,
+      duration_in_previous_stage_seconds: params.durationSeconds,
+      actor_role: params.actorRole,
+      po_number: params.poNumber ?? null,
+      grv_id: params.grvId ?? null,
+    },
+  }).then(({ error }) => { if (error) console.error('activity_log error:', error) })
+}
+
 const EMAIL_TEMPLATES: Record<string, { subject: string; body: string }> = {
   NEW:              { subject: 'Enquiry Received - {enq}', body: 'Dear {contact},\n\nThank you for your enquiry {enq}. We have received your request and will be in touch shortly.\n\nKind regards\nERHA Fabrication & Construction' },
   PENDING:          { subject: 'Quotation In Progress - {enq}', body: 'Dear {contact},\n\nWe are currently preparing your quotation for enquiry {enq}. We will send it to you as soon as it is ready.\n\nKind regards\nERHA Fabrication & Construction' },
@@ -3992,13 +4108,19 @@ const PR_STATUS_BADGE: Record<string, string> = {
 
 function SupplierManagement({ suppliers, loading, onRefresh, currentRole }: { suppliers: Supplier[]; loading: boolean; onRefresh: () => void; currentRole: string | null }) {
   const { activeEntity } = useEntity()
-  const [procurementTab, setProcurementTab] = React.useState<'suppliers' | 'purchase_requests' | 'purchase_orders' | 'invoices'>('suppliers')
+  const [procurementTab, setProcurementTab] = React.useState<'suppliers' | 'purchase_requests' | 'purchase_orders' | 'invoices' | 'board'>('suppliers')
   const [purchaseRequests, setPurchaseRequests] = React.useState<PurchaseRequest[]>([])
   const [prsLoading, setPrsLoading] = React.useState(false)
   const [purchaseOrders, setPurchaseOrders] = React.useState<PurchaseOrder[]>([])
   const [posLoading, setPosLoading] = React.useState(false)
   const [invoices, setInvoices] = React.useState<SupplierInvoice[]>([])
   const [invoicesLoading, setInvoicesLoading] = React.useState(false)
+  const [boardGrvs, setBoardGrvs] = React.useState<Array<{ id: string; po_id: string }>>([])
+  const [boardLoading, setBoardLoading] = React.useState(false)
+  // Board-level selection — when a user clicks a kanban card we open the
+  // existing detail modal here rather than forking the rendering into each tab.
+  const [boardSelectedPR, setBoardSelectedPR] = React.useState<PurchaseRequest | null>(null)
+  const [boardSelectedPO, setBoardSelectedPO] = React.useState<PurchaseOrder | null>(null)
 
   const fetchPRs = React.useCallback(async () => {
     setPrsLoading(true)
@@ -4042,9 +4164,43 @@ function SupplierManagement({ suppliers, loading, onRefresh, currentRole }: { su
     finally { setInvoicesLoading(false) }
   }, [activeEntity])
 
+  const fetchBoardData = React.useCallback(async () => {
+    setBoardLoading(true)
+    try {
+      const [prRes, poRes, invRes, grvRes] = await Promise.all([
+        supabase.from('purchase_requests').select('*, suppliers(company_name), jobs(job_number, description)').eq('operating_entity', activeEntity).order('created_at', { ascending: false }),
+        supabase.from('purchase_orders').select('*, suppliers(company_name), jobs(job_number), purchase_requests(pr_number)').eq('operating_entity', activeEntity),
+        supabase.from('supplier_invoices').select('*, suppliers(company_name), purchase_orders(po_number, total_value)').eq('operating_entity', activeEntity),
+        supabase.from('goods_received_vouchers').select('id, po_id').eq('operating_entity', activeEntity),
+      ])
+      setPurchaseRequests(prRes.data || [])
+      setPurchaseOrders(poRes.data || [])
+      setInvoices(invRes.data || [])
+      setBoardGrvs(grvRes.data || [])
+    } catch (e: any) { console.error('Failed to fetch board data:', e.message) }
+    finally { setBoardLoading(false) }
+  }, [activeEntity])
+
   React.useEffect(() => { if (procurementTab === 'purchase_requests') fetchPRs() }, [procurementTab, fetchPRs])
   React.useEffect(() => { if (procurementTab === 'purchase_orders') fetchPOs() }, [procurementTab, fetchPOs])
   React.useEffect(() => { if (procurementTab === 'invoices') fetchInvoices() }, [procurementTab, fetchInvoices])
+  React.useEffect(() => { if (procurementTab === 'board') fetchBoardData() }, [procurementTab, fetchBoardData])
+
+  const boardThreads = React.useMemo<ProcurementThread[]>(() => {
+    return purchaseRequests
+      .filter(pr => pr.status !== 'REJECTED')
+      .map(pr => {
+        const po = purchaseOrders.find(p => p.purchase_request_id === pr.id) || null
+        const threadInvoices = po ? invoices.filter(inv => inv.po_id === po.id) : []
+        const invoice = threadInvoices.length > 0
+          ? threadInvoices.reduce((latest, curr) => (new Date(curr.created_at).getTime() > new Date(latest.created_at).getTime() ? curr : latest))
+          : null
+        const grvCount = po ? boardGrvs.filter(g => g.po_id === po.id).length : 0
+        const stage = deriveStage(pr, po, grvCount, invoice)
+        const stageSince = deriveStageSince(pr, po, invoice, stage)
+        return { pr, po, grvCount, invoice, stage, stageSince }
+      })
+  }, [purchaseRequests, purchaseOrders, invoices, boardGrvs])
 
   return (
     <div className="h-full flex flex-col">
@@ -4065,6 +4221,10 @@ function SupplierManagement({ suppliers, loading, onRefresh, currentRole }: { su
           className={`px-4 py-2.5 text-sm font-semibold border-b-2 transition-colors -mb-px ${procurementTab === 'invoices' ? 'border-green-500 text-green-700' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
           Invoices
         </button>
+        <button onClick={() => setProcurementTab('board')}
+          className={`px-4 py-2.5 text-sm font-semibold border-b-2 transition-colors -mb-px ${procurementTab === 'board' ? 'border-green-500 text-green-700' : 'border-transparent text-gray-500 hover:text-gray-700'}`}>
+          Board
+        </button>
       </div>
 
       {procurementTab === 'suppliers'
@@ -4073,7 +4233,12 @@ function SupplierManagement({ suppliers, loading, onRefresh, currentRole }: { su
         ? <PurchaseRequestsTab purchaseRequests={purchaseRequests} loading={prsLoading} onRefresh={fetchPRs} currentRole={currentRole} suppliers={suppliers} activeEntity={activeEntity} />
         : procurementTab === 'purchase_orders'
         ? <PurchaseOrdersTab purchaseOrders={purchaseOrders} loading={posLoading} onRefresh={fetchPOs} currentRole={currentRole} activeEntity={activeEntity} />
-        : <InvoicesTab invoices={invoices} loading={invoicesLoading} onRefresh={fetchInvoices} currentRole={currentRole} />}
+        : procurementTab === 'invoices'
+        ? <InvoicesTab invoices={invoices} loading={invoicesLoading} onRefresh={fetchInvoices} currentRole={currentRole} />
+        : <ProcurementBoard threads={boardThreads} loading={boardLoading} activeEntity={activeEntity} onSelectPR={setBoardSelectedPR} onSelectPO={setBoardSelectedPO} />}
+
+      {boardSelectedPR && <PurchaseRequestDetailModal pr={boardSelectedPR} onClose={() => setBoardSelectedPR(null)} onUpdated={() => { setBoardSelectedPR(null); fetchBoardData() }} currentRole={currentRole} activeEntity={activeEntity} />}
+      {boardSelectedPO && <PODetailModal po={boardSelectedPO} onClose={() => setBoardSelectedPO(null)} onUpdated={() => { setBoardSelectedPO(null); fetchBoardData() }} currentRole={currentRole} activeEntity={activeEntity} />}
     </div>
   )
 }
@@ -4571,6 +4736,18 @@ function PurchaseRequestDetailModal({ pr, onClose, onUpdated, currentRole, activ
         user_id: currentRole,
       }).then(({ error: logErr }) => { if (logErr) console.error('Activity log error:', logErr.message) })
 
+      // Procurement kanban — stage transition PR_PENDING → PO_ISSUED
+      logProcurementStageChange({
+        prId: pr.id,
+        prNumber: pr.pr_number,
+        operatingEntity: (pr.operating_entity === 'ERHA_FC' || pr.operating_entity === 'ERHA_SS') ? pr.operating_entity : activeEntity,
+        fromStage: 'PR_PENDING',
+        toStage: 'PO_ISSUED',
+        durationSeconds: Math.floor((Date.now() - new Date(pr.created_at).getTime()) / 1000),
+        actorRole: currentRole,
+        poNumber: po.po_number,
+      })
+
       onUpdated()
     } catch (e: any) { alert('Error: ' + e.message); setProcessing(false) }
   }
@@ -5043,6 +5220,28 @@ function PODetailModal({ po, onClose, onUpdated, currentRole, activeEntity }: { 
         user_id: currentRole,
       }).then(({ error: logErr }) => { if (logErr) console.error('Activity log error:', logErr.message) })
 
+      // Procurement kanban — stage transition → COMPLETE.
+      // Heuristic: infer old stage from current po.status. No invoice-match
+      // handler exists yet, so we don't see INVOICE_MATCHED transitions; the
+      // VALID_TRANSITIONS guard will warn whenever COMPLETE is reached
+      // directly from FULLY_RECEIVED, which is the current observed path.
+      if (po.purchase_request_id) {
+        const oldStage: StageId = po.status === 'FULLY_RECEIVED' ? 'FULLY_RECEIVED'
+          : po.status === 'PARTIALLY_RECEIVED' ? 'PARTIAL_DELIVERY'
+          : po.status === 'ISSUED' ? 'PO_ISSUED'
+          : 'INVOICE_MATCHED'
+        logProcurementStageChange({
+          prId: po.purchase_request_id,
+          prNumber: po.purchase_requests?.pr_number || null,
+          operatingEntity: (po.operating_entity === 'ERHA_FC' || po.operating_entity === 'ERHA_SS') ? po.operating_entity : activeEntity,
+          fromStage: oldStage,
+          toStage: 'COMPLETE',
+          durationSeconds: Math.floor((Date.now() - new Date(po.updated_at || po.created_at).getTime()) / 1000),
+          actorRole: currentRole,
+          poNumber: po.po_number,
+        })
+      }
+
       onUpdated()
     } catch (e: any) { alert('Error: ' + e.message); setProcessing(false) }
   }
@@ -5338,6 +5537,23 @@ function LogDeliveryModal({ po, onClose, onSaved, currentRole, activeEntity }: {
       const newStatus = allFullyReceived ? 'FULLY_RECEIVED' : someReceived ? 'PARTIALLY_RECEIVED' : po.status
       if (newStatus !== po.status) {
         await supabase.from('purchase_orders').update({ status: newStatus }).eq('id', po.id)
+
+        // Procurement kanban — stage transition on PO-status change
+        const oldStage: StageId | null = po.status === 'ISSUED' ? 'PO_ISSUED' : po.status === 'PARTIALLY_RECEIVED' ? 'PARTIAL_DELIVERY' : po.status === 'FULLY_RECEIVED' ? 'FULLY_RECEIVED' : null
+        const newStage: StageId | null = newStatus === 'PARTIALLY_RECEIVED' ? 'PARTIAL_DELIVERY' : newStatus === 'FULLY_RECEIVED' ? 'FULLY_RECEIVED' : newStatus === 'ISSUED' ? 'PO_ISSUED' : null
+        if (oldStage && newStage && oldStage !== newStage && po.purchase_request_id) {
+          logProcurementStageChange({
+            prId: po.purchase_request_id,
+            prNumber: po.purchase_requests?.pr_number || null,
+            operatingEntity: (po.operating_entity === 'ERHA_FC' || po.operating_entity === 'ERHA_SS') ? po.operating_entity : activeEntity,
+            fromStage: oldStage,
+            toStage: newStage,
+            durationSeconds: Math.floor((Date.now() - new Date(po.updated_at || po.created_at).getTime()) / 1000),
+            actorRole: currentRole,
+            poNumber: po.po_number,
+            grvId: grv.id,
+          })
+        }
       }
 
       // 5. Stock matching — fuzzy match on item_name
@@ -5926,6 +6142,96 @@ const DROPDOWN_TYPES: { key: string; label: string }[] = [
   { key: 'departments', label: 'Departments' },
   { key: 'action_types', label: 'Action Types' },
 ]
+
+// PROCUREMENT BOARD — kanban across PR → PO → GRV → Invoice threads
+
+function ProcurementBoard({ threads, loading, activeEntity, onSelectPR, onSelectPO }: {
+  threads: ProcurementThread[]
+  loading: boolean
+  activeEntity: OperatingEntity
+  onSelectPR: (pr: PurchaseRequest) => void
+  onSelectPO: (po: PurchaseOrder) => void
+}) {
+  const byStage = React.useMemo(() => {
+    const m = Object.fromEntries(PROCUREMENT_STAGES.map(s => [s.id, [] as ProcurementThread[]])) as Record<StageId, ProcurementThread[]>
+    threads.forEach(t => m[t.stage].push(t))
+    return m
+  }, [threads])
+
+  if (loading) return <div className="flex items-center justify-center h-64 gap-3 text-gray-400"><div className="w-5 h-5 border-2 border-gray-300 border-t-green-500 rounded-full animate-spin" /><span>Loading board...</span></div>
+
+  return (
+    <div className="flex-1 flex flex-col min-h-0">
+      <div className="mb-4">
+        <div className="flex items-center gap-2 mb-1">
+          <h2 className="text-lg font-bold text-gray-900">Procurement Board</h2>
+          <span className="inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-semibold bg-blue-100 text-blue-700">{threads.length} active threads</span>
+        </div>
+        <p className="text-sm text-gray-500">Live view of every procurement thread across stages. Click a card to open the relevant detail modal. Rejected PRs are hidden.</p>
+      </div>
+      <div className="flex-1 flex gap-3 overflow-x-auto pb-2">
+        {PROCUREMENT_STAGES.map(stage => {
+          const colour = STAGE_COLOUR_CLASSES[stage.colour]
+          const count = byStage[stage.id].length
+          return (
+            <div key={stage.id} className="flex-shrink-0 w-72 flex flex-col">
+              <div className={`mb-3 px-3 py-2.5 rounded-lg border ${colour.header}`}>
+                <div className="flex items-center justify-between">
+                  <span className="text-sm font-semibold text-gray-800">{stage.label}</span>
+                  <span className={`inline-flex items-center min-w-[1.5rem] justify-center px-2 py-0.5 rounded-full text-xs font-bold ${colour.countPill}`}>{count}</span>
+                </div>
+              </div>
+              <div className="flex-1 overflow-y-auto space-y-2 pr-1">
+                {count === 0 ? (
+                  <div className="text-xs text-gray-400 italic text-center py-6 border border-dashed border-gray-200 rounded-lg">No threads</div>
+                ) : (
+                  byStage[stage.id].map(thread => (
+                    <ProcurementCard key={thread.pr.id} thread={thread} activeEntity={activeEntity} accentClass={colour.cardAccent} onSelect={() => {
+                      if (thread.po) onSelectPO(thread.po)
+                      else onSelectPR(thread.pr)
+                    }} />
+                  ))
+                )}
+              </div>
+            </div>
+          )
+        })}
+      </div>
+    </div>
+  )
+}
+
+function ProcurementCard({ thread, activeEntity, accentClass, onSelect }: {
+  thread: ProcurementThread
+  activeEntity: OperatingEntity
+  accentClass: string
+  onSelect: () => void
+}) {
+  const days = daysSince(thread.stageSince)
+  const entityBadge = activeEntity === 'ERHA_FC'
+    ? { label: 'F&C', cls: 'bg-blue-100 text-blue-700' }
+    : { label: 'S&S', cls: 'bg-amber-100 text-amber-700' }
+  const value = thread.po?.total_value ?? thread.pr.total_estimated_value ?? 0
+
+  return (
+    <button onClick={onSelect} className={`w-full text-left bg-white rounded-lg border border-gray-200 border-l-4 ${accentClass} p-3 hover:shadow-md hover:border-gray-300 transition-all`}>
+      <div className="flex items-start justify-between gap-2 mb-1.5">
+        <span className="font-mono text-xs font-semibold text-gray-900">{thread.pr.pr_number || '—'}</span>
+        <span className={`inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold ${entityBadge.cls}`}>{entityBadge.label}</span>
+      </div>
+      {thread.po && <div className="text-[11px] text-gray-500 font-mono mb-1">{thread.po.po_number}</div>}
+      <div className="text-xs text-gray-700 font-medium truncate mb-0.5">{thread.pr.suppliers?.company_name || '—'}</div>
+      <div className="text-[11px] text-gray-500 font-mono mb-2">Job {thread.pr.jobs?.job_number || '—'}</div>
+      <div className="flex items-center justify-between text-[11px]">
+        <span className="text-gray-600 font-medium">R {value.toLocaleString('en-ZA', { minimumFractionDigits: 0, maximumFractionDigits: 0 })}</span>
+        <div className="flex items-center gap-1.5">
+          {thread.grvCount > 0 && <span className="inline-flex items-center px-1.5 py-0.5 rounded text-[10px] font-semibold bg-gray-100 text-gray-600">{thread.grvCount} GRV</span>}
+          <span className="text-gray-400">{days}d</span>
+        </div>
+      </div>
+    </button>
+  )
+}
 
 function SettingsPage() {
   const [settingsTab, setSettingsTab] = React.useState<'dropdowns'>('dropdowns')
