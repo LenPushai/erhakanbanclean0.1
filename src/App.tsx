@@ -1751,7 +1751,10 @@ function JobDetailPanel({ job, parentJobNumber, activeEntity, onClose, onUpdate 
 
 function CreateDirectJobModal({ activeEntity, onClose, onCreated }: { activeEntity: OperatingEntity; onClose: () => void; onCreated: () => void }) {
   const [saving, setSaving] = React.useState(false)
-  const [clientName, setClientName] = React.useState('')
+  const [clients, setClients] = React.useState<any[]>([])
+  const [selectedClientId, setSelectedClientId] = React.useState('')
+  const [showNewClient, setShowNewClient] = React.useState(false)
+  const [newClientName, setNewClientName] = React.useState('')
   const [description, setDescription] = React.useState('')
   const [siteReq, setSiteReq] = React.useState('')
   const [workType, setWorkType] = React.useState<'contract' | 'quoted'>('contract')
@@ -1776,6 +1779,12 @@ function CreateDirectJobModal({ activeEntity, onClose, onCreated }: { activeEnti
     setSelectedActions(new Set())
   }, [])
 
+  React.useEffect(() => {
+    supabase.from('clients').select('id, company_name').order('company_name').then(({ data }) => {
+      if (data) setClients(data)
+    })
+  }, [])
+
   const toggleDirectAction = (label: string) => setSelectedActions(prev => {
     const next = new Set(prev)
     if (next.has(label)) next.delete(label); else next.add(label)
@@ -1786,13 +1795,30 @@ function CreateDirectJobModal({ activeEntity, onClose, onCreated }: { activeEnti
   const updateLineItem = (i: number, field: string, val: any) => setLineItems(li => li.map((item, idx) => idx === i ? { ...item, [field]: val } : item))
 
   const handleCreate = async () => {
-    if (!clientName.trim()) { alert('Client name is required'); return }
+    if (!selectedClientId && !showNewClient) { alert('Please select a client'); return }
+    if (showNewClient && !newClientName.trim()) { alert('Please enter the new client name'); return }
     setSaving(true)
     try {
+      let resolvedClientId: string | null = null
+      let resolvedClientName: string
+      if (showNewClient && newClientName.trim()) {
+        const { data: nc, error: ce } = await supabase
+          .from('clients')
+          .insert({ company_name: newClientName.trim() })
+          .select('id, company_name')
+          .single()
+        if (ce) throw ce
+        resolvedClientId = nc?.id || null
+        resolvedClientName = nc?.company_name || newClientName.trim()
+      } else {
+        const match = clients.find(c => c.id === selectedClientId)
+        resolvedClientId = match?.id || null
+        resolvedClientName = match?.company_name || ''
+      }
       const { data: job, error } = await supabase.from('jobs').insert({
         operating_entity: activeEntity,
         description: description.trim() || null,
-        client_name: clientName.trim(), site_req: siteReq.trim() || null,
+        client_name: resolvedClientName, site_req: siteReq.trim() || null,
         is_contract_work: workType === 'contract', is_quoted_work: workType === 'quoted',
         priority, compiled_by: compiledBy.trim() || null, is_emergency: isEmergency,
         assigned_employee_name: assignedEmployee.trim() || null,
@@ -1820,7 +1846,7 @@ function CreateDirectJobModal({ activeEntity, onClose, onCreated }: { activeEnti
       // LOG: no_card_job_created ML event (direct job starts without a printed card)
       await supabase.from('import_events').insert({
         source: 'no_card_job_created',
-        file_name: JSON.stringify({ job_id: job.id, job_type: 'DIRECT', created_at: new Date().toISOString() }),
+        file_name: JSON.stringify({ job_id: job.id, job_type: 'DIRECT', client_id: resolvedClientId, created_at: new Date().toISOString() }),
         rows_attempted: 1, rows_imported: 1, rows_failed: 0,
         imported_at: new Date().toISOString(), imported_by: 'system',
       }).then(({ error: logErr }) => { if (logErr) console.error('Event log error:', logErr.message) })
@@ -1842,7 +1868,23 @@ function CreateDirectJobModal({ activeEntity, onClose, onCreated }: { activeEnti
         </div>
         <div className="overflow-y-auto flex-1 p-6 space-y-5">
           <div className="grid grid-cols-3 gap-4">
-            <div><label className="block text-xs font-medium text-gray-600 mb-1">Client *</label><input value={clientName} onChange={e => setClientName(e.target.value)} placeholder="Client name..." className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" /></div>
+            <div>
+              <label className="block text-xs font-medium text-gray-600 mb-1">Client *</label>
+              {!showNewClient ? (
+                <div className="flex gap-1">
+                  <select value={selectedClientId} onChange={e => setSelectedClientId(e.target.value)} className="flex-1 min-w-0 border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500">
+                    <option value="">Select client...</option>
+                    {clients.map(c => <option key={c.id} value={c.id}>{c.company_name}</option>)}
+                  </select>
+                  <button type="button" onClick={() => setShowNewClient(true)} title="Add new client" className="px-2 py-2 text-xs bg-gray-100 hover:bg-gray-200 rounded-lg text-gray-600 whitespace-nowrap font-medium shrink-0">+ New</button>
+                </div>
+              ) : (
+                <div className="flex gap-1">
+                  <input type="text" value={newClientName} onChange={e => setNewClientName(e.target.value)} placeholder="Company name" autoFocus className="flex-1 min-w-0 border border-indigo-400 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" />
+                  <button type="button" onClick={() => { setShowNewClient(false); setNewClientName('') }} title="Cancel" className="px-2 py-2 text-xs bg-gray-100 hover:bg-gray-200 rounded-lg text-gray-600 shrink-0">Cancel</button>
+                </div>
+              )}
+            </div>
             <div><label className="block text-xs font-medium text-gray-600 mb-1">Site Req / PO</label><input value={siteReq} onChange={e => setSiteReq(e.target.value)} placeholder="e.g. PO-12345" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" /></div>
             <div><label className="block text-xs font-medium text-gray-600 mb-1">Due Date</label><input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" /></div>
           </div>
