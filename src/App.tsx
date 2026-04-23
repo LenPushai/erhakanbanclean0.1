@@ -3331,7 +3331,7 @@ function JobExecutionPanel({ job, onClose, onStatusChange, onRefresh }: {
   job: any; onClose: () => void; onStatusChange: (id: string, status: string) => void; onRefresh: () => void
 }) {
   const { activeEntity } = useEntity()
-  const [activeTab, setActiveTab] = React.useState<'workers'|'time'|'qc'|'materials'|'reconcile'|'line_items'>('workers')
+  const [activeTab, setActiveTab] = React.useState<'workers'|'time'|'qc'|'materials'|'reconcile'|'line_items'>('line_items')
   const [workshopStatus, setWorkshopStatus] = React.useState(job.workshop_status || 'NOT_STARTED')
   const [notes, setNotes] = React.useState(job.workshop_notes || '')
   const [savingNotes, setSavingNotes] = React.useState(false)
@@ -3578,11 +3578,11 @@ function JobExecutionPanel({ job, onClose, onStatusChange, onRefresh }: {
   }
 
   const tabs = [
+    { key: 'line_items', label: 'Line Items' },
     { key: 'workers',    label: 'Workers'    },
     { key: 'time',       label: 'Time'       },
     { key: 'qc',         label: 'QC'         },
     { key: 'materials',  label: 'Materials'  },
-    { key: 'line_items', label: 'Line Items' },
     { key: 'reconcile',  label: 'Reconcile'  },
   ]
 
