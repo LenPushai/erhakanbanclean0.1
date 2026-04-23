@@ -9,10 +9,10 @@ const FROM_EMAIL = 'ERHA Operations <onboarding@resend.dev>'
 const RECIPIENTS = {
   len: 'lenklopper03@gmail.com',
   hendrik: 'hendrik@erha.co.za',
-  juanic: 'pa@erha.co.za',
+  jeanic: 'pa@erha.co.za',
 }
 
-const ALL = [RECIPIENTS.len, RECIPIENTS.hendrik, RECIPIENTS.juanic]
+const ALL = [RECIPIENTS.len, RECIPIENTS.hendrik, RECIPIENTS.jeanic]
 
 async function sendEmail(to: string[], subject: string, html: string) {
   try {

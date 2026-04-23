@@ -324,6 +324,23 @@ const ITEM_TYPES = ['MATERIAL', 'LABOUR', 'TRANSPORT', 'EQUIPMENT', 'SUBCONTRACT
 const ROLE_STORAGE_KEY = 'erha_current_role'
 const VALID_ROLES = ['HENDRIK', 'JUANIC', 'SONJA', 'CHARLES', 'DEWALD', 'JACO', 'ELSJE', 'ALWYN', 'CHERISE', 'ZACH'] as const
 
+// Display-only name lookup. The uppercase VALID_ROLES keys remain the source
+// of truth for role gates, localStorage, and activity_log writes — this map is
+// consulted purely when rendering the role to the user. Do not use for any
+// equality check or as a persistence value.
+const ROLE_DISPLAY_NAMES: Record<string, string> = {
+  HENDRIK: 'Hendrik',
+  JUANIC: 'Jeanic',
+  SONJA: 'Sonja',
+  CHARLES: 'Charles',
+  DEWALD: 'Dewald',
+  JACO: 'Jaco',
+  ELSJE: 'Elsje',
+  ALWYN: 'Alwyn',
+  CHERISE: 'Cherise',
+  ZACH: 'Zach',
+}
+
 function readStoredRole(): string | null {
   try {
     const raw = localStorage.getItem(ROLE_STORAGE_KEY)
@@ -495,7 +512,7 @@ function RoleSelector({ onSelect }: any) {
                 <span className={`text-${role.color}-600 font-bold text-sm`}>{role.initials}</span>
               </div>
               <div className="text-left">
-                <p className="font-semibold text-gray-900">{role.label}</p>
+                <p className="font-semibold text-gray-900">{ROLE_DISPLAY_NAMES[role.key] || role.key}</p>
               </div>
             </button>
           ))}
@@ -945,7 +962,7 @@ table { border-collapse:collapse; width:100%; }
               </button>
             </>)}
             <div className="flex items-center gap-1.5 text-xs text-gray-500 pr-1 border-r border-gray-200">
-              <span className="pr-2">Role: <span className="font-semibold text-gray-700">{currentRole}</span></span>
+              <span className="pr-2">Role: <span className="font-semibold text-gray-700">{ROLE_DISPLAY_NAMES[currentRole] || currentRole}</span></span>
               <button onClick={() => setCurrentRole(null)} className="text-blue-600 hover:underline font-medium pr-1">Change</button>
             </div>
             <EntitySwitcher currentRole={currentRole} />
