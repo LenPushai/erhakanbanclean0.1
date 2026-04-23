@@ -1268,6 +1268,9 @@ function JobBoard({ jobs, loading, onCardClick, selectedId, onStatusChange, onPr
                     {job.due_date && (
                       <p className="text-xs text-gray-400 mt-0.5">Due: {new Date(job.due_date).toLocaleDateString('en-ZA')}</p>
                     )}
+                    {job.client_rfq_number && (
+                      <p className="text-xs text-gray-400 mt-0.5 truncate">RFQ: {job.client_rfq_number}</p>
+                    )}
                     {(nextActions.length > 0 || canPrint) && (
                       <div className="flex gap-1 mt-2" onClick={e => e.stopPropagation()}>
                         {nextActions.map(action => (
@@ -1518,7 +1521,7 @@ function JobDetailPanel({ job, parentJobNumber, activeEntity, onClose, onUpdate 
         </div>
         <div className="grid grid-cols-2 gap-4 text-sm">
           {job.site_req && <div><span className="text-xs text-gray-500 block">Site Req / PO</span><span className="font-medium">{job.site_req}</span></div>}
-          {job.entry_type !== 'DIRECT' && (job.client_rfq_number || job.rfq_no) && <div><span className="text-xs text-gray-500 block">Client RFQ No</span><span className="font-medium text-blue-600">{job.client_rfq_number || job.rfq_no}</span></div>}
+          {(job.client_rfq_number || job.rfq_no) && <div><span className="text-xs text-gray-500 block">Client RFQ No</span><span className="font-medium text-blue-600">{job.client_rfq_number || job.rfq_no}</span></div>}
           {job.due_date && <div><span className="text-xs text-gray-500 block">Due Date</span><span className="font-medium">{new Date(job.due_date).toLocaleDateString('en-ZA')}</span></div>}
           {job.created_at && <div><span className="text-xs text-gray-500 block">Created</span><span className="font-medium">{new Date(job.created_at).toLocaleDateString('en-ZA')}</span></div>}
           {job.parent_job_id && <div><span className="text-xs text-gray-500 block">Parent Job</span><span className="font-medium text-purple-600">{parentJobNumber || job.parent_job_id.slice(0,8)}</span></div>}
@@ -1768,6 +1771,7 @@ function CreateDirectJobModal({ activeEntity, onClose, onCreated }: { activeEnti
   const [dueDate, setDueDate] = React.useState('')
   const [hasDrawing, setHasDrawing] = React.useState(false)
   const [drawingNumber, setDrawingNumber] = React.useState('')
+  const [clientRfqNumber, setClientRfqNumber] = React.useState('')
   const [directAttachments, setDirectAttachments] = React.useState<Array<{name:string;path:string;size:number}>>( [])
   const [uploadingDirect, setUploadingDirect] = React.useState(false)
   const actionTypeOptions = useDropdownOptions('action_types', ACTIONS_LIST_FALLBACK)
@@ -1826,7 +1830,7 @@ function CreateDirectJobModal({ activeEntity, onClose, onCreated }: { activeEnti
         notes: notes.trim() || null, date_received: dateReceived, due_date: dueDate || null,
         has_drawing: hasDrawing,
         drawing_number: drawingNumber.trim() || null,
-        client_rfq_number: null,
+        client_rfq_number: clientRfqNumber.trim() || null,
         ...buildActionFields(selectedActions),
         entry_type: 'DIRECT', status: 'PENDING', workshop_status: 'NOT_STARTED',
         has_info_for_quote: false,
@@ -1846,7 +1850,7 @@ function CreateDirectJobModal({ activeEntity, onClose, onCreated }: { activeEnti
       // LOG: no_card_job_created ML event (direct job starts without a printed card)
       await supabase.from('import_events').insert({
         source: 'no_card_job_created',
-        file_name: JSON.stringify({ job_id: job.id, job_type: 'DIRECT', client_id: resolvedClientId, created_at: new Date().toISOString() }),
+        file_name: JSON.stringify({ job_id: job.id, job_type: 'DIRECT', client_id: resolvedClientId, client_rfq_number: clientRfqNumber.trim() || null, created_at: new Date().toISOString() }),
         rows_attempted: 1, rows_imported: 1, rows_failed: 0,
         imported_at: new Date().toISOString(), imported_by: 'system',
       }).then(({ error: logErr }) => { if (logErr) console.error('Event log error:', logErr.message) })
@@ -1938,7 +1942,10 @@ function CreateDirectJobModal({ activeEntity, onClose, onCreated }: { activeEnti
             </div>
           </div>
           <div className="flex items-center gap-2"><input type="checkbox" id="djDrawing" checked={hasDrawing} onChange={e => setHasDrawing(e.target.checked)} className="w-4 h-4" /><label htmlFor="djDrawing" className="text-sm text-gray-700">Drawing / Sketches Attached</label></div>
-          <div><label className="block text-xs font-medium text-gray-600 mb-1">Drawing Number</label><input value={drawingNumber} onChange={e => setDrawingNumber(e.target.value)} placeholder="DWG-001" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" /></div>
+          <div className="grid grid-cols-2 gap-4">
+            <div><label className="block text-xs font-medium text-gray-600 mb-1">Client RFQ Ref</label><input value={clientRfqNumber} onChange={e => setClientRfqNumber(e.target.value)} placeholder="Customer-supplied RFQ / reference (optional)" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" /></div>
+            <div><label className="block text-xs font-medium text-gray-600 mb-1">Drawing Number</label><input value={drawingNumber} onChange={e => setDrawingNumber(e.target.value)} placeholder="DWG-001" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" /></div>
+          </div>
           <div>
             <label className="block text-xs font-medium text-gray-600 mb-2">Attachments</label>
             <div className="border-2 border-dashed border-gray-200 rounded-lg p-4 text-center">
