@@ -512,7 +512,7 @@ function RoleSelector({ onSelect }: any) {
                 <span className={`text-${role.color}-600 font-bold text-sm`}>{role.initials}</span>
               </div>
               <div className="text-left">
-                <p className="font-semibold text-gray-900">{ROLE_DISPLAY_NAMES[role.key] || role.key}</p>
+                <p className="font-semibold text-gray-900">{role.label}</p>
               </div>
             </button>
           ))}
