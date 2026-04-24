@@ -2661,9 +2661,9 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, activeEntity, onJobCreat
 
                 <div><label className="text-xs font-medium text-gray-600 block mb-1">Order Date</label><input type="date" value={orderDate} onChange={e => setOrderDate(e.target.value)} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400" /></div>
               </div>
-        {(['NEW','PENDING','QUOTED','SENT_TO_CUSTOMER'].includes(status)) && !rfq.job_number && (
+        {(['PENDING','QUOTED','SENT_TO_CUSTOMER'].includes(status)) && !rfq.job_number && (
           <button onClick={async () => {
-            if (!confirm('FAST TRACK: This will create a Job Card immediately without waiting for a PO number. The PO can be added later. Continue?')) return
+            if (!confirm('FAST TRACK: This will create a Job Card immediately without waiting for a PO number. The RFQ will stay in its current status until the quote is sent and the PO is captured. Continue?')) return
             setSaving(true)
             try {
               // GUARD: Re-check from DB that no job_number is already locked to this RFQ
@@ -2713,10 +2713,13 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, activeEntity, onJobCreat
               if (jobError) throw jobError
               const newJobNumber = jobData.job_number
 
-              // LOCK: Store job_number on RFQ record immediately + move to Order Won (ACCEPTED)
+              // LOCK: Store job_number on RFQ record immediately. Status is
+              // intentionally NOT advanced — Fast Track creates the job
+              // without prejudicing the RFQ lifecycle. Normal flow (Quoted
+              // -> Sent to Customer -> Order Won on PO capture via
+              // handleSaveOrder) continues to drive status transitions.
               const { data: updatedRfq, error: lockError } = await supabase.from('rfqs').update({
                 job_number: newJobNumber,
-                status: 'ACCEPTED',
               }).eq('id', rfq.id).select('*, clients(company_name)').single()
               if (lockError) console.error('Failed to lock job_number on RFQ:', lockError.message)
               else onUpdate(updatedRfq)
