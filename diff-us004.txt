@@ -1,0 +1,325 @@
+diff --git a/src/App.tsx b/src/App.tsx
+index 6344459..477995a 100644
+--- a/src/App.tsx
++++ b/src/App.tsx
+@@ -191,6 +191,7 @@ interface Job {
+   is_child_job?: boolean | null
+   parent_job_id?: string | null
+   is_contract_work?: boolean | null
++  is_no_card?: boolean
+   date_received?: string | null
+   site_req?: string | null
+   contact_person?: string | null
+@@ -1247,7 +1248,7 @@ function JobBoard({ jobs, loading, onCardClick, selectedId, onStatusChange, onPr
+                   PRINTED:        [],
+                 }
+                 const nextActions = nextMap[job.status] || []
+-                const canPrint = job.status === 'READY_TO_PRINT' || job.status === 'PRINTED'
++                const canPrint = (job.status === 'READY_TO_PRINT' || job.status === 'PRINTED') && !job.is_no_card
+                 return (
+                   <React.Fragment key={job.id}><div onClick={() => onCardClick(job)}
+                     className={`bg-white rounded-lg shadow-sm border-2 p-3 cursor-pointer hover:shadow-md transition-all ${job.id === selectedId ? 'border-green-400 shadow-md' : 'border-transparent hover:border-green-300'}`}>
+@@ -1260,7 +1261,7 @@ function JobBoard({ jobs, loading, onCardClick, selectedId, onStatusChange, onPr
+                         {job.entry_type === 'CHILD' && <span className="text-xs font-bold px-1.5 py-0.5 bg-indigo-100 text-indigo-600 rounded">↳</span>}
+                         {job.is_parent && <span className="text-xs font-bold px-1.5 py-0.5 bg-purple-100 text-purple-600 rounded">P</span>}
+                         {job.is_emergency && <span className="text-xs font-bold px-1.5 py-0.5 bg-red-100 text-red-600 rounded">!</span>}
+-                        {job.status !== 'PRINTED' && <span className="text-xs font-bold px-1.5 py-0.5 bg-rose-50 text-rose-500 rounded border border-rose-200">No Card</span>}
++                        {!!job.is_no_card && <span className="text-xs font-bold px-1.5 py-0.5 bg-rose-50 text-rose-500 rounded border border-rose-200">No Card</span>}
+                       </div>
+                     </div>
+                     <p className="text-sm font-medium text-gray-800 mt-1 line-clamp-2">{job.description || job.client_name || 'No description'}</p>
+@@ -1296,14 +1297,14 @@ function JobBoard({ jobs, loading, onCardClick, selectedId, onStatusChange, onPr
+                   </div>
+                   {job.is_parent && isExpanded && children.map(child => {
+                     const cNext = (({"PENDING":[{label:"Review",next:"IN_REVIEW",color:"bg-blue-500 hover:bg-blue-600"}],"IN_REVIEW":[{label:"Ready",next:"READY_TO_PRINT",color:"bg-amber-500 hover:bg-amber-600"}],"READY_TO_PRINT":[{label:"Back",next:"IN_REVIEW",color:"bg-gray-400 hover:bg-gray-500"}],"PRINTED":[]} as Record<string,{label:string;next:string;color:string}[]>)[child.status] || [])
+-                    const cPrint = child.status === "READY_TO_PRINT" || child.status === "PRINTED"
++                    const cPrint = (child.status === "READY_TO_PRINT" || child.status === "PRINTED") && !child.is_no_card
+                     return (
+                       <div key={child.id} className="ml-3 mt-1 border-l-2 border-purple-200 pl-2">
+                         <div onClick={() => onCardClick(child)} className={`bg-white rounded-lg shadow-sm border-2 p-2 cursor-pointer transition-all ${child.id === selectedId ? "border-green-400" : "border-transparent hover:border-purple-300"}`}>
+                           <div className="flex items-center justify-between gap-1">
+                             <p className="text-xs font-bold text-purple-600">{child.job_number}</p>
+                             <div className="flex items-center gap-1">
+-                              {child.status !== 'PRINTED' && <span className="text-xs font-bold px-1.5 py-0.5 bg-rose-50 text-rose-500 rounded border border-rose-200">No Card</span>}
++                              {!!child.is_no_card && <span className="text-xs font-bold px-1.5 py-0.5 bg-rose-50 text-rose-500 rounded border border-rose-200">No Card</span>}
+                               <span className="text-xs font-bold px-1.5 py-0.5 bg-indigo-100 text-indigo-600 rounded">↳</span>
+                             </div>
+                           </div>
+@@ -1346,6 +1347,7 @@ function JobDetailPanel({ job, parentJobNumber, activeEntity, onClose, onUpdate
+   const [editClientRfqNumber, setEditClientRfqNumber] = React.useState(job.client_rfq_number || '')
+   const [editDueDate, setEditDueDate] = React.useState((job.due_date || '').slice(0, 10))
+   const [editDescription, setEditDescription] = React.useState(job.description || '')
++  const [editNoCard, setEditNoCard] = React.useState((job as any).is_no_card || false)
+   const [msg, setMsg] = React.useState('')
+   const [spawning, setSpawning] = React.useState<string | null>(null)
+   const [spawnTarget, setSpawnTarget] = React.useState<any | null>(null)
+@@ -1405,6 +1407,7 @@ function JobDetailPanel({ job, parentJobNumber, activeEntity, onClose, onUpdate
+         .eq('operating_entity', activeEntity)
+       const suffix = String.fromCharCode(65 + (existingChildren?.length || 0)) // A, B, C...
+       const childJobNumber = (job.job_number || 'JOB') + '-' + suffix
++      const isNoCard = false
+       const { data: childJob, error: jobError } = await supabase.from('jobs').insert({
+         operating_entity: activeEntity,
+         parent_job_id: job.id,
+@@ -1417,7 +1420,7 @@ function JobDetailPanel({ job, parentJobNumber, activeEntity, onClose, onUpdate
+         due_date: job.due_date || null,
+         priority: job.priority || 'NORMAL',
+         entry_type: 'CHILD',
+-        status: 'PENDING',
++        status: isNoCard ? 'PRINTED' : 'PENDING',
+         workshop_status: 'NOT_STARTED',
+         rfq_no: job.rfq_no || null,
+         client_rfq_number: job.client_rfq_number || null,
+@@ -1429,6 +1432,7 @@ function JobDetailPanel({ job, parentJobNumber, activeEntity, onClose, onUpdate
+         date_received: new Date().toISOString().split('T')[0],
+         ...buildActionFields(new Set()),
+         has_info_for_quote: false,
++        is_no_card: isNoCard,
+       }).select().single()
+       if (jobError) throw jobError
+       // Create line item for child job so it prints on the card
+@@ -1446,13 +1450,15 @@ function JobDetailPanel({ job, parentJobNumber, activeEntity, onClose, onUpdate
+         imported_at: new Date().toISOString(),
+         imported_by: 'system',
+       }).then(({ error: logErr }) => { if (logErr) console.error('Event log error:', logErr.message) })
+-      // LOG: no_card_job_created ML event (child job starts without a printed card)
+-      await supabase.from('import_events').insert({
+-        source: 'no_card_job_created',
+-        file_name: JSON.stringify({ job_id: childJob.id, job_type: 'CHILD', created_at: new Date().toISOString() }),
+-        rows_attempted: 1, rows_imported: 1, rows_failed: 0,
+-        imported_at: new Date().toISOString(), imported_by: 'system',
+-      }).then(({ error: logErr }) => { if (logErr) console.error('Event log error:', logErr.message) })
++      // LOG: no_card_job_created ML event (only fires when explicit No Card flag is set at creation)
++      if (isNoCard) {
++        await supabase.from('import_events').insert({
++          source: 'no_card_job_created',
++          file_name: JSON.stringify({ job_id: childJob.id, job_type: 'CHILD', created_at: new Date().toISOString() }),
++          rows_attempted: 1, rows_imported: 1, rows_failed: 0,
++          imported_at: new Date().toISOString(), imported_by: 'system',
++        }).then(({ error: logErr }) => { if (logErr) console.error('Event log error:', logErr.message) })
++      }
+       const { data: updatedItems } = await supabase
+         .from('job_line_items')
+         .select('*, child_job:jobs!child_job_id(job_number)')
+@@ -1482,6 +1488,7 @@ function JobDetailPanel({ job, parentJobNumber, activeEntity, onClose, onUpdate
+         client_rfq_number: job.client_rfq_number ?? null,
+         due_date: (job.due_date || '').slice(0, 10) || null,
+         description: job.description ?? null,
++        is_no_card: (job as any).is_no_card ?? false,
+       }
+       const after: Record<string, any> = {
+         status,
+@@ -1494,6 +1501,7 @@ function JobDetailPanel({ job, parentJobNumber, activeEntity, onClose, onUpdate
+         client_rfq_number: editClientRfqNumber.trim() || null,
+         due_date: editDueDate || null,
+         description: editDescription.trim() || null,
++        is_no_card: editNoCard,
+       }
+       const { data, error } = await supabase.from('jobs').update(after).eq('id', job.id).select().single()
+       if (error) throw error
+@@ -1552,6 +1560,7 @@ function JobDetailPanel({ job, parentJobNumber, activeEntity, onClose, onUpdate
+             </select>
+           </div>
+         </div>
++        <div className="flex items-center gap-2"><input type="checkbox" id="editNoCard" checked={editNoCard} onChange={e => setEditNoCard(e.target.checked)} className="w-4 h-4 text-rose-500" /><label htmlFor="editNoCard" className="text-sm font-medium text-rose-500">No Card (don't print job card)</label></div>
+         <div className="grid grid-cols-2 gap-4 text-sm">
+           <div><label className="text-xs text-gray-500 block mb-1">Site Req / PO</label><input type="text" value={editSiteReq} onChange={e => setEditSiteReq(e.target.value)} className="w-full border border-gray-300 rounded-md px-2 py-1 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-green-500" /></div>
+           <div><label className="text-xs text-gray-500 block mb-1">Client RFQ No</label><input type="text" value={editClientRfqNumber} onChange={e => setEditClientRfqNumber(e.target.value)} className="w-full border border-gray-300 rounded-md px-2 py-1 text-sm font-medium text-blue-600 focus:outline-none focus:ring-2 focus:ring-green-500" /></div>
+@@ -1795,6 +1804,7 @@ function CreateDirectJobModal({ activeEntity, onClose, onCreated }: { activeEnti
+   const [priority, setPriority] = React.useState('NORMAL')
+   const [compiledBy, setCompiledBy] = React.useState('')
+   const [isEmergency, setIsEmergency] = React.useState(false)
++  const [noCard, setNoCard] = React.useState(false)
+   const [assignedEmployee, setAssignedEmployee] = React.useState('')
+   const [assignedSupervisor, setAssignedSupervisor] = React.useState('')
+   const [notes, setNotes] = React.useState('')
+@@ -1863,8 +1873,9 @@ function CreateDirectJobModal({ activeEntity, onClose, onCreated }: { activeEnti
+         drawing_number: drawingNumber.trim() || null,
+         client_rfq_number: clientRfqNumber.trim() || null,
+         ...buildActionFields(selectedActions),
+-        entry_type: 'DIRECT', status: 'PENDING', workshop_status: 'NOT_STARTED',
++        entry_type: 'DIRECT', status: noCard ? 'PRINTED' : 'PENDING', workshop_status: 'NOT_STARTED',
+         has_info_for_quote: false,
++        is_no_card: noCard,
+       }).select().single()
+       if (error) throw error
+       const validItems = lineItems.filter(l => l.description.trim())
+@@ -1878,13 +1889,15 @@ function CreateDirectJobModal({ activeEntity, onClose, onCreated }: { activeEnti
+           }))
+         )
+       }
+-      // LOG: no_card_job_created ML event (direct job starts without a printed card)
+-      await supabase.from('import_events').insert({
+-        source: 'no_card_job_created',
+-        file_name: JSON.stringify({ job_id: job.id, job_type: 'DIRECT', client_id: resolvedClientId, client_rfq_number: clientRfqNumber.trim() || null, created_at: new Date().toISOString() }),
+-        rows_attempted: 1, rows_imported: 1, rows_failed: 0,
+-        imported_at: new Date().toISOString(), imported_by: 'system',
+-      }).then(({ error: logErr }) => { if (logErr) console.error('Event log error:', logErr.message) })
++      // LOG: no_card_job_created ML event (only fires when explicit No Card flag is set at creation)
++      if (noCard) {
++        await supabase.from('import_events').insert({
++          source: 'no_card_job_created',
++          file_name: JSON.stringify({ job_id: job.id, job_type: 'DIRECT', client_id: resolvedClientId, client_rfq_number: clientRfqNumber.trim() || null, created_at: new Date().toISOString() }),
++          rows_attempted: 1, rows_imported: 1, rows_failed: 0,
++          imported_at: new Date().toISOString(), imported_by: 'system',
++        }).then(({ error: logErr }) => { if (logErr) console.error('Event log error:', logErr.message) })
++      }
+       onCreated()
+       onClose()
+     } catch (err: any) { alert('Error: ' + err.message) }
+@@ -1934,6 +1947,7 @@ function CreateDirectJobModal({ activeEntity, onClose, onCreated }: { activeEnti
+             <div><label className="block text-xs font-medium text-gray-600 mb-1">Priority</label><select value={priority} onChange={e => setPriority(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"><option value="LOW">Low</option><option value="NORMAL">Normal</option><option value="HIGH">High</option><option value="URGENT">Urgent</option></select></div>
+             <div><label className="block text-xs font-medium text-gray-600 mb-1">Compiled By</label><input value={compiledBy} onChange={e => setCompiledBy(e.target.value)} placeholder="Name..." className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" /></div>
+             <div className="flex items-center gap-2 pb-2"><input type="checkbox" id="djEmergency" checked={isEmergency} onChange={e => setIsEmergency(e.target.checked)} className="w-4 h-4 text-red-600" /><label htmlFor="djEmergency" className="text-sm font-medium text-red-600">Emergency</label></div>
++            <div className="flex items-center gap-2 pb-2"><input type="checkbox" id="djNoCard" checked={noCard} onChange={e => setNoCard(e.target.checked)} className="w-4 h-4 text-rose-500" /><label htmlFor="djNoCard" className="text-sm font-medium text-rose-500">No Card (don't print job card)</label></div>
+           </div>
+           <div className="grid grid-cols-2 gap-4">
+             <div><label className="block text-xs font-medium text-gray-600 mb-1">Assigned Employee</label><input value={assignedEmployee} onChange={e => setAssignedEmployee(e.target.value)} placeholder="Employee name..." className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" /></div>
+@@ -2575,6 +2589,7 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, activeEntity, onJobCreat
+           is_child_job: false,
+           ...buildActionFields(new Set()),
+           has_info_for_quote: false,
++          is_no_card: false,
+         }).select('id, job_number').single()
+ 
+         if (jobError) {
+@@ -2750,6 +2765,7 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, activeEntity, onJobCreat
+               }
+ 
+               const pendingPO = 'PENDING-' + new Date().toISOString().slice(0,10)
++              const isNoCard = false
+               const { data: jobData, error: jobError } = await supabase.from('jobs').insert({
+                 operating_entity: (rfq.operating_entity === 'ERHA_FC' || rfq.operating_entity === 'ERHA_SS') ? rfq.operating_entity : activeEntity,
+                 rfq_id: rfq.id,
+@@ -2759,7 +2775,7 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, activeEntity, onJobCreat
+                 description: rfq.description,
+                 po_number: pendingPO,
+                 order_number: pendingPO,
+-                status: 'PENDING',
++                status: isNoCard ? 'PRINTED' : 'PENDING',
+                 workshop_status: 'NOT_STARTED',
+                 entry_type: 'FAST_TRACK',
+                 priority: rfq.priority || 'URGENT',
+@@ -2779,6 +2795,7 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, activeEntity, onJobCreat
+                 is_child_job: false,
+                 ...buildActionFields(new Set()),
+                 has_info_for_quote: false,
++                is_no_card: isNoCard,
+               }).select('id, job_number').single()
+               if (jobError) throw jobError
+               const newJobNumber = jobData.job_number
+@@ -2805,13 +2822,15 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, activeEntity, onJobCreat
+                 imported_by: rfq.assigned_quoter_name || 'system',
+               }).then(({ error: logErr }) => { if (logErr) console.error('Event log error:', logErr.message) })
+ 
+-              // LOG: no_card_job_created ML event (fast track job starts without a printed card)
+-              await supabase.from('import_events').insert({
+-                source: 'no_card_job_created',
+-                file_name: JSON.stringify({ job_id: jobData.id, job_type: 'FAST_TRACK', created_at: new Date().toISOString() }),
+-                rows_attempted: 1, rows_imported: 1, rows_failed: 0,
+-                imported_at: new Date().toISOString(), imported_by: 'system',
+-              }).then(({ error: logErr }) => { if (logErr) console.error('Event log error:', logErr.message) })
++              // LOG: no_card_job_created ML event (only fires when explicit No Card flag is set at creation)
++              if (isNoCard) {
++                await supabase.from('import_events').insert({
++                  source: 'no_card_job_created',
++                  file_name: JSON.stringify({ job_id: jobData.id, job_type: 'FAST_TRACK', created_at: new Date().toISOString() }),
++                  rows_attempted: 1, rows_imported: 1, rows_failed: 0,
++                  imported_at: new Date().toISOString(), imported_by: 'system',
++                }).then(({ error: logErr }) => { if (logErr) console.error('Event log error:', logErr.message) })
++              }
+ 
+               // Copy line items
+               const { data: rfqItems } = await supabase.from('rfq_line_items').select('*').eq('rfq_id', rfq.id).order('line_number')
+@@ -3158,6 +3177,7 @@ function SpawnJobModal({ lineItem, parentJob, activeEntity, onClose, onSpawned }
+     has_info_for_quote: false, has_service_schedule: false, has_qcp: false, has_internal_order: false
+   })
+   const toggleDoc = (key: keyof typeof docs) => setDocs(d => ({ ...d, [key]: !d[key] }))
++  const [spawnNoCard, setSpawnNoCard] = React.useState(false)
+ 
+   const handleCreate = async () => {
+     if (!description.trim()) { alert('Description is required'); return }
+@@ -3183,7 +3203,7 @@ function SpawnJobModal({ lineItem, parentJob, activeEntity, onClose, onSpawned }
+         due_date:                 dueDate || null,
+         priority:                 priority,
+         entry_type:               'CHILD',
+-        status:                   'PENDING',
++        status:                   spawnNoCard ? 'PRINTED' : 'PENDING',
+         workshop_status:          'NOT_STARTED',
+         assigned_employee_name:   null,
+         assigned_supervisor_name: null,
+@@ -3195,6 +3215,7 @@ function SpawnJobModal({ lineItem, parentJob, activeEntity, onClose, onSpawned }
+         has_service_schedule:     docs.has_service_schedule,
+         has_qcp:                  docs.has_qcp,
+         has_internal_order:       docs.has_internal_order,
++        is_no_card:               spawnNoCard,
+       }).select().single()
+       if (error) throw error
+       // Create line item for child job so it prints on the card
+@@ -3219,13 +3240,15 @@ function SpawnJobModal({ lineItem, parentJob, activeEntity, onClose, onSpawned }
+         imported_at: new Date().toISOString(),
+         imported_by: 'system',
+       }).then(({ error: logErr }) => { if (logErr) console.error('Event log error:', logErr.message) })
+-      // LOG: no_card_job_created ML event (child job starts without a printed card)
+-      await supabase.from('import_events').insert({
+-        source: 'no_card_job_created',
+-        file_name: JSON.stringify({ job_id: childJob.id, job_type: 'CHILD', created_at: new Date().toISOString() }),
+-        rows_attempted: 1, rows_imported: 1, rows_failed: 0,
+-        imported_at: new Date().toISOString(), imported_by: 'system',
+-      }).then(({ error: logErr }) => { if (logErr) console.error('Event log error:', logErr.message) })
++      // LOG: no_card_job_created ML event (only fires when explicit No Card flag is set at creation)
++      if (spawnNoCard) {
++        await supabase.from('import_events').insert({
++          source: 'no_card_job_created',
++          file_name: JSON.stringify({ job_id: childJob.id, job_type: 'CHILD', created_at: new Date().toISOString() }),
++          rows_attempted: 1, rows_imported: 1, rows_failed: 0,
++          imported_at: new Date().toISOString(), imported_by: 'system',
++        }).then(({ error: logErr }) => { if (logErr) console.error('Event log error:', logErr.message) })
++      }
+       emailChildJobSpawned(parentJob, childJob)
+       onSpawned(childJob)
+     } catch (err: any) { alert('Error: ' + err.message) }
+@@ -3295,6 +3318,7 @@ function SpawnJobModal({ lineItem, parentJob, activeEntity, onClose, onSpawned }
+               ))}
+             </div>
+           </div>
++          <div className="flex items-center gap-2"><input type="checkbox" id="spawnNoCard" checked={spawnNoCard} onChange={e => setSpawnNoCard(e.target.checked)} className="w-4 h-4 text-rose-500" /><label htmlFor="spawnNoCard" className="text-sm font-medium text-rose-500">No Card (don't print job card)</label></div>
+           <div><label className="block text-xs font-medium text-gray-600 mb-1">Notes</label>
+             <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={2}
+               placeholder="Additional notes for this child job..."
+@@ -3372,7 +3396,7 @@ function WorkshopBoard({ jobs, loading, onRefresh, onStatusChange }: {
+                         <p className="text-xs font-bold text-orange-600">{job.job_number}</p>
+                         <div className="flex items-center gap-1">
+                           {job.is_parent && <span className="text-xs font-bold px-1.5 py-0.5 bg-purple-100 text-purple-600 rounded">P</span>}
+-                          {job.status !== 'PRINTED' && <span className="text-xs font-bold px-1.5 py-0.5 bg-rose-50 text-rose-500 rounded border border-rose-200">No Card</span>}
++                          {!!job.is_no_card && <span className="text-xs font-bold px-1.5 py-0.5 bg-rose-50 text-rose-500 rounded border border-rose-200">No Card</span>}
+                           <span className={`text-xs font-semibold px-1.5 py-0.5 rounded ${job.priority==='URGENT'?'bg-red-100 text-red-700':job.priority==='HIGH'?'bg-orange-100 text-orange-700':'bg-gray-100 text-gray-600'}`}>{job.priority}</span>
+                         </div>
+                       </div>
+@@ -3414,7 +3438,7 @@ function WorkshopBoard({ jobs, loading, onRefresh, onStatusChange }: {
+                           <div className="flex items-center justify-between gap-1">
+                             <p className="text-xs font-bold text-purple-600">{child.job_number}</p>
+                             <div className="flex items-center gap-1">
+-                              {child.status !== 'PRINTED' && <span className="text-xs font-bold px-1.5 py-0.5 bg-rose-50 text-rose-500 rounded border border-rose-200">No Card</span>}
++                              {!!child.is_no_card && <span className="text-xs font-bold px-1.5 py-0.5 bg-rose-50 text-rose-500 rounded border border-rose-200">No Card</span>}
+                               <span className="text-xs px-1.5 py-0.5 bg-indigo-100 text-indigo-600 rounded">↳</span>
+                             </div>
+                           </div>
+diff --git a/supabase/us004_is_no_card_flag.sql b/supabase/us004_is_no_card_flag.sql
+new file mode 100644
+index 0000000..3b020ea
+--- /dev/null
++++ b/supabase/us004_is_no_card_flag.sql
+@@ -0,0 +1,12 @@
++BEGIN;
++
++ALTER TABLE public.jobs
++  ADD COLUMN IF NOT EXISTS is_no_card BOOLEAN NOT NULL DEFAULT false;
++
++CREATE INDEX IF NOT EXISTS idx_jobs_is_no_card
++  ON public.jobs(is_no_card)
++  WHERE is_no_card = true;
++
++NOTIFY pgrst, 'reload schema';
++
++COMMIT;
