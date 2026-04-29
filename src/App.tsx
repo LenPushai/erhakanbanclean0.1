@@ -1432,7 +1432,7 @@ function JobDetailPanel({ job, parentJobNumber, activeEntity, onClose, onUpdate 
       }).select().single()
       if (jobError) throw jobError
       // Create line item for child job so it prints on the card
-      await supabase.from('job_line_items').insert({ job_id: childJob.id, description: lineItem.description, quantity: lineItem.quantity || 1, uom: lineItem.uom || 'EA', item_type: lineItem.item_type || 'MATERIAL', cost_price: 0, sell_price: 0, line_total: 0, status: 'PENDING', sort_order: 0, can_spawn_job: false })
+      await supabase.from('job_line_items').insert({ job_id: childJob.id, description: lineItem.description, quantity: lineItem.quantity || 1, uom: lineItem.uom || 'EA', item_type: lineItem.item_type || 'MATERIAL', cost_price: 0, sell_price: 0, line_total: 0, status: 'PENDING', sort_order: 0, can_spawn_job: false, parent_line_item_id: lineItem.id })
       const { error: liError } = await supabase.from('job_line_items').update({ child_job_id: childJob.id }).eq('id', lineItem.id)
       if (liError) throw liError
       await supabase.from('jobs').update({ is_parent: true }).eq('id', job.id)
@@ -3198,7 +3198,7 @@ function SpawnJobModal({ lineItem, parentJob, activeEntity, onClose, onSpawned }
       }).select().single()
       if (error) throw error
       // Create line item for child job so it prints on the card
-      await supabase.from('job_line_items').insert({ job_id: childJob.id, description: lineItem.description || description.trim(), quantity: quantity, uom: lineItem.uom || 'EA', item_type: lineItem.item_type || 'MATERIAL', cost_price: 0, sell_price: 0, line_total: 0, status: 'PENDING', sort_order: 0, can_spawn_job: false })
+      await supabase.from('job_line_items').insert({ job_id: childJob.id, description: lineItem.description || description.trim(), quantity: quantity, uom: lineItem.uom || 'EA', item_type: lineItem.item_type || 'MATERIAL', cost_price: 0, sell_price: 0, line_total: 0, status: 'PENDING', sort_order: 0, can_spawn_job: false, parent_line_item_id: lineItem.id })
       await supabase.from('job_line_items').update({ child_job_id: childJob.id, quantity: quantity }).eq('id', lineItem.id)
       await supabase.from('jobs').update({ is_parent: true }).eq('id', parentJob.id)
       // Sync quantity to parent line item + log
@@ -3480,6 +3480,7 @@ function JobExecutionPanel({ job, onClose, onStatusChange, onRefresh }: {
   const [savingMat, setSavingMat] = React.useState(false)
   const [execLineItems, setExecLineItems] = React.useState<any[]>([])
   const [loadingExecLines, setLoadingExecLines] = React.useState(false)
+  const [propagatedMsg, setPropagatedMsg] = React.useState('')
 
   const loadExecLineItems = React.useCallback(async () => {
     setLoadingExecLines(true)
@@ -3514,6 +3515,22 @@ function JobExecutionPanel({ job, onClose, onStatusChange, onRefresh }: {
         operating_entity: (job.operating_entity === 'ERHA_FC' || job.operating_entity === 'ERHA_SS') ? job.operating_entity : activeEntity,
         metadata: { job_id: job.id, line_item_description: li.description, [`${field}_by`]: 'user', [`${field}_at`]: now },
       }).then(({ error: logErr }) => { if (logErr) console.error('Activity log error:', logErr.message) })
+    }
+    // US-002: propagate parent line-item status to child mirror rows
+    const { data: childMirrors } = await supabase.from('job_line_items').select('id, child_job_id, job_id').eq('parent_line_item_id', li.id)
+    if (childMirrors && childMirrors.length > 0) {
+      const propagatedEntity = (job.operating_entity === 'ERHA_FC' || job.operating_entity === 'ERHA_SS') ? job.operating_entity : activeEntity
+      for (const child of childMirrors) {
+        await supabase.from('job_line_items').update(update).eq('id', child.id)
+        supabase.from('activity_log').insert({
+          action_type: 'line_item_status_propagated', entity_type: 'job_line_item', entity_id: child.id,
+          operating_entity: propagatedEntity,
+          metadata: { parent_line_item_id: li.id, child_job_id: child.job_id, field, value, propagated_at: now },
+        }).then(({ error: logErr }) => { if (logErr) console.error('Activity log error:', logErr.message) })
+      }
+      const n = childMirrors.length
+      setPropagatedMsg(`Status propagated to ${n} child line${n === 1 ? '' : 's'}`)
+      setTimeout(() => setPropagatedMsg(''), 3000)
     }
     // Reload and check cross-board updates
     const { data: freshItems } = await supabase.from('job_line_items').select('*').eq('job_id', job.id).order('sort_order')
@@ -4052,6 +4069,11 @@ function JobExecutionPanel({ job, onClose, onStatusChange, onRefresh }: {
                 Refresh
               </button>
             </div>
+            {propagatedMsg && (
+              <div style={{ background: '#ecfdf5', border: '1px solid #a7f3d0', color: '#065f46', borderRadius: '6px', padding: '8px 12px', fontSize: '12px', fontWeight: 600, marginBottom: '12px' }}>
+                {propagatedMsg}
+              </div>
+            )}
             {loadingExecLines ? (
               <div style={{ textAlign: 'center', padding: '60px', color: '#8896a8' }}>Loading line items...</div>
             ) : execLineItems.length === 0 ? (
@@ -4078,21 +4100,25 @@ function JobExecutionPanel({ job, onClose, onStatusChange, onRefresh }: {
                       <td style={{ padding: '10px 12px', textAlign: 'center', color: '#64748b' }}>{li.quantity}</td>
                       <td style={{ padding: '10px 12px', textAlign: 'center' }}>
                         <input type="checkbox" checked={!!li.qc_done}
+                          disabled={!!li.parent_line_item_id}
+                          title={li.parent_line_item_id ? 'Set on parent job' : undefined}
                           onChange={e => handleLineItemToggle(li, 'qc_done', e.target.checked)}
-                          style={{ width: '18px', height: '18px', accentColor: '#4db848', cursor: 'pointer' }} />
+                          style={{ width: '18px', height: '18px', accentColor: '#4db848', cursor: li.parent_line_item_id ? 'not-allowed' : 'pointer', opacity: li.parent_line_item_id ? 0.35 : 1 }} />
                       </td>
                       <td style={{ padding: '10px 12px', textAlign: 'center' }}>
                         <input type="checkbox" checked={!!li.ready_for_delivery}
-                          disabled={!li.qc_done}
+                          disabled={!!li.parent_line_item_id || !li.qc_done}
+                          title={li.parent_line_item_id ? 'Set on parent job' : undefined}
                           onChange={e => handleLineItemToggle(li, 'ready_for_delivery', e.target.checked)}
-                          style={{ width: '18px', height: '18px', accentColor: '#d97706', cursor: li.qc_done ? 'pointer' : 'not-allowed', opacity: li.qc_done ? 1 : 0.35 }} />
+                          style={{ width: '18px', height: '18px', accentColor: '#d97706', cursor: (li.parent_line_item_id || !li.qc_done) ? 'not-allowed' : 'pointer', opacity: (li.parent_line_item_id || !li.qc_done) ? 0.35 : 1 }} />
                       </td>
                       <td style={{ padding: '10px 12px', textAlign: 'center' }}>
                         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'center', gap: '8px' }}>
                           <input type="checkbox" checked={!!li.dispatched}
-                            disabled={!li.ready_for_delivery}
+                            disabled={!!li.parent_line_item_id || !li.ready_for_delivery}
+                            title={li.parent_line_item_id ? 'Set on parent job' : undefined}
                             onChange={e => handleLineItemToggle(li, 'dispatched', e.target.checked)}
-                            style={{ width: '18px', height: '18px', accentColor: '#1d3461', cursor: li.ready_for_delivery ? 'pointer' : 'not-allowed', opacity: li.ready_for_delivery ? 1 : 0.35 }} />
+                            style={{ width: '18px', height: '18px', accentColor: '#1d3461', cursor: (li.parent_line_item_id || !li.ready_for_delivery) ? 'not-allowed' : 'pointer', opacity: (li.parent_line_item_id || !li.ready_for_delivery) ? 0.35 : 1 }} />
                           {li.dispatched && (
                             <input type="text" placeholder="DEL-001" defaultValue={li.delivery_number || ''}
                               onBlur={e => handleDeliveryField(li, 'delivery_number', e.target.value)}
