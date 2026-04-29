@@ -34,7 +34,7 @@ async function sendEmail(to: string[], subject: string, html: string) {
 const headerStyle = 'background:linear-gradient(135deg,#1e3a5f,#2d5a8e);color:white;padding:20px;border-radius:8px 8px 0 0'
 const bodyStyle = 'padding:20px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px;font-family:Arial,sans-serif'
 const footerStyle = 'margin-top:20px;padding-top:12px;border-top:1px solid #e5e7eb;font-size:11px;color:#9ca3af;text-align:center'
-const footer = `<div style="${footerStyle}">ERHA Fabrication & Construction · PUSH AI Foundation © 2026</div>`
+const footer = `<div style="${footerStyle}">ERHA · PUSH AI © 2026</div>`
 const infoRow = (label: string, value: any) => `<tr><td style="padding:4px 8px;font-weight:bold;color:#6b7280;width:140px">${label}</td><td style="padding:4px 8px;color:#1f2937">${value || '—'}</td></tr>`
 
 export async function emailRFQCreated(rfq: any) {

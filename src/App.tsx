@@ -5,7 +5,7 @@ import { supabase } from './lib/supabase'
 import { emailRFQCreated, emailQuoterAssigned, emailQuoteReady, emailOrderWon, emailJobInReview, emailJobReadyToPrint, emailJobPrinted, emailChildJobSpawned, emailJobStarted, emailJobQCCheck, emailJobComplete, emailJobDispatched } from './emailService'
 import { format } from 'date-fns'
 import { useEntity, type OperatingEntity } from './contexts/EntityContext'
-import { EntitySwitcher } from './components/EntitySwitcher'
+import { EntitySwitcher, getBrandName, getHeaderLogo } from './components/EntitySwitcher'
 
 type Board = 'rfq' | 'job' | 'workshop' | 'procurement' | 'clients' | 'settings'
 
@@ -468,11 +468,11 @@ function logProcurementStageChange(params: {
 }
 
 const EMAIL_TEMPLATES: Record<string, { subject: string; body: string }> = {
-  NEW:              { subject: 'Enquiry Received - {enq}', body: 'Dear {contact},\n\nThank you for your enquiry {enq}. We have received your request and will be in touch shortly.\n\nKind regards\nERHA Fabrication & Construction' },
-  PENDING:          { subject: 'Quotation In Progress - {enq}', body: 'Dear {contact},\n\nWe are currently preparing your quotation for enquiry {enq}. We will send it to you as soon as it is ready.\n\nKind regards\nERHA Fabrication & Construction' },
-  QUOTED:           { subject: 'Quotation Ready - {enq}', body: 'Dear {contact},\n\nPlease find attached your quotation for enquiry {enq}. Kindly review and revert at your earliest convenience.\n\nKind regards\nERHA Fabrication & Construction' },
-  SENT_TO_CUSTOMER: { subject: 'Follow Up - Quotation {enq}', body: 'Dear {contact},\n\nWe are following up on the quotation submitted for enquiry {enq}. Please do not hesitate to contact us if you have any questions.\n\nKind regards\nERHA Fabrication & Construction' },
-  ACCEPTED:         { subject: 'Order Confirmation - {enq}', body: 'Dear {contact},\n\nThank you for accepting our quotation for enquiry {enq}. We confirm receipt of your order and will be in contact regarding next steps.\n\nKind regards\nERHA Fabrication & Construction' },
+  NEW:              { subject: 'Enquiry Received - {enq}', body: 'Dear {contact},\n\nThank you for your enquiry {enq}. We have received your request and will be in touch shortly.\n\nKind regards\n{brand}' },
+  PENDING:          { subject: 'Quotation In Progress - {enq}', body: 'Dear {contact},\n\nWe are currently preparing your quotation for enquiry {enq}. We will send it to you as soon as it is ready.\n\nKind regards\n{brand}' },
+  QUOTED:           { subject: 'Quotation Ready - {enq}', body: 'Dear {contact},\n\nPlease find attached your quotation for enquiry {enq}. Kindly review and revert at your earliest convenience.\n\nKind regards\n{brand}' },
+  SENT_TO_CUSTOMER: { subject: 'Follow Up - Quotation {enq}', body: 'Dear {contact},\n\nWe are following up on the quotation submitted for enquiry {enq}. Please do not hesitate to contact us if you have any questions.\n\nKind regards\n{brand}' },
+  ACCEPTED:         { subject: 'Order Confirmation - {enq}', body: 'Dear {contact},\n\nThank you for accepting our quotation for enquiry {enq}. We confirm receipt of your order and will be in contact regarding next steps.\n\nKind regards\n{brand}' },
 }
 
 function formatDate(dateStr: string | null) {
@@ -748,7 +748,7 @@ table { border-collapse:collapse; width:100%; }
   <button class="close-btn" onclick="window.close()">✕ Close & Return to Board</button>
 </div>
 <div class="page">
-  <div class="hdr"><div class="hdr-logo">ERHA<span>.</span> FABRICATION</div><div class="hdr-dept"><strong>Quality Control Department</strong><br>Job Card / Work Order</div></div>
+  <div class="hdr"><div class="hdr-logo">${getHeaderLogo(job.operating_entity)}</div><div class="hdr-dept"><strong>Quality Control Department</strong><br>Job Card / Work Order</div></div>
   <div class="job-hero"><div><div class="jn">${val(job.job_number)}</div><div style="font-size:8pt;color:#64748b;margin-top:2px">Entry: ${val(job.entry_type)} | Priority: <strong style="color:${job.priority==='URGENT'?'#dc2626':job.priority==='HIGH'?'#ea580c':'#1d3461'}">${val(job.priority)}</strong></div></div><div><div class="client">${val(job.client_name)}</div><div class="due">${job.due_date ? 'DUE: ' + fmtDate(job.due_date) : ''}</div><div style="font-size:8pt;color:#64748b;margin-top:2px">Received: ${fmtDate(job.date_received)}</div></div></div>
   <div class="info-grid"><div class="info-cell"><div class="info-label">Job Number</div><div class="info-val">${val(job.job_number)}</div></div><div class="info-cell"><div class="info-label">Client RFQ No</div><div class="info-val">${val(job.client_rfq_number)}</div></div><div class="info-cell"><div class="info-label">Order / PO Number</div><div class="info-val">${val(job.po_number || (job as any).order_number)}</div></div><div class="info-cell"><div class="info-label">Site Req</div><div class="info-val">${val(job.site_req)}</div></div></div>
   <div class="info-grid" style="grid-template-columns:1fr 1fr"><div class="info-cell"><div class="info-label">Drawing Number</div><div class="info-val">${val(job.drawing_number)}</div></div><div class="info-cell"><div class="info-label">Compiled By</div><div class="info-val">${val((job as any).compiled_by)}</div></div></div>
@@ -768,7 +768,7 @@ table { border-collapse:collapse; width:100%; }
   <div class="sig-row"><div class="sig-line">Supervisor Signature</div><div class="sig-line">Date</div></div>
   <div class="sig-row"><div class="sig-line">Employee Signature</div><div class="sig-line">Date</div></div>
   ${childrenHtml}
-  <div class="footer"><span>ERHA Fabrication & Construction — Confidential</span><span>Printed: ${new Date().toLocaleString('en-ZA')}</span><span>PUSH AI</span></div>
+  <div class="footer"><span>${getBrandName(job.operating_entity)} — Confidential</span><span>Printed: ${new Date().toLocaleString('en-ZA')}</span><span>PUSH AI</span></div>
 </div>
 <div class="page page2">
   <div class="hdr" style="margin-bottom:12px"><div class="hdr-logo">ERHA<span>.</span></div><div style="font-size:14pt;font-weight:800;color:white">${val(job.job_number)}</div><div class="hdr-dept"><strong>QC & Time Tracking</strong><br>${val(job.client_name)}</div></div>
@@ -779,7 +779,7 @@ table { border-collapse:collapse; width:100%; }
   <table class="ts" style="margin-bottom:8px"><thead><tr><th rowspan="2" style="width:60px">Date</th><th rowspan="2" style="width:100px">Description</th><th colspan="2">Mon</th><th colspan="2">Tue</th><th colspan="2">Wed</th><th colspan="2">Thu</th><th colspan="2">Fri</th><th>Sat</th><th>Sun</th><th colspan="2">Total</th></tr><tr><th>NT</th><th>OT</th><th>NT</th><th>OT</th><th>NT</th><th>OT</th><th>NT</th><th>OT</th><th>NT</th><th>OT</th><th>OT</th><th>OT</th><th>NT</th><th>OT</th></tr></thead><tbody>${[1,2,3,4,5,6,7,8,9,10].map(() => '<tr>' + '<td></td><td></td>' + '<td></td><td></td>'.repeat(5) + '<td></td><td></td>' + '<td></td><td></td>' + '</tr>').join('')}</tbody></table>
   <div class="sec-hdr">Workshop Notes</div>
   <div style="border:1px solid #cbd5e1;border-radius:4px;padding:8px 10px;min-height:60px;font-size:9pt;color:#64748b">${val(job.notes) || '&nbsp;'}</div>
-  <div class="footer"><span>ERHA Fabrication & Construction — Confidential</span><span>Printed: ${new Date().toLocaleString('en-ZA')}</span><span>PUSH AI</span></div>
+  <div class="footer"><span>${getBrandName(job.operating_entity)} — Confidential</span><span>Printed: ${new Date().toLocaleString('en-ZA')}</span><span>PUSH AI</span></div>
 </div>
 </body></html>`;
     const win = window.open('', '_blank')
@@ -3050,9 +3050,10 @@ function EmailModal({ rfq, onClose }: { rfq: RFQ; onClose: () => void }) {
   const template = EMAIL_TEMPLATES[rfq.status] || EMAIL_TEMPLATES['NEW']
   const enqNo = rfq.client_rfq_number || rfq.enq_number || rfq.rfq_no || '-'
   const contactName = rfq.contact_person || 'Sir/Madam'
+  const brandName = getBrandName(rfq.operating_entity)
   const [to, setTo] = useState(rfq.contact_email || '')
   const [subject, setSubject] = useState(template.subject.replace('{enq}', enqNo))
-  const [body, setBody] = useState(template.body.replace(/\{enq\}/g, enqNo).replace('{contact}', contactName))
+  const [body, setBody] = useState(template.body.replace(/\{enq\}/g, enqNo).replace('{contact}', contactName).replace('{brand}', brandName))
   const [sending, setSending] = useState(false)
   const [sent, setSent] = useState(false)
 
@@ -3070,7 +3071,7 @@ function EmailModal({ rfq, onClose }: { rfq: RFQ; onClose: () => void }) {
           to: [to],
           subject: subject,
           text: body,
-          html: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;"><div style="background:#1e3a5f;color:white;padding:20px 24px;border-radius:8px 8px 0 0;"><h2 style="margin:0;font-size:18px;">ERHA Fabrication &amp; Construction</h2><p style="margin:4px 0 0;font-size:13px;opacity:0.8;">${enqNo}</p></div><div style="padding:24px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px;white-space:pre-line;">${body.replace(/\n/g,'<br>')}</div><p style="font-size:11px;color:#9ca3af;margin-top:12px;text-align:center;">ERHA Operations System</p></div>`,
+          html: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;"><div style="background:#1e3a5f;color:white;padding:20px 24px;border-radius:8px 8px 0 0;"><h2 style="margin:0;font-size:18px;">${brandName.replace(/&/g, '&amp;')}</h2><p style="margin:4px 0 0;font-size:13px;opacity:0.8;">${enqNo}</p></div><div style="padding:24px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px;white-space:pre-line;">${body.replace(/\n/g,'<br>')}</div><p style="font-size:11px;color:#9ca3af;margin-top:12px;text-align:center;">ERHA Operations System</p></div>`,
         }),
       })
       if (!res.ok) { const err = await res.json(); throw new Error(err.message || 'Send failed') }
@@ -5280,8 +5281,8 @@ function PODetailModal({ po, onClose, onUpdated, currentRole, activeEntity }: { 
 </div>
 <div class="hdr">
   <div>
-    <div class="hdr-logo">ERHA<span>.</span> FABRICATION</div>
-    <div style="font-size:8pt;color:#64748b;margin-top:2px">ERHA Fabrication & Construction (Pty) Ltd</div>
+    <div class="hdr-logo">${getHeaderLogo(po.operating_entity)}</div>
+    <div style="font-size:8pt;color:#64748b;margin-top:2px">${getBrandName(po.operating_entity)} (Pty) Ltd</div>
   </div>
   <div class="hdr-right">
     <div class="po-title">PURCHASE ORDER</div>
@@ -5325,7 +5326,7 @@ function PODetailModal({ po, onClose, onUpdated, currentRole, activeEntity }: { 
 </div>
 <div class="footer">
   <div>Issued by: ${po.issued_by || '-'} | Status: ${po.status.replace(/_/g, ' ')}</div>
-  <div>ERHA Fabrication & Construction (Pty) Ltd — Confidential</div>
+  <div>${getBrandName(po.operating_entity)} (Pty) Ltd — Confidential</div>
 </div>
 </body></html>`
 

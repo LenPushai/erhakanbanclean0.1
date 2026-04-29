@@ -1,3 +1,10 @@
+/**
+ * Entity switcher UI for the dual-operating-entity system.
+ *
+ * INVARIANT: Boards (RFQ, Job, Workshop, Procurement) must remain entity-agnostic.
+ * The only acceptable place for entity-aware branching is display-only branding
+ * (badges, brand names on print/email). See EntityContext.tsx for the full rule.
+ */
 import { useEffect, useRef, useState } from 'react'
 import { ChevronDown } from 'lucide-react'
 import { useEntity, type OperatingEntity } from '../contexts/EntityContext'
@@ -7,17 +14,44 @@ interface EntitySwitcherProps {
   currentRole: string | null
 }
 
-const ENTITY_META: Record<OperatingEntity, { label: string; dot: string; pill: string }> = {
+const ENTITY_META: Record<OperatingEntity, { label: string; dot: string; pill: string; brandName: string; headerLogo: string }> = {
   ERHA_FC: {
     label: 'ERHA F&C',
     dot: 'bg-blue-500',
     pill: 'bg-blue-50 border-blue-200 text-blue-800 hover:bg-blue-100',
+    brandName: 'ERHA Fabrication & Construction',
+    headerLogo: 'ERHA<span>.</span> FABRICATION',
   },
   ERHA_SS: {
     label: 'ERHA S&S',
     dot: 'bg-amber-500',
     pill: 'bg-amber-50 border-amber-200 text-amber-800 hover:bg-amber-100',
+    brandName: 'ERHA Steel & Stainless',
+    headerLogo: 'ERHA<span>.</span> STEEL & STAINLESS',
   },
+}
+
+/**
+ * Resolve the full brand name for an operating entity.
+ * Falls back to ERHA_FC if the value is null/unknown so callers can pass
+ * record.operating_entity directly without null-checks.
+ */
+export function getBrandName(entity: string | null | undefined): string {
+  if (entity === 'ERHA_FC' || entity === 'ERHA_SS') {
+    return ENTITY_META[entity].brandName
+  }
+  return ENTITY_META.ERHA_FC.brandName
+}
+
+/**
+ * Resolve the print-header logo HTML for an operating entity (e.g.
+ * "ERHA<span>.</span> FABRICATION"). Same fallback rule as getBrandName.
+ */
+export function getHeaderLogo(entity: string | null | undefined): string {
+  if (entity === 'ERHA_FC' || entity === 'ERHA_SS') {
+    return ENTITY_META[entity].headerLogo
+  }
+  return ENTITY_META.ERHA_FC.headerLogo
 }
 
 export function EntitySwitcher({ currentRole }: EntitySwitcherProps) {
