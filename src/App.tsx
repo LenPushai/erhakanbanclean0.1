@@ -1342,6 +1342,10 @@ function JobDetailPanel({ job, parentJobNumber, activeEntity, onClose, onUpdate 
   const [assignedSupervisor, setAssignedSupervisor] = React.useState(job.assigned_supervisor_name || '')
   const [compiledBy, setCompiledBy] = React.useState((job as any).compiled_by || '')
   const [notes, setNotes] = React.useState(job.notes || '')
+  const [editSiteReq, setEditSiteReq] = React.useState(job.site_req || '')
+  const [editClientRfqNumber, setEditClientRfqNumber] = React.useState(job.client_rfq_number || '')
+  const [editDueDate, setEditDueDate] = React.useState((job.due_date || '').slice(0, 10))
+  const [editDescription, setEditDescription] = React.useState(job.description || '')
   const [msg, setMsg] = React.useState('')
   const [spawning, setSpawning] = React.useState<string | null>(null)
   const [spawnTarget, setSpawnTarget] = React.useState<any | null>(null)
@@ -1467,14 +1471,43 @@ function JobDetailPanel({ job, parentJobNumber, activeEntity, onClose, onUpdate 
   const handleSave = async () => {
     setSaving(true)
     try {
-      const { data, error } = await supabase.from('jobs').update({
-        status, priority,
+      const before: Record<string, any> = {
+        status: job.status,
+        priority: job.priority,
+        assigned_employee_name: job.assigned_employee_name ?? null,
+        assigned_supervisor_name: job.assigned_supervisor_name ?? null,
+        compiled_by: (job as any).compiled_by ?? null,
+        notes: job.notes ?? null,
+        site_req: job.site_req ?? null,
+        client_rfq_number: job.client_rfq_number ?? null,
+        due_date: (job.due_date || '').slice(0, 10) || null,
+        description: job.description ?? null,
+      }
+      const after: Record<string, any> = {
+        status,
+        priority,
         assigned_employee_name: assignedEmployee || null,
         assigned_supervisor_name: assignedSupervisor || null,
         compiled_by: compiledBy || null,
         notes: notes || null,
-      }).eq('id', job.id).select().single()
+        site_req: editSiteReq.trim() || null,
+        client_rfq_number: editClientRfqNumber.trim() || null,
+        due_date: editDueDate || null,
+        description: editDescription.trim() || null,
+      }
+      const { data, error } = await supabase.from('jobs').update(after).eq('id', job.id).select().single()
       if (error) throw error
+      const changes: Record<string, { old: any; new: any }> = {}
+      for (const k of Object.keys(after)) {
+        if (before[k] !== after[k]) changes[k] = { old: before[k], new: after[k] }
+      }
+      if (Object.keys(changes).length > 0) {
+        supabase.from('activity_log').insert({
+          action_type: 'job_edited', entity_type: 'job', entity_id: job.id,
+          operating_entity: (job.operating_entity === 'ERHA_FC' || job.operating_entity === 'ERHA_SS') ? job.operating_entity : activeEntity,
+          metadata: { changes, changed_by: 'user', changed_at: new Date().toISOString() },
+        }).then(({ error: logErr }) => { if (logErr) console.error('Activity log error:', logErr.message) })
+      }
       onUpdate(data)
       showMsg('Saved successfully')
     } catch (err: any) {
@@ -1520,18 +1553,16 @@ function JobDetailPanel({ job, parentJobNumber, activeEntity, onClose, onUpdate 
           </div>
         </div>
         <div className="grid grid-cols-2 gap-4 text-sm">
-          {job.site_req && <div><span className="text-xs text-gray-500 block">Site Req / PO</span><span className="font-medium">{job.site_req}</span></div>}
-          {(job.client_rfq_number || job.rfq_no) && <div><span className="text-xs text-gray-500 block">Client RFQ No</span><span className="font-medium text-blue-600">{job.client_rfq_number || job.rfq_no}</span></div>}
-          {job.due_date && <div><span className="text-xs text-gray-500 block">Due Date</span><span className="font-medium">{new Date(job.due_date).toLocaleDateString('en-ZA')}</span></div>}
+          <div><label className="text-xs text-gray-500 block mb-1">Site Req / PO</label><input type="text" value={editSiteReq} onChange={e => setEditSiteReq(e.target.value)} className="w-full border border-gray-300 rounded-md px-2 py-1 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-green-500" /></div>
+          <div><label className="text-xs text-gray-500 block mb-1">Client RFQ No</label><input type="text" value={editClientRfqNumber} onChange={e => setEditClientRfqNumber(e.target.value)} className="w-full border border-gray-300 rounded-md px-2 py-1 text-sm font-medium text-blue-600 focus:outline-none focus:ring-2 focus:ring-green-500" /></div>
+          <div><label className="text-xs text-gray-500 block mb-1">Due Date</label><input type="date" value={editDueDate} onChange={e => setEditDueDate(e.target.value)} className="w-full border border-gray-300 rounded-md px-2 py-1 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-green-500" /></div>
           {job.created_at && <div><span className="text-xs text-gray-500 block">Created</span><span className="font-medium">{new Date(job.created_at).toLocaleDateString('en-ZA')}</span></div>}
           {job.parent_job_id && <div><span className="text-xs text-gray-500 block">Parent Job</span><span className="font-medium text-purple-600">{parentJobNumber || job.parent_job_id.slice(0,8)}</span></div>}
         </div>
-        {job.description && (
-          <div>
-            <label className="block text-xs font-medium text-gray-500 mb-1">Description</label>
-            <p className="text-sm text-gray-800 bg-gray-50 rounded-lg px-3 py-2">{job.description}</p>
-          </div>
-        )}
+        <div>
+          <label className="block text-xs font-medium text-gray-500 mb-1">Description</label>
+          <textarea value={editDescription} onChange={e => setEditDescription(e.target.value)} rows={3} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm text-gray-800 focus:outline-none focus:ring-2 focus:ring-green-500 resize-none" />
+        </div>
         <div>
           <label className="block text-xs font-medium text-gray-500 mb-1">Drawing Number</label>
           <input type="text" defaultValue={job.drawing_number || ''} onBlur={async (e) => { await supabase.from('jobs').update({ drawing_number: e.target.value || null }).eq('id', job.id) }} placeholder="DWG-001" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
@@ -2410,14 +2441,53 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, activeEntity, onJobCreat
   const handleSaveRFQDetails = async () => {
     setSaving(true)
     try {
-      const { data, error } = await supabase.from('rfqs').update({
-        contact_person: editContactPerson || null, contact_email: editContactEmail || null, contact_phone: editContactPhone || null,
-        client_rfq_number: editClientRfqNumber || null, drawing_number: editDrawingNumber || null, requested_by: editRequestedBy || null,
-        media_received: editMediaReceived || null, request_date: editDateReceived || null,
-        required_date: editRequiredBy || null, priority: editPriority, department_cg: editDepartmentCG || null,
-        actions_required: editActions.join(',') || null, description: editDescription.trim(), special_requirements: editSpecialReqs || null, notes: editNotes || null,
-      }).eq('id', rfq.id).select('*, clients(company_name)').single()
+      const before: Record<string, any> = {
+        contact_person: rfq.contact_person ?? null,
+        contact_email: rfq.contact_email ?? null,
+        contact_phone: rfq.contact_phone ?? null,
+        client_rfq_number: rfq.client_rfq_number ?? null,
+        drawing_number: rfq.drawing_number ?? null,
+        requested_by: rfq.requested_by ?? null,
+        media_received: rfq.media_received ?? null,
+        request_date: rfq.request_date ?? null,
+        required_date: rfq.required_date ?? null,
+        priority: rfq.priority ?? null,
+        department_cg: rfq.department_cg ?? null,
+        actions_required: rfq.actions_required ?? null,
+        description: rfq.description ?? null,
+        special_requirements: rfq.special_requirements ?? null,
+        notes: rfq.notes ?? null,
+      }
+      const after: Record<string, any> = {
+        contact_person: editContactPerson || null,
+        contact_email: editContactEmail || null,
+        contact_phone: editContactPhone || null,
+        client_rfq_number: editClientRfqNumber || null,
+        drawing_number: editDrawingNumber || null,
+        requested_by: editRequestedBy || null,
+        media_received: editMediaReceived || null,
+        request_date: editDateReceived || null,
+        required_date: editRequiredBy || null,
+        priority: editPriority,
+        department_cg: editDepartmentCG || null,
+        actions_required: editActions.join(',') || null,
+        description: editDescription.trim(),
+        special_requirements: editSpecialReqs || null,
+        notes: editNotes || null,
+      }
+      const { data, error } = await supabase.from('rfqs').update(after).eq('id', rfq.id).select('*, clients(company_name)').single()
       if (error) throw error
+      const changes: Record<string, { old: any; new: any }> = {}
+      for (const k of Object.keys(after)) {
+        if (before[k] !== after[k]) changes[k] = { old: before[k], new: after[k] }
+      }
+      if (Object.keys(changes).length > 0) {
+        supabase.from('activity_log').insert({
+          action_type: 'rfq_edited', entity_type: 'rfq', entity_id: rfq.id,
+          operating_entity: rfq.operating_entity || activeEntity,
+          metadata: { changes, changed_by: 'user', changed_at: new Date().toISOString() },
+        }).then(({ error: logErr }) => { if (logErr) console.error('Activity log error:', logErr.message) })
+      }
       onUpdate(data)
       showMsg('RFQ details saved')
     } catch (e: any) { alert('Error: ' + e.message) }
