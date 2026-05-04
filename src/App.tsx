@@ -1670,20 +1670,20 @@ function JobDetailPanel({ job, parentJobNumber, activeEntity, onClose, onUpdate 
                             if (newQty === item.quantity) return
                             const oldQty = item.quantity
                             await supabase.from('job_line_items').update({ quantity: newQty }).eq('id', item.id)
-                            // If this is a child job, sync quantity back to parent line item
+                            // D2 hotfix: parent qty is canonical (sourced from RFQ).
+                            // Removed upward sync so child edits cannot overwrite parent line item qty.
+                            // We log divergence as ML signal for over-spawn analysis.
                             if (job.is_child_job && job.parent_job_id) {
                               const { data: parentItems } = await supabase.from('job_line_items').select('id, quantity').eq('child_job_id', job.id)
-                              if (parentItems && parentItems.length > 0) {
-                                await supabase.from('job_line_items').update({ quantity: newQty }).eq('id', parentItems[0].id)
+                              if (parentItems && parentItems.length > 0 && parentItems[0].quantity !== newQty) {
                                 await supabase.from('activity_log').insert({
-                                  action_type: 'parent_job_quantity_synced', entity_type: 'job', entity_id: job.parent_job_id,
-                                  operating_entity: (job.operating_entity === 'ERHA_FC' || job.operating_entity === 'ERHA_SS') ? job.operating_entity : activeEntity,
-                                  metadata: { child_job_id: job.id, parent_job_id: job.parent_job_id, old_qty: oldQty, new_qty: newQty, synced_at: new Date().toISOString() },
-                                }).then(({ error: logErr }) => { if (logErr) console.error('Activity log error:', logErr.message) })
+                                  action_type: 'child_qty_diverged_from_parent', entity_type: 'job', entity_id: job.parent_job_id,
+                                  metadata: { child_job_id: job.id, parent_job_id: job.parent_job_id, parent_qty: parentItems[0].quantity, child_qty: newQty, diverged_at: new Date().toISOString() },
+                                })
                               }
                             }
                             setLineItems(prev => prev.map(li => li.id === item.id ? { ...li, quantity: newQty } : li))
-                            showMsg('Quantity updated' + (job.is_child_job ? ' & synced to parent' : ''))
+                            showMsg('Quantity updated')
                           }} />
                       </td>
                       <td className="px-3 py-2 text-gray-600">{item.uom}</td>
@@ -3217,6 +3217,12 @@ function SpawnJobModal({ lineItem, parentJob, activeEntity, onClose, onSpawned }
 
   const handleCreate = async () => {
     if (!description.trim()) { alert('Description is required'); return }
+    // D2 hotfix: cap child qty at parent line item qty (RFQ canonical)
+    const parentQty = lineItem.quantity || 0
+    if (quantity > parentQty) {
+      alert('Child quantity (' + quantity + ') cannot exceed parent line item quantity (' + parentQty + '). The customer ordered ' + parentQty + ' on the original RFQ.')
+      return
+    }
     setSaving(true)
     try {
       const { data: existingChildren } = await supabase.from('jobs').select('id').eq('parent_job_id', parentJob.id).eq('operating_entity', activeEntity)
@@ -3256,7 +3262,8 @@ function SpawnJobModal({ lineItem, parentJob, activeEntity, onClose, onSpawned }
       if (error) throw error
       // Create line item for child job so it prints on the card
       await supabase.from('job_line_items').insert({ job_id: childJob.id, description: lineItem.description || description.trim(), quantity: quantity, uom: lineItem.uom || 'EA', item_type: lineItem.item_type || 'MATERIAL', cost_price: 0, sell_price: 0, line_total: 0, status: 'PENDING', sort_order: 0, can_spawn_job: false, parent_line_item_id: lineItem.id })
-      await supabase.from('job_line_items').update({ child_job_id: childJob.id, quantity: quantity }).eq('id', lineItem.id)
+      // D2 hotfix: only link child_job_id, never overwrite parent qty (RFQ canonical)
+      await supabase.from('job_line_items').update({ child_job_id: childJob.id }).eq('id', lineItem.id)
       await supabase.from('jobs').update({ is_parent: true }).eq('id', parentJob.id)
       // Sync quantity to parent line item + log
       if (quantity !== (lineItem.quantity || 1)) {
