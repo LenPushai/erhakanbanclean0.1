@@ -756,12 +756,34 @@ table { border-collapse:collapse; width:100%; }
   <div class="desc-box"><div class="lbl">Job Description</div><div class="val">${val(job.description)}</div></div>
   <div class="info-grid" style="grid-template-columns:1fr 1fr"><div class="info-cell"><div class="info-label">Work Type</div><div class="info-val">${job.is_contract_work ? '☑ Contract Work' : '☑ Quoted Work'}</div></div><div class="info-cell"><div class="info-label">Emergency</div><div class="info-val">${job.is_emergency ? '⚠️ YES — EMERGENCY' : 'No'}</div></div></div>
   <div class="sec-hdr">Actions Required</div>
-  <div class="actions-grid"><div class="action-cell ${job.action_manufacture?'checked':'unchecked'}">${job.action_manufacture?'<span class=chk>✓</span>':'☐'} Manufacture</div><div class="action-cell ${job.action_service?'checked':'unchecked'}">${job.action_service?'<span class=chk>✓</span>':'☐'} Service</div><div class="action-cell ${job.action_repair?'checked':'unchecked'}">${job.action_repair?'<span class=chk>✓</span>':'☐'} Repair</div><div class="action-cell ${job.action_modify?'checked':'unchecked'}">${job.action_modify?'<span class=chk>✓</span>':'☐'} Modify</div><div class="action-cell ${job.action_cut?'checked':'unchecked'}">${job.action_cut?'<span class=chk>✓</span>':'☐'} Cut</div><div class="action-cell ${job.action_sandblast?'checked':'unchecked'}">${job.action_sandblast?'<span class=chk>✓</span>':'☐'} Sandblast</div><div class="action-cell ${job.action_paint?'checked':'unchecked'}">${job.action_paint?'<span class=chk>✓</span>':'☐'} Paint</div><div class="action-cell ${job.action_installation?'checked':'unchecked'}">${job.action_installation?'<span class=chk>✓</span>':'☐'} Installation</div></div>
+  <div class="actions-grid">${(() => {
+    // D10 hotfix: render union of legacy booleans and dynamic JSONB so newer
+    // dropdown values (Machining, Supply, Prepare Material, Other) print.
+    const allLabels = ['Manufacture','Service','Repair','Modify','Cut','Sandblast','Paint','Installation','Machining','Supply','Prepare Material','Other'];
+    const j = job as any;
+    const labelToBool = {
+      'Manufacture': j.action_manufacture, 'Service': j.action_service,
+      'Repair': j.action_repair, 'Modify': j.action_modify, 'Cut': j.action_cut,
+      'Sandblast': j.action_sandblast, 'Paint': j.action_paint,
+      'Installation': j.action_installation, 'Machining': j.action_machining,
+      'Prepare Material': j.action_prepare_material, 'Other': j.action_other,
+    };
+    const labelAliases = { 'Cut': ['Cut','Cutting'], 'Modify': ['Modify','Modification'] };
+    const dynamic = Array.isArray(j.actions_required_dynamic) ? j.actions_required_dynamic : [];
+    const isTicked = (label: string): boolean => {
+      if ((labelToBool as any)[label]) return true;
+      const aliases = (labelAliases as any)[label] || [label];
+      return aliases.some((a: string) => dynamic.includes(a));
+    };
+    return allLabels.map(label =>
+      '<div class="action-cell ' + (isTicked(label)?'checked':'unchecked') + '">' + (isTicked(label)?'<span class=chk>&#10003;</span>':'&#9744;') + ' ' + label + '</div>'
+    ).join('');
+  })()}</div>
   <div class="sec-hdr">Line Items / Bill of Materials</div>
   <table class="tbl"><thead><tr><th style="width:70%">Description</th><th style="width:15%;text-align:center">Qty</th><th style="width:15%;text-align:center">UOM</th></tr></thead><tbody>${items.length > 0 ? items.map((item, i) => '<tr><td>' + (item.description||'') + '</td><td style="text-align:center;font-weight:700">' + (item.quantity||1) + '</td><td style="text-align:center">' + (item.uom||'EA') + '</td></tr>').join('') : '<tr><td colspan="3" style="text-align:center;color:#94a3b8;padding:12px">No line items</td></tr>'}</tbody></table>
   <div class="sec-hdr">Attached Documents</div>
   <div class="doc-grid"><div class="doc-cell">${job.has_service_schedule ? '☑' : '☐'} Service Schedule / QCP</div><div class="doc-cell">${job.has_info_for_quote ? '☑' : '☐'} Info for Quote</div><div class="doc-cell">${job.has_drawing || job.drawing_number ? '☑' : '☐'} Drawing / Sketches</div><div class="doc-cell">${job.has_qcp ? '☑' : '☐'} QCP</div><div class="doc-cell">${job.has_internal_order ? '☑' : '☐'} Internal Order</div><div class="doc-cell">☐ List as Quoted</div></div>
-  <div class="notice"><strong>ARTISAN:</strong> Make sure you sign the Internal Transmittal to acknowledge receipt of your job card and attached documents. <strong>ALL WELDING FOOD MUST BE DRIED PRIOR TO WELDING.</strong></div>
+  <div class="notice"><strong>ARTISAN:</strong> Make sure you sign the Internal Transmittal to acknowledge receipt of your job card and attached documents. <strong>ALL WELDING RODS MUST BE DRIED PRIOR TO WELDING.</strong></div>
   <div class="sec-hdr">Supervisor Job Planning Info</div>
   <div class="plan-grid"><div class="plan-cell"><div class="lbl">Date Received</div><div class="val">&nbsp;</div></div><div class="plan-cell"><div class="lbl">Material Ordered</div><div class="val">&nbsp;</div></div><div class="plan-cell"><div class="lbl">Completion Date</div><div class="val" style="font-size:7pt;color:#94a3b8">(2 days before delivery)</div></div><div class="plan-cell"><div class="lbl">Due Date</div><div class="val" style="color:#dc2626;font-weight:800">${fmtDate(job.due_date)}</div></div></div>
   <div style="font-size:7.5pt;color:#94a3b8;font-style:italic;margin-bottom:8px">(All above to be completed by the supervisor)</div>
