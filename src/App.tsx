@@ -1755,6 +1755,42 @@ function JobDetailPanel({ job, parentJobNumber, activeEntity, onClose, onUpdate 
             </div>
           </div>
         )}
+
+        {/* US-D1: Job-stage attachment upload (mirrors RFQ panel pattern) */}
+        <div className="border-t border-gray-200 pt-4">
+          <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-3">Add Attachments</p>
+          <label className="flex items-center gap-3 px-4 py-3 border-2 border-dashed border-gray-300 hover:border-green-400 hover:bg-green-50 rounded-lg cursor-pointer transition-colors">
+            <Paperclip size={16} className="text-gray-400" />
+            <div className="flex-1">
+              <p className="text-xs font-medium text-gray-700">Click to attach files</p>
+              <p className="text-xs text-gray-400">Drawings, QCPs, photos, internal orders - any file type</p>
+            </div>
+            <input type="file" multiple className="hidden" onChange={async (e) => {
+              const files = e.target.files
+              if (!files || files.length === 0) return
+              for (const file of Array.from(files)) {
+                const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_')
+                const filePath = `jobs/${job.id}/${Date.now()}-${safeName}`
+                const { error: upErr } = await supabase.storage.from('rfq-attachments').upload(filePath, file)
+                if (!upErr) {
+                  await supabase.from('job_attachments').insert({ job_id: job.id, file_name: file.name, file_path: filePath, file_size: file.size })
+                  await supabase.from('activity_log').insert({
+                    action_type: 'job_attachment_added',
+                    entity_type: 'job',
+                    entity_id: job.id,
+                    file_name: JSON.stringify({ job_id: job.id, file_name: file.name, file_size: file.size, added_at: new Date().toISOString() }),
+                    metadata: { source: 'job_attachment_added', job_number: job.job_number, file_name: file.name },
+                    imported_at: new Date().toISOString(),
+                    imported_by: 'user',
+                  })
+                }
+              }
+              const { data } = await supabase.from('job_attachments').select('*').eq('job_id', job.id)
+              if (data) setAttachments(data)
+              showMsg('Attachment(s) added')
+            }} />
+          </label>
+        </div>
         <div>
           <label className="block text-xs font-medium text-gray-500 mb-1">Notes</label>
           <textarea value={notes} onChange={e => setNotes(e.target.value)} rows={3} placeholder="Notes..." className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500 resize-none" />
