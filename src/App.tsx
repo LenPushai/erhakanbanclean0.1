@@ -751,7 +751,7 @@ table { border-collapse:collapse; width:100%; }
 <div class="page">
   <div class="hdr"><div class="hdr-logo">${getHeaderLogo(job.operating_entity)}</div><div class="hdr-dept"><strong>Quality Control Department</strong><br>Job Card / Work Order</div></div>
   <div class="job-hero"><div><div class="jn">${val(job.job_number)}</div><div style="font-size:8pt;color:#64748b;margin-top:2px">Entry: ${val(job.entry_type)} | Priority: <strong style="color:${job.priority==='URGENT'?'#dc2626':job.priority==='HIGH'?'#ea580c':'#1d3461'}">${val(job.priority)}</strong></div></div><div><div class="client">${val(job.client_name)}</div><div class="due">${job.due_date ? 'DUE: ' + fmtDate(job.due_date) : ''}</div><div style="font-size:8pt;color:#64748b;margin-top:2px">Received: ${fmtDate(job.date_received)}</div></div></div>
-  <div class="info-grid"><div class="info-cell"><div class="info-label">Job Number</div><div class="info-val">${val(job.job_number)}</div></div><div class="info-cell"><div class="info-label">Client RFQ No</div><div class="info-val">${val(job.client_rfq_number)}</div></div><div class="info-cell"><div class="info-label">Order / PO Number</div><div class="info-val">${val(job.po_number || (job as any).order_number)}</div></div><div class="info-cell"><div class="info-label">Site Requisition</div><div class="info-val">${val(job.site_req)}</div></div></div>
+  <div class="info-grid" style="grid-template-columns:1fr 1fr 1fr"><div class="info-cell"><div class="info-label">Job Number</div><div class="info-val">${val(job.job_number)}</div></div><div class="info-cell"><div class="info-label">Client RFQ No</div><div class="info-val">${val(job.client_rfq_number)}</div></div><div class="info-cell"><div class="info-label">Order / PO Number</div><div class="info-val">${val(job.po_number || (job as any).order_number)}</div></div></div>
   <div class="info-grid" style="grid-template-columns:1fr 1fr"><div class="info-cell"><div class="info-label">Drawing Number</div><div class="info-val">${val(job.drawing_number)}</div></div><div class="info-cell"><div class="info-label">Compiled By</div><div class="info-val">${val((job as any).compiled_by)}</div></div></div>
   <div class="desc-box"><div class="lbl">Job Description</div><div class="val">${val(job.description)}</div></div>
   <div class="info-grid" style="grid-template-columns:1fr 1fr"><div class="info-cell"><div class="info-label">Work Type</div><div class="info-val">${job.is_contract_work ? '☑ Contract Work' : '☑ Quoted Work'}</div></div><div class="info-cell"><div class="info-label">Emergency</div><div class="info-val">${job.is_emergency ? '⚠️ YES — EMERGENCY' : 'No'}</div></div></div>
@@ -1365,7 +1365,6 @@ function JobDetailPanel({ job, parentJobNumber, activeEntity, onClose, onUpdate 
   const [assignedSupervisor, setAssignedSupervisor] = React.useState(job.assigned_supervisor_name || '')
   const [compiledBy, setCompiledBy] = React.useState((job as any).compiled_by || '')
   const [notes, setNotes] = React.useState(job.notes || '')
-  const [editSiteReq, setEditSiteReq] = React.useState(job.site_req || '')
   const [editClientRfqNumber, setEditClientRfqNumber] = React.useState(job.client_rfq_number || '')
   const [editDueDate, setEditDueDate] = React.useState((job.due_date || '').slice(0, 10))
   const [editDescription, setEditDescription] = React.useState(job.description || '')
@@ -1506,7 +1505,6 @@ function JobDetailPanel({ job, parentJobNumber, activeEntity, onClose, onUpdate 
         assigned_supervisor_name: job.assigned_supervisor_name ?? null,
         compiled_by: (job as any).compiled_by ?? null,
         notes: job.notes ?? null,
-        site_req: job.site_req ?? null,
         client_rfq_number: job.client_rfq_number ?? null,
         due_date: (job.due_date || '').slice(0, 10) || null,
         description: job.description ?? null,
@@ -1519,7 +1517,6 @@ function JobDetailPanel({ job, parentJobNumber, activeEntity, onClose, onUpdate 
         assigned_supervisor_name: assignedSupervisor || null,
         compiled_by: compiledBy || null,
         notes: notes || null,
-        site_req: editSiteReq.trim() || null,
         client_rfq_number: editClientRfqNumber.trim() || null,
         due_date: editDueDate || null,
         description: editDescription.trim() || null,
@@ -1584,7 +1581,6 @@ function JobDetailPanel({ job, parentJobNumber, activeEntity, onClose, onUpdate 
         </div>
         <div className="flex items-center gap-2"><input type="checkbox" id="editNoCard" checked={editNoCard} onChange={e => setEditNoCard(e.target.checked)} className="w-4 h-4 text-rose-500" /><label htmlFor="editNoCard" className="text-sm font-medium text-rose-500">No Card (don't print job card)</label></div>
         <div className="grid grid-cols-2 gap-4 text-sm">
-          <div><label className="text-xs text-gray-500 block mb-1">Site Requisition</label><input type="text" value={editSiteReq} onChange={e => setEditSiteReq(e.target.value)} className="w-full border border-gray-300 rounded-md px-2 py-1 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-green-500" /></div>
           <div><label className="text-xs text-gray-500 block mb-1">Client RFQ No</label><input type="text" value={editClientRfqNumber} onChange={e => setEditClientRfqNumber(e.target.value)} className="w-full border border-gray-300 rounded-md px-2 py-1 text-sm font-medium text-blue-600 focus:outline-none focus:ring-2 focus:ring-green-500" /></div>
           <div><label className="text-xs text-gray-500 block mb-1">Due Date</label><input type="date" value={editDueDate} onChange={e => setEditDueDate(e.target.value)} className="w-full border border-gray-300 rounded-md px-2 py-1 text-sm font-medium focus:outline-none focus:ring-2 focus:ring-green-500" /></div>
           {job.created_at && <div><span className="text-xs text-gray-500 block">Created</span><span className="font-medium">{new Date(job.created_at).toLocaleDateString('en-ZA')}</span></div>}
@@ -1857,7 +1853,6 @@ function CreateDirectJobModal({ activeEntity, onClose, onCreated }: { activeEnti
   const [showNewClient, setShowNewClient] = React.useState(false)
   const [newClientName, setNewClientName] = React.useState('')
   const [description, setDescription] = React.useState('')
-  const [siteReq, setSiteReq] = React.useState('')
   const [workType, setWorkType] = React.useState<'contract' | 'quoted'>('contract')
   const [priority, setPriority] = React.useState('NORMAL')
   const [compiledBy, setCompiledBy] = React.useState('')
@@ -1921,7 +1916,7 @@ function CreateDirectJobModal({ activeEntity, onClose, onCreated }: { activeEnti
       const { data: job, error } = await supabase.from('jobs').insert({
         operating_entity: activeEntity,
         description: description.trim() || null,
-        client_name: resolvedClientName, site_req: siteReq.trim() || null,
+        client_name: resolvedClientName,
         is_contract_work: workType === 'contract', is_quoted_work: workType === 'quoted',
         priority, compiled_by: compiledBy.trim() || null, is_emergency: isEmergency,
         assigned_employee_name: assignedEmployee.trim() || null,
@@ -1973,7 +1968,7 @@ function CreateDirectJobModal({ activeEntity, onClose, onCreated }: { activeEnti
           <button onClick={onClose} className="text-indigo-200 hover:text-white"><X size={20} /></button>
         </div>
         <div className="overflow-y-auto flex-1 p-6 space-y-5">
-          <div className="grid grid-cols-3 gap-4">
+          <div className="grid grid-cols-2 gap-4">
             <div>
               <label className="block text-xs font-medium text-gray-600 mb-1">Client *</label>
               {!showNewClient ? (
@@ -1991,7 +1986,6 @@ function CreateDirectJobModal({ activeEntity, onClose, onCreated }: { activeEnti
                 </div>
               )}
             </div>
-            <div><label className="block text-xs font-medium text-gray-600 mb-1">Site Requisition</label><input value={siteReq} onChange={e => setSiteReq(e.target.value)} placeholder="e.g. SR-2026-04887" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" /></div>
             <div><label className="block text-xs font-medium text-gray-600 mb-1">Due Date</label><input type="date" value={dueDate} onChange={e => setDueDate(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" /></div>
           </div>
           <div><label className="block text-xs font-medium text-gray-600 mb-1">Job Description *</label><input value={description} onChange={e => setDescription(e.target.value)} placeholder="Brief description of the work..." className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" /></div>
