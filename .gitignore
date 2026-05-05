@@ -26,3 +26,6 @@ dist-ssr
 .vercel
 .env*.local
 .claude/
+
+# UAT regression probes (kept locally for re-verification, not committed)
+probe_j1.ps1
