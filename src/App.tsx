@@ -1358,6 +1358,7 @@ function JobBoard({ jobs, loading, onCardClick, selectedId, onStatusChange, onPr
 
 function JobDetailPanel({ job, parentJobNumber, activeEntity, onClose, onUpdate }: { job: Job; parentJobNumber?: string; activeEntity: OperatingEntity; onClose: () => void; onUpdate: (j: Job) => void }) {
   const actionTypeOptions = useDropdownOptions('action_types', ACTIONS_LIST_FALLBACK)
+  const compiledByOptions = useDropdownOptions('compiled_by', ['Cherise', 'Jeanic', 'Hendrik'])
   const [saving, setSaving] = React.useState(false)
   const [status, setStatus] = React.useState(job.status)
   const [priority, setPriority] = React.useState(job.priority || 'NORMAL')
@@ -1598,8 +1599,10 @@ function JobDetailPanel({ job, parentJobNumber, activeEntity, onClose, onUpdate 
           <label className="block text-xs font-medium text-gray-500 mb-1">Compiled By</label>
           <select value={compiledBy} onChange={e => setCompiledBy(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500">
             <option value="">Select...</option>
-            <option value="Cherise">Cherise</option>
-            <option value="Jeanic">Jeanic</option>
+            {compiledByOptions.map(opt => <option key={opt} value={opt}>{opt}</option>)}
+            {compiledBy && !compiledByOptions.includes(compiledBy) && (
+              <option value={compiledBy}>{compiledBy}</option>
+            )}
           </select>
         </div>
         <div>
@@ -1869,6 +1872,7 @@ function CreateDirectJobModal({ activeEntity, onClose, onCreated }: { activeEnti
   const [directAttachments, setDirectAttachments] = React.useState<Array<{name:string;path:string;size:number}>>( [])
   const [uploadingDirect, setUploadingDirect] = React.useState(false)
   const actionTypeOptions = useDropdownOptions('action_types', ACTIONS_LIST_FALLBACK)
+  const compiledByOptions = useDropdownOptions('compiled_by', ['Cherise', 'Jeanic', 'Hendrik'])
   const [selectedActions, setSelectedActions] = React.useState<Set<string>>(new Set())
   const [lineItems, setLineItems] = React.useState([{ description: '', quantity: 1, uom: 'Each', notes: '' }])
 
@@ -1997,7 +2001,7 @@ function CreateDirectJobModal({ activeEntity, onClose, onCreated }: { activeEnti
               </div>
             </div>
             <div><label className="block text-xs font-medium text-gray-600 mb-1">Priority</label><select value={priority} onChange={e => setPriority(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"><option value="LOW">Low</option><option value="NORMAL">Normal</option><option value="HIGH">High</option><option value="URGENT">Urgent</option></select></div>
-            <div><label className="block text-xs font-medium text-gray-600 mb-1">Compiled By</label><input value={compiledBy} onChange={e => setCompiledBy(e.target.value)} placeholder="Name..." className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500" /></div>
+            <div><label className="block text-xs font-medium text-gray-600 mb-1">Compiled By</label><select value={compiledBy} onChange={e => setCompiledBy(e.target.value)} className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-indigo-500"><option value="">Select...</option>{compiledByOptions.map(opt => <option key={opt} value={opt}>{opt}</option>)}{compiledBy && !compiledByOptions.includes(compiledBy) && (<option value={compiledBy}>{compiledBy}</option>)}</select></div>
             <div className="flex items-center gap-2 pb-2"><input type="checkbox" id="djEmergency" checked={isEmergency} onChange={e => setIsEmergency(e.target.checked)} className="w-4 h-4 text-red-600" /><label htmlFor="djEmergency" className="text-sm font-medium text-red-600">Emergency</label></div>
             <div className="flex items-center gap-2 pb-2"><input type="checkbox" id="djNoCard" checked={noCard} onChange={e => setNoCard(e.target.checked)} className="w-4 h-4 text-rose-500" /><label htmlFor="djNoCard" className="text-sm font-medium text-rose-500">No Card (don't print job card)</label></div>
           </div>
