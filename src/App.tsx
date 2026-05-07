@@ -751,7 +751,7 @@ table { border-collapse:collapse; width:100%; }
 <div class="page">
   <div class="hdr"><div class="hdr-logo">${getHeaderLogo(job.operating_entity)}</div><div class="hdr-dept"><strong>Quality Control Department</strong><br>Job Card / Work Order</div></div>
   <div class="job-hero"><div><div class="jn">${val(job.job_number)}</div><div style="font-size:8pt;color:#64748b;margin-top:2px">Entry: ${val(job.entry_type)} | Priority: <strong style="color:${job.priority==='URGENT'?'#dc2626':job.priority==='HIGH'?'#ea580c':'#1d3461'}">${val(job.priority)}</strong></div></div><div><div class="client">${val(job.client_name)}</div><div class="due">${job.due_date ? 'DUE: ' + fmtDate(job.due_date) : ''}</div><div style="font-size:8pt;color:#64748b;margin-top:2px">Received: ${fmtDate(job.date_received)}</div></div></div>
-  <div class="info-grid" style="grid-template-columns:1fr 1fr 1fr"><div class="info-cell"><div class="info-label">Job Number</div><div class="info-val">${val(job.job_number)}</div></div><div class="info-cell"><div class="info-label">Client RFQ No</div><div class="info-val">${val(job.client_rfq_number)}</div></div><div class="info-cell"><div class="info-label">Order / PO Number</div><div class="info-val">${val(job.po_number || (job as any).order_number)}</div></div></div>
+  <div class="info-grid" style="grid-template-columns:${(job.client_rfq_number || '').trim() ? '1fr 1fr 1fr' : '1fr 1fr'}"><div class="info-cell"><div class="info-label">Job Number</div><div class="info-val">${val(job.job_number)}</div></div>${(job.client_rfq_number || '').trim() ? `<div class="info-cell"><div class="info-label">Client RFQ No</div><div class="info-val">${val(job.client_rfq_number)}</div></div>` : ''}<div class="info-cell"><div class="info-label">Order / PO Number</div><div class="info-val">${val(job.po_number || (job as any).order_number)}</div></div></div>
   <div class="info-grid" style="grid-template-columns:1fr 1fr"><div class="info-cell"><div class="info-label">Drawing Number</div><div class="info-val">${val(job.drawing_number)}</div></div><div class="info-cell"><div class="info-label">Compiled By</div><div class="info-val">${val((job as any).compiled_by)}</div></div></div>
   <div class="desc-box"><div class="lbl">Job Description</div><div class="val">${val(job.description)}</div></div>
   <div class="info-grid" style="grid-template-columns:1fr 1fr"><div class="info-cell"><div class="info-label">Work Type</div><div class="info-val">${job.is_contract_work ? '☑ Contract Work' : '☑ Quoted Work'}</div></div><div class="info-cell"><div class="info-label">Emergency</div><div class="info-val">${job.is_emergency ? '⚠️ YES — EMERGENCY' : 'No'}</div></div></div>
@@ -3637,8 +3637,26 @@ function JobExecutionPanel({ job, onClose, onStatusChange, onRefresh }: {
   }
 
   const handleDeliveryField = async (li: any, field: 'delivery_number' | 'delivery_date', value: string) => {
-    await supabase.from('job_line_items').update({ [field]: value || null }).eq('id', li.id)
-    setExecLineItems(prev => prev.map(x => x.id === li.id ? { ...x, [field]: value || null } : x))
+    const next = value || null
+    await supabase.from('job_line_items').update({ [field]: next }).eq('id', li.id)
+    setExecLineItems(prev => prev.map(x => x.id === li.id ? { ...x, [field]: next } : x))
+    // US-J3: propagate parent line-item delivery fields to child mirror rows
+    const { data: childMirrors } = await supabase.from('job_line_items').select('id, child_job_id, job_id').eq('parent_line_item_id', li.id)
+    if (childMirrors && childMirrors.length > 0) {
+      const propagatedEntity = (job.operating_entity === 'ERHA_FC' || job.operating_entity === 'ERHA_SS') ? job.operating_entity : activeEntity
+      const now = new Date().toISOString()
+      for (const child of childMirrors) {
+        await supabase.from('job_line_items').update({ [field]: next }).eq('id', child.id)
+        supabase.from('activity_log').insert({
+          action_type: 'line_item_delivery_propagated', entity_type: 'job_line_item', entity_id: child.id,
+          operating_entity: propagatedEntity,
+          metadata: { parent_line_item_id: li.id, child_job_id: child.job_id, field, value: next, propagated_at: now },
+        }).then(({ error: logErr }) => { if (logErr) console.error('Activity log error:', logErr.message) })
+      }
+      const n = childMirrors.length
+      setPropagatedMsg(`Delivery ${field === 'delivery_number' ? 'note' : 'date'} propagated to ${n} child line${n === 1 ? '' : 's'}`)
+      setTimeout(() => setPropagatedMsg(''), 3000)
+    }
   }
 
   const MAT_UNITS = ['EA', 'M', 'KG', 'L', 'M2', 'M3', 'SET', 'HR', 'PCS']
@@ -4208,16 +4226,20 @@ function JobExecutionPanel({ job, onClose, onStatusChange, onRefresh }: {
                             style={{ width: '18px', height: '18px', accentColor: '#1d3461', cursor: (li.parent_line_item_id || !li.ready_for_delivery) ? 'not-allowed' : 'pointer', opacity: (li.parent_line_item_id || !li.ready_for_delivery) ? 0.35 : 1 }} />
                           {li.dispatched && (
                             <input type="text" placeholder="DEL-001" defaultValue={li.delivery_number || ''}
+                              disabled={!!li.parent_line_item_id}
+                              title={li.parent_line_item_id ? 'Set on parent — auto-syncs to children' : undefined}
                               onBlur={e => handleDeliveryField(li, 'delivery_number', e.target.value)}
-                              style={{ width: '90px', border: '1px solid #dde3ec', borderRadius: '4px', padding: '3px 6px', fontSize: '11px', color: '#1d3461' }} />
+                              style={{ width: '90px', border: '1px solid #dde3ec', borderRadius: '4px', padding: '3px 6px', fontSize: '11px', color: '#1d3461', cursor: li.parent_line_item_id ? 'not-allowed' : 'text', opacity: li.parent_line_item_id ? 0.5 : 1, background: li.parent_line_item_id ? '#f1f5f9' : 'white' }} />
                           )}
                         </div>
                       </td>
                       <td style={{ padding: '10px 12px', textAlign: 'center' }}>
                         {li.dispatched ? (
                           <input type="date" defaultValue={li.delivery_date || ''}
+                            disabled={!!li.parent_line_item_id}
+                            title={li.parent_line_item_id ? 'Set on parent — auto-syncs to children' : undefined}
                             onBlur={e => handleDeliveryField(li, 'delivery_date', e.target.value)}
-                            style={{ border: '1px solid #dde3ec', borderRadius: '4px', padding: '3px 6px', fontSize: '11px', color: '#1d3461' }} />
+                            style={{ border: '1px solid #dde3ec', borderRadius: '4px', padding: '3px 6px', fontSize: '11px', color: '#1d3461', cursor: li.parent_line_item_id ? 'not-allowed' : 'text', opacity: li.parent_line_item_id ? 0.5 : 1, background: li.parent_line_item_id ? '#f1f5f9' : 'white' }} />
                         ) : (
                           <span style={{ color: '#cbd5e1', fontSize: '11px' }}>—</span>
                         )}
