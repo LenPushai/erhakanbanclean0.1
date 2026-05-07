@@ -6,7 +6,7 @@
 | Status  | **Inferred — Awaiting Confirmation**                                                           |
 | Author  | Len Klopper / PUSH AI                                                                          |
 | User Story | US-009 (Phase 2 UAT, raised ~23 April 2026)                                                |
-| Implementation Tag | TBD (will follow pattern `us-009-job-card-rfq-suppression-2026-05-07`)            |
+| Implementation Tag | `us-009-job-card-rfq-suppression-2026-05-07`                                       |
 
 ---
 
