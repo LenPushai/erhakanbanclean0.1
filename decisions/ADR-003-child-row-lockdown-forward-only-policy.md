@@ -6,7 +6,7 @@
 | Status  | **Inferred — Awaiting Confirmation** *(retrospective: code is in production)*                  |
 | Author  | Len Klopper / PUSH AI                                                                          |
 | User Story | None — cross-cutting policy decision underlying US-J1, US-J2, US-J3, US-J4, and ADR-001    |
-| Implementation Tags | `hotfix-jeanic1-*-2026-05-06`, `hotfix-jeanic2-*-2026-05-06`, `hotfix-jeanic3-delivery-propagation-2026-05-06`, `hotfix-jeanic4-*-2026-05-06` |
+| Implementation Tags | `hotfix-jeanic1-contact-add-2026-05-05`, `hotfix-jeanic2-remove-site-requisition-2026-05-05`, `hotfix-jeanic3-delivery-propagation-2026-05-07` *(tagged retroactively; build shipped 2026-05-07 via deploy `dpl_3CuA3wCvLGWSMskiuviBN4eGAqjA`)*, `hotfix-jeanic4-compiled-by-dropdown-2026-05-05` |
 
 ---
 
