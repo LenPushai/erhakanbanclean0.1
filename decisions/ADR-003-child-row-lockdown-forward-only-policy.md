@@ -6,20 +6,20 @@
 | Status  | **Inferred — Awaiting Confirmation** *(retrospective: code is in production)*                  |
 | Author  | Len Klopper / PUSH AI                                                                          |
 | User Story | None — cross-cutting policy decision underlying US-J1, US-J2, US-J3, US-J4, and ADR-001    |
-| Implementation Tags | `hotfix-jeanic1-contact-add-2026-05-05`, `hotfix-jeanic2-remove-site-requisition-2026-05-05`, `hotfix-jeanic3-delivery-propagation-2026-05-07` *(tagged retroactively; build shipped 2026-05-07 via deploy `dpl_3CuA3wCvLGWSMskiuviBN4eGAqjA`)*, `hotfix-jeanic4-compiled-by-dropdown-2026-05-05` |
+| Implementation Tags | `hotfix-jeanic1-contact-add-2026-05-05`, `hotfix-jeanic2-remove-site-requisition-2026-05-05`, `hotfix-jeanic3-delivery-propagation-2026-05-07` *(tagged retroactively on 2026-05-07; build shipped on 2026-05-06 via deploy `dpl_3CuA3wCvLGWSMskiuviBN4eGAqjA`)*, `hotfix-jeanic4-compiled-by-dropdown-2026-05-05` |
 
 ---
 
 ## Context
 
-Across the four propagation hotfixes shipped on 6 May 2026 (US-J1 through US-J4) and the imminent US-002 build (ADR-001), two cross-cutting design decisions were made implicitly by the implementation team but have not been written down as formal policy. Both decisions extend Jeanic's literal request and need to be documented as deliberate inferences rather than left as undocumented implementation choices.
+Across the four propagation hotfixes shipped 5–6 May 2026 (US-J1 through US-J4) and the imminent US-002 build (ADR-001), two cross-cutting design decisions were made implicitly by the implementation team but have not been written down as formal policy. Both decisions extend Jeanic's literal request and need to be documented as deliberate inferences rather than left as undocumented implementation choices.
 
 Jeanic's J-batch list asked for parent line item values to *propagate* to child line items. PUSH AI shipped propagation **plus** two additional design decisions that were not in the literal request:
 
 1. **Child-row input lockdown** — child fields corresponding to a propagated parent value are disabled in the UI, with a tooltip explaining the constraint.
 2. **Forward-only with no backfill** — only future updates propagate; existing data is not retroactively synced via blanket UPDATE.
 
-Both decisions have been in production since 6 May 2026 with no defects or user complaints reported. This ADR retrospectively documents the reasoning, raises the open questions for client confirmation, and establishes the policy as the standing pattern for all future propagation work — including ADR-001 (US-002 line item status) and any subsequent parent-child mirror relationships.
+Both decisions have been in production since 5 May 2026 with no defects or user complaints reported. This ADR retrospectively documents the reasoning, raises the open questions for client confirmation, and establishes the policy as the standing pattern for all future propagation work — including ADR-001 (US-002 line item status) and any subsequent parent-child mirror relationships.
 
 ---
 
@@ -66,7 +66,7 @@ This policy applies to all propagation work currently in production (US-J1 throu
 
 ## Evidence
 
-- **US-J1 through US-J4** (tagged 6 May 2026) — All four hotfixes implement child-row lockdown and forward-only propagation. All in production with zero defects reported as at the date of this ADR.
+- **US-J1 through US-J4** (J1/J2/J4 tagged 2026-05-05; J3 tagged retroactively 2026-05-07 — see the Audit Trail Reconciliation Note below) — All four hotfixes implement child-row lockdown and forward-only propagation. All in production with zero defects reported as at the date of this ADR.
 - **`qc_done` existing implementation** — Established the locked-child-input pattern in Phase 1. In production since Phase 1 sign-off (8 April 2026) with no operational pushback.
 - **J3 deployment record (6 May 2026)** — Explicit verbal decision in the deployment conversation: *"Backfill: SKIP. Match US-002 forward-only pattern. Consistent with the established propagation discipline."*
 - **Phase 1 sign-off (8 April 2026)** — Implicit acceptance of the parent-as-source-of-truth architecture by the client.
@@ -118,6 +118,7 @@ Going forward, **all parent-child mirror field implementations** in the ERHA sys
 
 1. The child-row input for the propagated field is locked using the standard treatment.
 2. Propagation is forward-only; no blanket backfill of existing data.
+3. **Tag verification after every push (procedural).** Although this section primarily codifies propagation behaviour, this procedural rule applies to all hotfix work in the repository: run `git tag -l "<pattern>"` immediately after every `git push origin <tag>` to verify the tag is present locally before considering the work closed. The missed-tag scenario documented in the Audit Trail Reconciliation Note below (J3, 2026-05-06 build, tag created retroactively 2026-05-07) would have been caught at the time of the original deploy by this check.
 
 Deviations from this policy require an ADR explicitly justifying the deviation.
 
@@ -135,4 +136,21 @@ A "yes" to questions 1 and 3, plus a clear answer to question 2 (which fields if
 
 ---
 
-*This ADR was authored on 2026-05-07 retrospectively. The decisions documented here have been in production since 2026-05-06 across US-J1 through US-J4. The retrospective character is itself part of the audit trail: it documents that the policy was made explicit and presented for ratification within 24 hours of the implementations shipping.*
+## Audit Trail Reconciliation Note
+
+**2026-05-07 — Retroactive J3 tag and bundled commit.** The `hotfix-jeanic3-delivery-propagation-2026-05-07` tag was created on 2026-05-07, one day after the J3 build shipped on 2026-05-06 (deploy `dpl_3CuA3wCvLGWSMskiuviBN4eGAqjA`). This delay was not intentional: in the working session that shipped J3, the post-deploy commit/tag/push step was skipped before pivoting to the next user story (US-009), and the J3 `src/App.tsx` changes — which had been written, applied, and deployed but not yet committed — were inadvertently bundled into the subsequent US-009 commit (`9cec724`).
+
+When this was identified on 2026-05-07, the cleanup taken was forward-only (no history rewrite, no force-push):
+
+1. The J3 patch script (`patch_j3_delivery_propagation.cjs`) was committed separately as a chore commit (`97582ea`) with a message disclosing the bundle.
+2. The tag `hotfix-jeanic3-delivery-propagation-2026-05-07` was created pointing at commit `9cec724` — the commit that actually contains the J3 `src/App.tsx` changes — with an annotation explaining the irregularity.
+3. This ADR was updated to reflect actual tag names and dates.
+4. The closing-section dates and the Implementation Tags annotation were corrected so that the audit trail records the truth rather than a tidied-up version.
+
+This note documents the irregularity for future readers so that two apparent inconsistencies — (a) the J3 tag date (2026-05-07) post-dating the J3 build date (2026-05-06), and (b) the J3 tag and the US-009 tag both pointing at commit `9cec724` — are not mistaken for accidental drift but understood as a deliberate, disclosed reconciliation.
+
+The standing rule added in the Standing Policy section above (item 3, tag verification after every push) is the procedural safeguard adopted in response to this incident.
+
+---
+
+*This ADR was authored on 2026-05-07 retrospectively. The decisions documented here have been in production since 2026-05-05 across US-J1 through US-J4. The retrospective character is itself part of the audit trail: it documents that the policy was made explicit and presented for ratification within 48 hours of the first implementation shipping.*
