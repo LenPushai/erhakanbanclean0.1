@@ -1,5 +1,21 @@
 # React + TypeScript + Vite
 
+## Decision Register
+
+This repository maintains an audit trail of architecture decisions and operational policies in [`/decisions/`](./decisions/INDEX.md). Each Architecture Decision Record (ADR) carries a Status (`Inferred — Awaiting Confirmation`, `Confirmed`, `Superseded`, or `Reserved`) and an Implementation Tag linking the decision to the git tag that shipped the code. Read the [register index](./decisions/INDEX.md) to understand the calculated decisions made on the client's behalf and the reversal paths attached to each one.
+
+## Recent shipped tags
+
+| Date       | Tag                                                 | Summary                                                                                                                                                                                                                                                                                |
+| ---------- | --------------------------------------------------- | -------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------------- |
+| 2026-05-05 | `hotfix-jeanic1-contact-add-2026-05-05`             | US-J1: Client Management — cannot add contacts (Jeanic UAT, 5 May 2026)                                                                                                                                                                                                                |
+| 2026-05-05 | `hotfix-jeanic2-remove-site-requisition-2026-05-05` | US-J2: Remove Site Requisition field from Job Card and Job Board (Jeanic UAT, 5 May 2026)                                                                                                                                                                                              |
+| 2026-05-05 | `hotfix-jeanic4-compiled-by-dropdown-2026-05-05`    | US-J4: Compiled By field becomes a system_dropdowns-backed dropdown (Jeanic UAT, 5 May 2026)                                                                                                                                                                                           |
+| 2026-05-06 | `hotfix-jeanic3-delivery-propagation-2026-05-07`    | US-J3: Workshop Board parent->child delivery field propagation (Jeanic UAT, 6 May 2026 build, tagged retroactively 7 May 2026). See [ADR-003 Audit Trail Reconciliation Note](./decisions/ADR-003-child-row-lockdown-forward-only-policy.md#audit-trail-reconciliation-note).          |
+| 2026-05-07 | `us-009-job-card-rfq-suppression-2026-05-07`        | US-009: Suppress empty Client RFQ No cell on printed Direct Job cards (2026-05-07).                                                                                                                                                                                                    |
+
+---
+
 This template provides a minimal setup to get React working in Vite with HMR and some ESLint rules.
 
 Currently, two official plugins are available:
