@@ -40,7 +40,12 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   try {
     const { to: originalTo, template, data, subject: rawSubject, html: rawHtml } = req.body;
-    const to = ["lenklopper03@gmail.com"]; // TEMP: override until erha.co.za DNS verified
+    // TEMP override for build/test only — REMOVE before Monday user go-live; tracked as US-014b.
+    // All outbound mail is forced to Len's inbox while erha.co.za DNS verification is pending,
+    // so e-sign Stage 1/Stage 2 smoke tests land in one place without paging Hendrik or customers.
+    // The mirror of this override lives in api/sign-submit.js (sendCustomerSignEmail) — both
+    // must be removed together when DNS verification clears.
+    const to = ["lenklopper03@gmail.com"];
     if (!to) return res.status(400).json({ error: 'Missing to' });
     let subject, html;
     if (rawSubject && rawHtml) {

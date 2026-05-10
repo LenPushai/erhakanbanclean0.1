@@ -2,10 +2,11 @@
 import { useState, useEffect } from 'react'
 import { ClipboardList, Briefcase, ChevronRight, ChevronDown, ChevronUp, Factory, Building2, Calendar, Hash, RefreshCw, ArrowDownToLine, ArrowUpFromLine, X, Mail, FileText, Paperclip, Send, Plus, Check, Printer, Upload, Package, Search, Filter, Edit3, XCircle, Trash2, Eye, CheckCircle, ShoppingCart, Download, Truck, DollarSign, AlertTriangle, Receipt, Users, Settings }  from 'lucide-react'
 import { supabase } from './lib/supabase'
-import { emailRFQCreated, emailQuoterAssigned, emailQuoteReady, emailOrderWon, emailJobInReview, emailJobReadyToPrint, emailJobPrinted, emailChildJobSpawned, emailJobStarted, emailJobQCCheck, emailJobComplete, emailJobDispatched } from './emailService'
+import { emailRFQCreated, emailQuoterAssigned, emailQuoteReady, emailOrderWon, emailJobInReview, emailJobReadyToPrint, emailJobPrinted, emailChildJobSpawned, emailJobStarted, emailJobQCCheck, emailJobComplete, emailJobDispatched, emailManagerReviewAndSign } from './emailService'
 import { format } from 'date-fns'
 import { useEntity, type OperatingEntity } from './contexts/EntityContext'
 import { EntitySwitcher, getBrandName, getHeaderLogo } from './components/EntitySwitcher'
+import { SignaturePage } from './components/SignaturePage'
 
 type Board = 'rfq' | 'job' | 'workshop' | 'procurement' | 'clients' | 'settings'
 
@@ -594,6 +595,11 @@ function
 
 App() {
   const [currentRole, setCurrentRoleState] = useState<string | null>(readStoredRole)
+  // E-sign /sign/:token short-circuit — signers arrive via emailed link with
+  // no app session. Bypass RoleSelector and main layout. Hooks must still be
+  // called unconditionally, so the actual return short-circuit happens after
+  // the hook block.
+  const isSignRoute = typeof window !== 'undefined' && window.location.pathname.startsWith('/sign/')
   const setCurrentRole = (role: string | null) => {
     setCurrentRoleState(role)
     try {
@@ -859,7 +865,52 @@ table { border-collapse:collapse; width:100%; }
     } finally { setWorkshopLoading(false) }
   }
 
-  useEffect(() => { fetchRFQs(); fetchJobs() }, [activeEntity])
+  // E-sign signature_tokens cache, keyed by rfq_id. Drives the "Send for
+  // Manager Approval" button visibility (no token + role gate) and the kanban
+  // badge text (per ADR-006 Lifecycle Integration Addendum). Refetched after
+  // any token-creating action (button press) or on entity switch.
+  const [tokensByRfq, setTokensByRfq] = useState<Record<string, any[]>>({})
+  const fetchSignatureTokens = async () => {
+    try {
+      const { data, error } = await supabase.from('signature_tokens').select('*').order('created_at', { ascending: false })
+      if (error) { console.error('signature_tokens fetch failed:', error.message); return }
+      const map: Record<string, any[]> = {}
+      for (const t of data || []) {
+        if (!map[t.rfq_id]) map[t.rfq_id] = []
+        map[t.rfq_id].push(t)
+      }
+      setTokensByRfq(map)
+    } catch (e: any) { console.error('signature_tokens fetch threw:', e.message) }
+  }
+
+  // E-sign Stage 1 trigger: create a 'manager' signature_token for the RFQ
+  // and dispatch the manager review-and-sign email. Hendrik is the only
+  // recipient in v1 per ADR-006 (Dewald fallback deferred to v2).
+  const handleSendForManagerApproval = async (rfq: RFQ) => {
+    if (!confirm(`Send "${rfq.rfq_no || rfq.enq_number || 'this quote'}" to Hendrik for manager sign-off?`)) return
+    try {
+      const token = (globalThis.crypto?.randomUUID?.()) || (Date.now() + '-' + Math.random().toString(36).slice(2))
+      const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
+      const { error } = await supabase.from('signature_tokens').insert({
+        rfq_id: rfq.id,
+        token,
+        client_email: 'hendrik@erha.co.za',
+        client_name: 'Hendrik',
+        expires_at: expiresAt,
+        is_valid: true,
+        used_at: null,
+        signature_stage: 'manager',
+      })
+      if (error) { alert('Could not create sign token: ' + error.message); return }
+      // Email send is best-effort - the token is the legal record. If the
+      // email fails, Jeanic can re-issue or the token can be re-emailed.
+      try { await emailManagerReviewAndSign(rfq, token) } catch (e: any) { console.error('manager email failed:', e.message) }
+      await fetchSignatureTokens()
+      alert('Sent to Hendrik for sign-off. Once signed, the customer will be emailed automatically.')
+    } catch (e: any) { alert('Send for manager approval failed: ' + e.message) }
+  }
+
+  useEffect(() => { if (!isSignRoute) { fetchRFQs(); fetchJobs(); fetchSignatureTokens() } }, [activeEntity, isSignRoute])
 
   const handleRFQUpdate = (updated: RFQ) => {
     setRfqs(prev => prev.map(r => r.id === updated.id ? updated : r))
@@ -924,6 +975,7 @@ table { border-collapse:collapse; width:100%; }
     } catch (e: any) { alert('Error: ' + e.message) }
   }
 
+  if (isSignRoute) return <SignaturePage />
   if (!currentRole) return <RoleSelector onSelect={setCurrentRole} />
   return (
     <div className="flex h-screen bg-gray-100">
@@ -998,7 +1050,7 @@ table { border-collapse:collapse; width:100%; }
         <div className="flex-1 flex overflow-hidden min-w-0">
           <div className="flex-1 overflow-auto p-6 min-w-0">
             {activeBoard === 'rfq'
-              ? <RFQBoard rfqs={rfqs} loading={loading} error={error} onRefresh={fetchRFQs} onCardClick={setSelectedRFQ} selectedId={selectedRFQ?.id} />
+              ? <RFQBoard rfqs={rfqs} loading={loading} error={error} onRefresh={fetchRFQs} onCardClick={setSelectedRFQ} selectedId={selectedRFQ?.id} tokensByRfq={tokensByRfq} currentRole={currentRole} onSendForApproval={handleSendForManagerApproval} />
               : activeBoard === 'job'
               ? <JobBoard jobs={jobs} loading={jobsLoading} onStatusChange={handleJobStatusChange} onPrintCard={handlePrintJobCard} onCardClick={setSelectedJob} selectedId={selectedJob?.id} />
               : activeBoard === 'procurement'
@@ -1023,7 +1075,7 @@ table { border-collapse:collapse; width:100%; }
 
 // RFQ BOARD
 
-function RFQBoard({ rfqs, loading, error, onRefresh, onCardClick, selectedId }: { rfqs: RFQ[]; loading: boolean; error: string | null; onRefresh: () => void; onCardClick: (rfq: RFQ) => void; selectedId?: string }) {
+function RFQBoard({ rfqs, loading, error, onRefresh, onCardClick, selectedId, tokensByRfq, currentRole, onSendForApproval }: { rfqs: RFQ[]; loading: boolean; error: string | null; onRefresh: () => void; onCardClick: (rfq: RFQ) => void; selectedId?: string; tokensByRfq: Record<string, any[]>; currentRole: string | null; onSendForApproval: (rfq: RFQ) => void }) {
   if (loading) return <div className="flex items-center justify-center h-64 gap-3 text-gray-400"><div className="w-5 h-5 border-2 border-gray-300 border-t-blue-500 rounded-full animate-spin" /><span>Loading RFQs...</span></div>
   if (error) return <div className="flex items-center justify-center h-64"><div className="bg-red-50 border border-red-200 rounded-xl p-6 text-center"><p className="text-red-700 font-semibold mb-2">Failed to load</p><p className="text-red-500 text-sm mb-4">{error}</p><button onClick={onRefresh} className="px-4 py-2 bg-red-600 text-white rounded-lg text-sm">Try Again</button></div></div>
   return (
@@ -1038,7 +1090,7 @@ function RFQBoard({ rfqs, loading, error, onRefresh, onCardClick, selectedId }: 
             </div>
             <div className="flex-1 bg-gray-200 rounded-b-lg p-2 min-h-96 space-y-2">
               {cards.length === 0 && <div className="flex items-center justify-center h-20"><p className="text-gray-400 text-xs">No RFQs</p></div>}
-              {cards.map(rfq => <RFQCard key={rfq.id} rfq={rfq} hoverColor={col.hover} onClick={() => onCardClick(rfq)} isSelected={rfq.id === selectedId} />)}
+              {cards.map(rfq => <RFQCard key={rfq.id} rfq={rfq} hoverColor={col.hover} onClick={() => onCardClick(rfq)} isSelected={rfq.id === selectedId} tokens={tokensByRfq[rfq.id] || []} currentRole={currentRole} onSendForApproval={onSendForApproval} />)}
             </div>
           </div>
         )
@@ -1049,10 +1101,24 @@ function RFQBoard({ rfqs, loading, error, onRefresh, onCardClick, selectedId }: 
 
 // RFQ CARD
 
-function RFQCard({ rfq, hoverColor, onClick, isSelected }: { rfq: RFQ; hoverColor: string; onClick: () => void; isSelected: boolean }) {
+function RFQCard({ rfq, hoverColor, onClick, isSelected, tokens, currentRole, onSendForApproval }: { rfq: RFQ; hoverColor: string; onClick: () => void; isSelected: boolean; tokens: any[]; currentRole: string | null; onSendForApproval: (rfq: RFQ) => void }) {
   const priority = rfq.priority?.toUpperCase() || 'NORMAL'
   const direction = rfq.rfq_direction?.toUpperCase()
   const enqNo = rfq.client_rfq_number || rfq.enq_number || rfq.rfq_no || '-'
+
+  // E-sign progress indicators driven by signature_tokens state, per ADR-006
+  // Lifecycle Integration Addendum. Kanban columns are unchanged; the badge
+  // and the "Send for Manager Approval" button surface fine-grained progress
+  // on QUOTED and SENT_TO_CUSTOMER cards.
+  const now = Date.now()
+  const isLive = (t: any) => !t.used_at && t.is_valid !== false && new Date(t.expires_at).getTime() > now
+  const stage1Live = tokens.find((t: any) => t.signature_stage === 'manager' && isLive(t))
+  const stage2Live = tokens.find((t: any) => t.signature_stage === 'client' && isLive(t))
+  const canSendForApproval = rfq.status === 'QUOTED' && !stage1Live && (currentRole === 'HENDRIK' || currentRole === 'JUANIC')
+  const showStage1AwaitingBadge = rfq.status === 'QUOTED' && !stage1Live && !canSendForApproval
+  const showStage1SignBadge = rfq.status === 'QUOTED' && !!stage1Live
+  const showStage2SignBadge = rfq.status === 'SENT_TO_CUSTOMER' && !!stage2Live
+
   return (
     <div onClick={onClick} className={`bg-white rounded-lg shadow-sm border-2 p-3 cursor-pointer hover:shadow-md ${hoverColor} transition-all ${isSelected ? 'border-blue-400 shadow-md' : 'border-transparent'}`}>
       <div className="flex items-center gap-1.5 mb-2 flex-wrap">
@@ -1071,6 +1137,26 @@ function RFQCard({ rfq, hoverColor, onClick, isSelected }: { rfq: RFQ; hoverColo
       <p className="text-sm font-medium text-gray-800 leading-snug mb-3 line-clamp-2">{rfq.description || 'No description'}</p>
       <div className="flex items-center gap-1.5 mb-1"><Building2 size={12} className="text-gray-400 shrink-0" /><span className="text-xs text-gray-500 truncate">{rfq.clients?.company_name || 'Unknown Client'}</span></div>
       {rfq.request_date && <div className="flex items-center gap-1.5"><Calendar size={12} className="text-gray-400 shrink-0" /><span className="text-xs text-gray-400">Received {formatDate(rfq.request_date)}</span></div>}
+      {canSendForApproval && (
+        <button onClick={(e) => { e.stopPropagation(); onSendForApproval(rfq) }} className="mt-2 w-full text-xs font-semibold text-white bg-blue-600 hover:bg-blue-700 rounded px-2 py-1.5">
+          Send for Manager Approval
+        </button>
+      )}
+      {showStage1AwaitingBadge && (
+        <div className="mt-2 text-xs font-semibold text-amber-800 bg-amber-50 border border-amber-200 rounded px-2 py-1 text-center">
+          Awaiting Send for Manager Approval
+        </div>
+      )}
+      {showStage1SignBadge && (
+        <div className="mt-2 text-xs font-semibold text-blue-800 bg-blue-50 border border-blue-200 rounded px-2 py-1 text-center">
+          Stage 1 — Awaiting Manager Signature
+        </div>
+      )}
+      {showStage2SignBadge && (
+        <div className="mt-2 text-xs font-semibold text-cyan-800 bg-cyan-50 border border-cyan-200 rounded px-2 py-1 text-center">
+          Stage 2 — Awaiting Customer Signature
+        </div>
+      )}
     </div>
   )
 }
