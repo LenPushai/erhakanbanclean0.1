@@ -1061,7 +1061,7 @@ table { border-collapse:collapse; width:100%; }
               ? <SettingsPage />
               : <WorkshopBoard jobs={workshopJobs} loading={workshopLoading} onRefresh={fetchWorkshopJobs} onStatusChange={handleWorkshopStatusChange} />}
           </div>
-          {selectedRFQ && <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4"><RFQDetailPanel rfq={selectedRFQ} onClose={() => setSelectedRFQ(null)} onUpdate={handleRFQUpdate} role={currentRole} activeEntity={activeEntity} onJobCreated={fetchJobs} onNavigateToJob={(jobNumber) => { setSelectedRFQ(null); setActiveBoard('job'); const job = jobs.find(j => j.job_number === jobNumber); if (job) setSelectedJob(job); }} /></div>}
+          {selectedRFQ && <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4"><RFQDetailPanel rfq={selectedRFQ} onClose={() => setSelectedRFQ(null)} onUpdate={handleRFQUpdate} role={currentRole} activeEntity={activeEntity} onJobCreated={fetchJobs} onNavigateToJob={(jobNumber) => { setSelectedRFQ(null); setActiveBoard('job'); const job = jobs.find(j => j.job_number === jobNumber); if (job) setSelectedJob(job); }} onSendForApproval={handleSendForManagerApproval} /></div>}
         </div>
       </main>
 
@@ -2508,7 +2508,7 @@ function CreateRFQModal({ activeEntity, onClose, onCreated }: { activeEntity: Op
 
 // RFQ DETAIL PANEL
 
-function RFQDetailPanel({ rfq, onClose, onUpdate, role, activeEntity, onJobCreated, onNavigateToJob }: { rfq: RFQ; onClose: () => void; onUpdate: (rfq: RFQ) => void; role: string | null; activeEntity: OperatingEntity; onJobCreated?: () => void; onNavigateToJob?: (jobNumber: string) => void }) {
+function RFQDetailPanel({ rfq, onClose, onUpdate, role, activeEntity, onJobCreated, onNavigateToJob, onSendForApproval }: { rfq: RFQ; onClose: () => void; onUpdate: (rfq: RFQ) => void; role: string | null; activeEntity: OperatingEntity; onJobCreated?: () => void; onNavigateToJob?: (jobNumber: string) => void; onSendForApproval: (rfq: RFQ) => void }) {
   const mediaOptions = useDropdownOptions('media_received', MEDIA_OPTIONS_FALLBACK)
   const actionTypeOptions = useDropdownOptions('action_types', ACTIONS_LIST_FALLBACK)
   const [lineItems, setLineItems] = React.useState<LineItem[]>([])
@@ -2993,18 +2993,10 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, activeEntity, onJobCreat
           </button>
         )}
 
-        {status === 'QUOTED' && (
-          <button onClick={async () => {
-            setSaving(true)
-            try {
-              const { data, error } = await supabase.from('rfqs').update({ status: 'SENT_TO_CUSTOMER' }).eq('id', rfq.id).select('*, clients(company_name)').single()
-              if (error) throw error
-              onUpdate(data)
-              import('./emailService').then(({ emailQuoteReady }) => emailQuoteReady(data))
-            } catch (err: any) { console.error(err) }
-            finally { setSaving(false) }
-          }} disabled={saving} className="w-full py-2 bg-cyan-600 hover:bg-cyan-700 text-white text-sm font-semibold rounded-lg disabled:opacity-50">
-            {saving ? 'Saving...' : 'Send Quote to Customer - Move to Sent'}
+        {status === 'QUOTED' && (role === 'HENDRIK' || role === 'JUANIC') && (
+          <button onClick={() => onSendForApproval(rfq)}
+            className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg">
+            Send for Manager Approval
           </button>
         )}
         {status === 'SENT_TO_CUSTOMER' && (
