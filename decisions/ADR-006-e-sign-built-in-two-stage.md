@@ -241,6 +241,86 @@ When CC resumes work on US-012 + US-013, the revised build brief must explicitly
 
 ---
 
+## Lifecycle Integration Addendum (2026-05-08)
+
+**Discovery during US-012 + US-013 pre-flight audit (post commit `729b09e`):** The CC audit grepped the codebase for the status states this ADR's original *Decision* section references — `READY_FOR_APPROVAL` and `APPROVED_INTERNAL` — and found **zero hits anywhere in `src/`**. The actual quote lifecycle in the live codebase is:
+
+```
+NEW → PENDING → QUOTED → SENT_TO_CUSTOMER → ACCEPTED → JOB_CREATED
+```
+
+The original *Decision* section's flow ("status moves to `READY_FOR_APPROVAL` → Stage 1 fires → flips to `APPROVED_INTERNAL` → Stage 2 fires → `ACCEPTED`") cannot be implemented as written without first introducing two new lifecycle values that don't exist. CC stopped per the standing rule. The audit-first discipline caught the gap before any code landed.
+
+### Three implementation paths considered
+
+- **Option A — Add both statuses as net-new lifecycle values.** Requires kanban column, badge, label, and guard updates across multiple `App.tsx` anchor points. Adds two visible kanban columns to the RFQ Board, changing what office users see on Monday. **Rejected** as scope creep beyond US-012 / US-013 and as an unnecessary UX change introduced during cutover week.
+- **Option B — Repurpose existing statuses (`QUOTED` as Stage 1 trigger, `SENT_TO_CUSTOMER` as Stage 2 trigger).** Preserves the kanban but conflates status semantics. **Rejected** because `QUOTED` would no longer cleanly mean "quote captured" — it would also mean "ready for manager signature," which are two operational concepts the user team has been treating distinctly during parallel run.
+- **Option C — Add the two statuses as DB-only values without kanban representation.** Creates a divide between visible workflow (kanban) and DB truth. **Rejected** because debugging and audit-log inspection become inconsistent with what users see; orphan status values confuse future engineers reading the code.
+
+### Decision: Option D — Drive e-sign via token state; do not add lifecycle values
+
+The signing workflow operates *around* the existing status transitions, with `signature_tokens` rows providing the fine-grained progress tracking that the kanban does not surface.
+
+**The integrated flow:**
+
+| Step | Trigger | What happens | Resulting state |
+|------|---------|--------------|-----------------|
+| Quote captured | User finishes quote entry | Quote sits at `QUOTED` on the RFQ Board | Status: `QUOTED`. No tokens yet. |
+| Send for manager approval | Authorised user clicks "Send for Manager Approval" on a `QUOTED` quote card | New row in `signature_tokens` with `signature_stage = 'manager'`; Stage 1 email sent | Status: `QUOTED`. Stage 1 token: created, unused. |
+| Manager signs | Manager clicks email link, reviews, signs | Stage 1 token marked `used_at`; `quote_signatures` row written; **automatically** creates Stage 2 token; Stage 2 email sent to customer; quote status flipped | Status: `SENT_TO_CUSTOMER`. Stage 1 token: used. Stage 2 token: created, unused. |
+| Customer signs | Customer clicks email link, reviews, signs | Stage 2 token marked `used_at`; `quote_signatures` row written; ORDER WON cascade fires | Status: `ACCEPTED`. Both tokens: used. |
+
+### Kanban behaviour (no column changes)
+
+The RFQ Board's existing columns (`NEW`, `PENDING`, `QUOTED`, `SENT_TO_CUSTOMER`, `ACCEPTED`, `JOB_CREATED`) stay exactly as they are. Quote cards in `QUOTED` and `SENT_TO_CUSTOMER` columns show a small badge driven by token state:
+
+- **`QUOTED` with no tokens:** "Awaiting Send for Manager Approval"
+- **`QUOTED` with unused Stage 1 token:** "Stage 1 — Awaiting Manager Signature"
+- **`SENT_TO_CUSTOMER` with unused Stage 2 token:** "Stage 2 — Awaiting Customer Signature"
+- **`ACCEPTED`:** no special badge — the status itself communicates completion
+
+The badge logic queries `signature_tokens` filtered by `rfq_id` and joins to `quote_signatures` for completion state. Indexed lookup, cheap query.
+
+### Reasoning
+
+**1. Zero kanban changes for Monday.** Office users (Hendrik, Dewald, Jeanic, Cherise) see the RFQ Board exactly as they've been seeing it during parallel run. No new columns to learn, no surprise UX. Monday cutover stays clean.
+
+**2. Status semantics stay clean.** `QUOTED` keeps meaning "quote has been captured." `SENT_TO_CUSTOMER` keeps meaning "the customer has the quote." No conflation, no rename of established operational vocabulary.
+
+**3. Token state IS the source of truth for the signing flow.** The existing schema (`signature_tokens.is_valid`, `expires_at`, `used_at`) is rich enough to express the flow's full state machine. We use what's there rather than fight it. This is the same principle that drove the Reconciliation Note above — the live design is genuinely good and shouldn't be re-engineered just to match an outdated spec.
+
+**4. Audit trail is unified.** The kanban tells the high-level story ("a quote went from `NEW` to `ACCEPTED`"); `signature_tokens` and `quote_signatures` tell the granular story ("manager signed at X time, customer signed at Y time, here are the IPs and user agents"). Two coordinated logs, zero contradictions.
+
+**5. Reversibility is preserved.** If at any point ERHA wants to add explicit lifecycle states for the signing intermediate steps, that's a future ADR. The current decision doesn't paint into a corner — adding states later just means migrating token-state-based logic into status-based logic with a small ALTER and code change. Roughly half a dev day of effort.
+
+### Build implications (further revisions to the brief)
+
+The revised CC build brief that goes out next must reflect:
+
+1. **No `READY_FOR_APPROVAL` or `APPROVED_INTERNAL` references.** These statuses do not exist and will not be added.
+2. **Stage 1 trigger is the user action "Send for Manager Approval"** on a `QUOTED` quote — a button on the quote card, not an automatic status-driven trigger. This adds one small UI element to the build (button + handler) but is materially smaller than adding kanban columns.
+3. **Stage 1 success transitions** the quote from `QUOTED` → `SENT_TO_CUSTOMER` AND creates the Stage 2 token AND sends the customer email — three coordinated actions in one transaction.
+4. **Stage 2 success transitions** the quote from `SENT_TO_CUSTOMER` → `ACCEPTED` AND fires the ORDER WON cascade.
+5. **Kanban card badges** read token state to display progress indicators on `QUOTED` and `SENT_TO_CUSTOMER` cards. This is a small visual addition, not a structural kanban change.
+
+### Open Question for Client Confirmation
+
+This addendum surfaces one new question that should be ratified by Jeanic before Monday:
+
+5. **The "Send for Manager Approval" button — who can press it?** v1 proposes Jeanic as the gatekeeper (operational lead), with Hendrik also able to press it. Cherise (admin) and Dewald (quoter) cannot. Confirm with Jeanic.
+
+(Numbering continues from the original ADR-006 open questions Q1–Q4.)
+
+### Standing forward
+
+Like the Reconciliation Note above, this Addendum is **forward-only**. The original *Decision* and *Sequencing* sections at the top of this ADR are preserved as historical record. The Reconciliation Note is the source of truth for the **data layer**. This Addendum is the source of truth for the **lifecycle integration**. Together with the original ADR they describe the full e-sign architecture as actually built, with the gaps between original intent and live reality fully documented.
+
+The next CC build brief must explicitly reference both the Reconciliation Note and this Addendum as authoritative.
+
+---
+
 *This ADR was authored on 2026-05-08 prior to implementation. It documents both the original DocuSign choice (now superseded) and the Built-in E-Sign decision that replaces it. The DocuSign integration code that was partially built will not be migrated — it should be removed or archived as a separate cleanup task tracked outside this ADR.*
 
 *The Audit Trail Reconciliation Note appended on 2026-05-08 captures the discovery that the data layer pre-existed this ADR and the decision to adapt the spec to the live schema rather than recreate. The pre-existing schema is, in several material respects, better-designed than the original spec — denormalised quote data, readable stage names, and additive columns that improve both audit defensibility and ML-readiness.*
+
+*The Lifecycle Integration Addendum appended on 2026-05-08 captures the discovery that the original Decision section's status flow (`READY_FOR_APPROVAL` / `APPROVED_INTERNAL`) does not match the live codebase, and the decision to drive the e-sign workflow via token state rather than introduce new lifecycle values. The kanban remains unchanged for Monday cutover; granular signing progress is tracked via `signature_tokens` and surfaced as small badges on existing quote cards.*
