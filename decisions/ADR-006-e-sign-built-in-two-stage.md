@@ -142,4 +142,105 @@ A "yes" to question 1 (or an alternative TTL), plus answers to 2, 3, and 4, move
 
 ---
 
+## Audit Trail Reconciliation Note (2026-05-08)
+
+**Discovery:** During the pre-build audit phase for US-012 + US-013, a Supabase schema probe revealed that **both `signature_tokens` and `quote_signatures` tables already exist in the live database** with a fully-formed column structure that **precedes this ADR**. The tables were created during earlier work — most likely the February 2026 e-sign design session — and were never populated. The audit found them empty (`status 200, body: []`) and structurally complete.
+
+This means the original specification in this ADR's *Decision* section described tables that needed to be *created*, when in fact the data layer had already been built to a different design. Building against the original spec would have either failed (table-creation conflicts) or required a destructive migration of existing structure. The audit-first discipline caught this before any code landed — the catch is the system working as designed.
+
+**The reconciliation decision: adapt this ADR to the existing schema. Do not drop and recreate.**
+
+### Live schema (ground truth, captured via Supabase information_schema query 2026-05-08)
+
+**`signature_tokens` (10 columns):**
+
+| Column | Type | Nullable | Default |
+|--------|------|----------|---------|
+| `id` | uuid | NO | `gen_random_uuid()` |
+| `rfq_id` | uuid | NO | — |
+| `token` | varchar | NO | — |
+| `client_email` | varchar | NO | — |
+| `client_name` | varchar | YES | — |
+| `expires_at` | timestamptz | NO | — *(caller-set, not auto-defaulted)* |
+| `used_at` | timestamptz | YES | — |
+| `is_valid` | boolean | YES | `true` |
+| `created_at` | timestamptz | YES | `now()` |
+| `signature_stage` | text | YES | `'manager'` |
+
+**`quote_signatures` (17 columns):**
+
+| Column | Type | Nullable | Default |
+|--------|------|----------|---------|
+| `id` | uuid | NO | `gen_random_uuid()` |
+| `rfq_id` | uuid | YES | — |
+| `quote_number` | varchar | YES | — |
+| `signer_name` | varchar | NO | — |
+| `signer_email` | varchar | NO | — |
+| `signer_title` | varchar | YES | — |
+| `signer_company` | varchar | YES | — |
+| `signature_data` | text | YES | — |
+| `signature_type` | varchar | YES | `'click'` |
+| `signed_at` | timestamptz | YES | `now()` |
+| `ip_address` | varchar | YES | — |
+| `user_agent` | text | YES | — |
+| `quote_total` | numeric | YES | — |
+| `quote_description` | text | YES | — |
+| `status` | varchar | YES | `'SIGNED'` |
+| `created_at` | timestamptz | YES | `now()` |
+| `signature_stage` | varchar | YES | `'client'` |
+
+### Reconciliation map — original ADR-006 spec → live schema
+
+| Original ADR-006 spec | Live schema reality | Decision |
+|----------------------|---------------------|----------|
+| `signature_tokens.quote_id` (FK to quotes) | `signature_tokens.rfq_id` (links at RFQ level) | **Adapt to live.** RFQ-level linkage is consistent with broader ERHA data model where quotes live under RFQs. |
+| `signature_tokens.stage` smallint (1 or 2) | `signature_tokens.signature_stage` text (`'manager'` / `'client'`) | **Adapt to live.** Readable string values are more legible in queries, logs, and admin tools than magic numbers. Decision against original spec. |
+| `signature_tokens.recipient_email` | `signature_tokens.client_email` | **Adapt to live.** Naming difference; same purpose. |
+| `signature_tokens` default `expires_at = now() + 7 days` | No default; caller sets `expires_at` explicitly | **Adapt to live.** Build code sets explicit 7-day expiry at token creation rather than relying on schema default. Same outcome. |
+| `quote_signatures.quote_id` (FK) | `quote_signatures.rfq_id` (RFQ-level linkage) + denormalised `quote_number`, `quote_total`, `quote_description` | **Adapt to live, and the live schema is *better*.** Denormalised quote data captured at signing time is an immutable record of *what was actually signed* — strong for legal/audit purposes. Original ADR spec underspecified this. |
+| `quote_signatures.stage` smallint | `quote_signatures.signature_stage` varchar | Same decision as on `signature_tokens` — adapt to live. |
+| `quote_signatures.signer_ip` | `quote_signatures.ip_address` | **Adapt to live.** |
+| `quote_signatures.signature_image` | `quote_signatures.signature_data` | **Adapt to live.** |
+| `quote_signatures.signature_method` (drawn / clicked) | `quote_signatures.signature_type` (default `'click'`) | **Adapt to live.** Same purpose, different naming. |
+| `quote_signatures.signature_token_id` FK | **Not present in live schema** | **Decided against.** Linkage is inferred via `rfq_id` + `signature_stage` (one token + one signature per RFQ per stage). Adding a strict FK is a Phase 2 enhancement if linkage proves ambiguous in practice. |
+
+### Live schema columns the original ADR-006 did not anticipate (additive value)
+
+The live schema includes columns the original spec missed, all of which add real value:
+
+- **`signer_title`, `signer_company`** — additional signer metadata. Strengthens the audit record of *who signed in what capacity*.
+- **`quote_total`, `quote_description`, `quote_number`** (denormalised on `quote_signatures`) — immutable record of what was signed at the moment of signing. Critical for legal defensibility if a quote is later modified or deleted.
+- **`user_agent`** — browser/device info captured at signing. Useful for audit, fraud detection, and ML on signature behaviour.
+- **`status`** (default `'SIGNED'` on `quote_signatures`) — signature lifecycle field. Allows for future states like `'REVOKED'` or `'CHALLENGED'` without schema changes.
+- **`is_valid`** flag on `signature_tokens` — soft-invalidation capability. Lets us mark a token invalid without deleting the record.
+
+The live schema is also **better aligned with the PUSH AI ML-first mandate** than the original spec. Fields like `user_agent`, `signature_type`, `signer_title`, `signer_company`, `quote_total`, and `is_valid` are all useful features for future ML on signature behaviour, fraud detection, and trust scoring. The original ADR-006 spec would have produced a leaner schema with fewer ML hooks.
+
+### Build implications (revised from original *Sequencing* section)
+
+1. **No DDL migration in v1.** Both tables exist; the build does not create them. The original spec's "schema migration creating two tables" step is removed.
+2. **Optional ALTER TABLE deferred.** Adding a `signature_token_id` FK to `quote_signatures` is *not* in v1 — flagged as Phase 2 enhancement if RFQ + stage inference proves ambiguous in practice.
+3. **PostgREST schema reload required only if columns change.** No reload needed for v1 since no DDL runs.
+4. **All US-012 + US-013 build work shifts to email templates, signature route, signature capture component, status transitions, token validation, and the ORDER WON cascade trigger.** Data layer is in place.
+5. **Build code must use live column names.** Every reference to `quote_id`, `recipient_email`, `signer_ip`, `signature_image`, `signature_method`, `stage` (as a number) in CC's build brief was wrong. Revised build brief must use `rfq_id`, `client_email`, `ip_address`, `signature_data`, `signature_type`, `signature_stage` (text values `'manager'` / `'client'`).
+6. **Stage values in code:** `'manager'` for Stage 1 (internal), `'client'` for Stage 2 (external). Not `1` and `2`.
+7. **The live schema's design choices (denormalisation, readable stage names, additive columns) are now canonical.** Future ADRs that touch e-sign should reference this Reconciliation Note as the authoritative schema description.
+
+### What this means for the open questions in the original ADR
+
+- **Q1 (7-day token TTL)** — still open; token TTL is set in build code at token creation, not in schema.
+- **Q2 (signature method preference)** — partially answered by live schema. The default `signature_type` is `'click'`, suggesting click-to-accept is the established baseline; drawn signature is an alternative path the schema supports.
+- **Q3 (reminder cadence)** — unchanged; still v2 enhancement.
+- **Q4 (Stage 1 routing)** — unchanged; build-side decision.
+
+### Standing forward
+
+This Reconciliation Note is **forward-only** — the original Decision and Reasoning sections above are preserved as the historical record of how this ADR was originally written. They are NOT to be edited to retroactively match the live schema. The Note itself documents the gap between original intent and discovered reality, and the reconciliation choice. This matches the audit-trail discipline established in ADR-003's *Audit Trail Reconciliation Note*.
+
+When CC resumes work on US-012 + US-013, the revised build brief must explicitly reference this Note as authoritative for the data layer.
+
+---
+
 *This ADR was authored on 2026-05-08 prior to implementation. It documents both the original DocuSign choice (now superseded) and the Built-in E-Sign decision that replaces it. The DocuSign integration code that was partially built will not be migrated — it should be removed or archived as a separate cleanup task tracked outside this ADR.*
+
+*The Audit Trail Reconciliation Note appended on 2026-05-08 captures the discovery that the data layer pre-existed this ADR and the decision to adapt the spec to the live schema rather than recreate. The pre-existing schema is, in several material respects, better-designed than the original spec — denormalised quote data, readable stage names, and additive columns that improve both audit defensibility and ML-readiness.*
