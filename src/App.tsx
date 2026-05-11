@@ -3192,7 +3192,7 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, activeEntity, onJobCreat
 
           <div className="px-5 py-4 border-b border-gray-100">
             <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-3">Attachments</p>
-            <label className={`flex items-center gap-3 px-4 py-3 border-2 border-dashed rounded-lg cursor-pointer transition-colors mb-3 ${uploadingPanelFiles ? 'border-blue-300 bg-blue-50 cursor-wait' : 'border-gray-300 hover:border-blue-400 hover:bg-blue-50'}`}>
+            {canWriteRFQ(role, rfq) && <label className={`flex items-center gap-3 px-4 py-3 border-2 border-dashed rounded-lg cursor-pointer transition-colors mb-3 ${uploadingPanelFiles ? 'border-blue-300 bg-blue-50 cursor-wait' : 'border-gray-300 hover:border-blue-400 hover:bg-blue-50'}`}>
               <Paperclip size={16} className="text-gray-400 shrink-0" />
               <div>
                 <p className="text-xs font-medium text-gray-700">{uploadingPanelFiles ? 'Uploading...' : 'Click to attach files'}</p>
@@ -3215,7 +3215,7 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, activeEntity, onJobCreat
                 setUploadingPanelFiles(false)
                 e.target.value = ''
               }} />
-            </label>
+            </label>}
             {panelAttachments.length === 0 && !uploadingPanelFiles && (
               <p className="text-xs text-gray-400 text-center py-2">No attachments yet</p>
             )}
@@ -3229,13 +3229,13 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, activeEntity, onJobCreat
                         <FileText size={13} className="text-blue-500 shrink-0" />
                         <span className="text-xs font-medium text-blue-700 truncate">{att.file_name}</span>
                       </a>
-                      <button onClick={async () => {
+                      {canWriteRFQ(role, rfq) && <button onClick={async () => {
                         await supabase.storage.from('rfq-attachments').remove([att.file_path])
                         await supabase.from('rfq_attachments').delete().eq('id', att.id)
                         setPanelAttachments(prev => prev.filter(a => a.id !== att.id))
                       }} className="ml-2 text-red-400 hover:text-red-600 shrink-0">
                         <X size={12} />
-                      </button>
+                      </button>}
                     </div>
                   )
                 })}
