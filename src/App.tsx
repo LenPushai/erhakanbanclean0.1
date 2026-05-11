@@ -3250,14 +3250,14 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, activeEntity, onJobCreat
           )}
         </div>
       </div>
-      {showEmail && <EmailModal rfq={rfq} onClose={() => setShowEmail(false)} />}
+      {showEmail && <EmailModal rfq={rfq} role={role} onClose={() => setShowEmail(false)} />}
     </>
   )
 }
 
 // EMAIL MODAL
 
-function EmailModal({ rfq, onClose }: { rfq: RFQ; onClose: () => void }) {
+function EmailModal({ rfq, role, onClose }: { rfq: RFQ; role: string | null; onClose: () => void }) {
   const template = EMAIL_TEMPLATES[rfq.status] || EMAIL_TEMPLATES['NEW']
   const enqNo = rfq.client_rfq_number || rfq.enq_number || rfq.rfq_no || '-'
   const contactName = rfq.contact_person || 'Sir/Madam'
@@ -3269,6 +3269,10 @@ function EmailModal({ rfq, onClose }: { rfq: RFQ; onClose: () => void }) {
   const [sent, setSent] = useState(false)
 
   const handleSend = async () => {
+    if (!canWriteRFQ(role, rfq)) {
+      alert('Permission denied: only the assigned quoter or a manager can email about this RFQ.')
+      return
+    }
     if (!to) { alert('Please enter a recipient email address'); return }
     setSending(true)
     try {
@@ -3306,9 +3310,9 @@ function EmailModal({ rfq, onClose }: { rfq: RFQ; onClose: () => void }) {
         </div>
         <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-3">
           <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
-          <button onClick={handleSend} disabled={!to || sending || sent} className="flex items-center gap-2 px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white text-sm font-semibold rounded-lg disabled:opacity-50 transition-colors">
+          {canWriteRFQ(role, rfq) && <button onClick={handleSend} disabled={!to || sending || sent} className="flex items-center gap-2 px-4 py-2 bg-orange-500 hover:bg-orange-600 text-white text-sm font-semibold rounded-lg disabled:opacity-50 transition-colors">
             <Send size={14} />{sent ? 'Sent!' : sending ? 'Sending...' : 'Send Email'}
-          </button>
+          </button>}
         </div>
       </div>
     </div>
