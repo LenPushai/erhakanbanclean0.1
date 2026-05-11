@@ -1103,7 +1103,7 @@ table { border-collapse:collapse; width:100%; }
         </div>
       </main>
 
-      {showCreateModal && <CreateRFQModal activeEntity={activeEntity} onClose={() => setShowCreateModal(false)} onCreated={handleRFQCreated} />}
+      {showCreateModal && <CreateRFQModal activeEntity={activeEntity} role={currentRole} onClose={() => setShowCreateModal(false)} onCreated={handleRFQCreated} />}
       {showCreateDirectJob && <CreateDirectJobModal key={directJobModalKey} activeEntity={activeEntity} onClose={() => setShowCreateDirectJob(false)} onCreated={fetchJobs} />}
       {showJarisonImport && <JarisonImportModal activeEntity={activeEntity} onClose={() => setShowJarisonImport(false)} onImported={fetchJobs} />}
       {selectedJob && <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4"><JobDetailPanel key={selectedJob.id} job={selectedJob} parentJobNumber={jobs.find(j=>j.id===selectedJob?.parent_job_id)?.job_number} activeEntity={activeEntity} onClose={() => setSelectedJob(null)} onUpdate={(j) => { setSelectedJob(j); fetchJobs() }} /></div>}
@@ -2206,7 +2206,7 @@ function CreateDirectJobModal({ activeEntity, onClose, onCreated }: { activeEnti
 
 // CREATE RFQ MODAL
 
-function CreateRFQModal({ activeEntity, onClose, onCreated }: { activeEntity: OperatingEntity; onClose: () => void; onCreated: () => void }) {
+function CreateRFQModal({ activeEntity, role, onClose, onCreated }: { activeEntity: OperatingEntity; role: string | null; onClose: () => void; onCreated: () => void }) {
   const [saving, setSaving] = React.useState(false)
   const [uploadingFiles, setUploadingFiles] = React.useState(false)
   const [clients, setClients] = React.useState<any[]>([])
@@ -2289,6 +2289,10 @@ function CreateRFQModal({ activeEntity, onClose, onCreated }: { activeEntity: Op
   }
 
   const handleSave = async () => {
+    if (!canWrite(role)) {
+      alert('Permission denied: only a manager (Managing Director or Operations System Manager) can create a new RFQ.')
+      return
+    }
     if (!form.client_id && !showNewClient) { alert('Please select a client'); return }
     if (showNewClient && !newClientName.trim()) { alert('Please enter the new client name'); return }
     if (!form.description.trim()) { alert('Description is required'); return }
@@ -2535,9 +2539,9 @@ function CreateRFQModal({ activeEntity, onClose, onCreated }: { activeEntity: Op
 
         <div className="flex justify-end gap-3 px-6 py-4 border-t border-gray-200 bg-gray-50 rounded-b-xl">
           <button type="button" onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-800 font-medium">Cancel</button>
-          <button type="button" onClick={handleSave} disabled={saving || uploadingFiles} className="px-6 py-2 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
+          {canWrite(role) && <button type="button" onClick={handleSave} disabled={saving || uploadingFiles} className="px-6 py-2 bg-blue-600 text-white text-sm font-semibold rounded-lg hover:bg-blue-700 disabled:opacity-50 disabled:cursor-not-allowed transition-colors">
             {saving ? 'Creating...' : 'Create RFQ'}
-          </button>
+          </button>}
         </div>
       </div>
     </div>
