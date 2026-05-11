@@ -3062,7 +3062,7 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, activeEntity, onJobCreat
             {saving ? 'Saving...' : 'Save Order - Move to Order Won'}
           </button>
         )}
-              {status === 'ACCEPTED' && (
+              {status === 'ACCEPTED' && canWrite(role) && (
                 <button onClick={async () => {
                   setSaving(true)
                   try {
