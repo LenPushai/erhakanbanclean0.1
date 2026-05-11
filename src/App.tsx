@@ -1104,7 +1104,7 @@ table { border-collapse:collapse; width:100%; }
       </main>
 
       {showCreateModal && <CreateRFQModal activeEntity={activeEntity} role={currentRole} onClose={() => setShowCreateModal(false)} onCreated={handleRFQCreated} />}
-      {showCreateDirectJob && <CreateDirectJobModal key={directJobModalKey} activeEntity={activeEntity} onClose={() => setShowCreateDirectJob(false)} onCreated={fetchJobs} />}
+      {showCreateDirectJob && <CreateDirectJobModal key={directJobModalKey} activeEntity={activeEntity} role={currentRole} onClose={() => setShowCreateDirectJob(false)} onCreated={fetchJobs} />}
       {showJarisonImport && <JarisonImportModal activeEntity={activeEntity} onClose={() => setShowJarisonImport(false)} onImported={fetchJobs} />}
       {selectedJob && <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4"><JobDetailPanel key={selectedJob.id} job={selectedJob} parentJobNumber={jobs.find(j=>j.id===selectedJob?.parent_job_id)?.job_number} activeEntity={activeEntity} onClose={() => setSelectedJob(null)} onUpdate={(j) => { setSelectedJob(j); fetchJobs() }} /></div>}
     </div>
@@ -1973,7 +1973,7 @@ function JobDetailPanel({ job, parentJobNumber, activeEntity, onClose, onUpdate 
 
 // CREATE DIRECT JOB MODAL
 
-function CreateDirectJobModal({ activeEntity, onClose, onCreated }: { activeEntity: OperatingEntity; onClose: () => void; onCreated: () => void }) {
+function CreateDirectJobModal({ activeEntity, role, onClose, onCreated }: { activeEntity: OperatingEntity; role: string | null; onClose: () => void; onCreated: () => void }) {
   const [saving, setSaving] = React.useState(false)
   const [clients, setClients] = React.useState<any[]>([])
   const [selectedClientId, setSelectedClientId] = React.useState('')
@@ -2021,6 +2021,10 @@ function CreateDirectJobModal({ activeEntity, onClose, onCreated }: { activeEnti
   const updateLineItem = (i: number, field: string, val: any) => setLineItems(li => li.map((item, idx) => idx === i ? { ...item, [field]: val } : item))
 
   const handleCreate = async () => {
+    if (!canWrite(role)) {
+      alert('Permission denied: only a manager (Managing Director or Operations System Manager) can create a direct job.')
+      return
+    }
     if (!selectedClientId && !showNewClient) { alert('Please select a client'); return }
     if (showNewClient && !newClientName.trim()) { alert('Please enter the new client name'); return }
     setSaving(true)
@@ -2195,9 +2199,9 @@ function CreateDirectJobModal({ activeEntity, onClose, onCreated }: { activeEnti
         </div>
         <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-gray-100 shrink-0">
           <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors">Cancel</button>
-          <button onClick={handleCreate} disabled={saving} className="flex items-center gap-2 px-5 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-sm font-semibold rounded-lg transition-colors">
+          {canWrite(role) && <button onClick={handleCreate} disabled={saving} className="flex items-center gap-2 px-5 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-sm font-semibold rounded-lg transition-colors">
             <Briefcase size={14} />{saving ? 'Creating...' : 'Create Job'}
-          </button>
+          </button>}
         </div>
       </div>
     </div>
