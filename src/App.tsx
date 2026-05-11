@@ -1061,7 +1061,7 @@ table { border-collapse:collapse; width:100%; }
                 <RefreshCw size={14} />Refresh
               </button>
             )}
-            {activeBoard === 'rfq' && (
+            {activeBoard === 'rfq' && canWrite(currentRole) && (
               <button onClick={() => setShowCreateModal(true)} className="flex items-center gap-2 px-4 py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg transition-colors">
                 <Plus size={15} />New RFQ
               </button>
