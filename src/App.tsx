@@ -2689,6 +2689,10 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, activeEntity, onJobCreat
   }
 
   const handleSaveQuote = async () => {
+    if (!canWriteRFQ(role, rfq)) {
+      alert('Permission denied: only the assigned quoter or a manager can save a quote on this RFQ.')
+      return
+    }
     if (!quoteNumber.trim()) { alert('Please enter the Pastel quote number'); return }
     if (!quoteValue.trim()) { alert('Please enter the quote value'); return }
     setSaving(true)
