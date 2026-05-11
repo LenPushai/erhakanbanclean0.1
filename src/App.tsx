@@ -2854,6 +2854,10 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, activeEntity, onJobCreat
   }
 
   const handleSaveInvoice = async () => {
+    if (!canWrite(role)) {
+      alert('Permission denied: only a manager (Managing Director or Operations System Manager) can save an invoice and mark the order complete.')
+      return
+    }
     if (!invoiceNumber.trim()) { alert('Please enter the Pastel invoice number'); return }
     setSaving(true)
     try {
@@ -3112,7 +3116,7 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, activeEntity, onJobCreat
                   </select>
                 </div>
               </div>
-              {status === 'ACCEPTED' && <button onClick={handleSaveInvoice} disabled={saving} className="w-full py-2 bg-gray-800 hover:bg-gray-900 text-white text-sm font-semibold rounded-lg disabled:opacity-50">{saving ? 'Saving...' : 'Save Invoice - Move to Complete'}</button>}
+              {status === 'ACCEPTED' && canWrite(role) && <button onClick={handleSaveInvoice} disabled={saving} className="w-full py-2 bg-gray-800 hover:bg-gray-900 text-white text-sm font-semibold rounded-lg disabled:opacity-50">{saving ? 'Saving...' : 'Save Invoice - Move to Complete'}</button>}
             </div>
           )}
 
