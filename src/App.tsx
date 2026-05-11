@@ -1152,7 +1152,7 @@ function RFQCard({ rfq, hoverColor, onClick, isSelected, tokens, currentRole, on
   const isLive = (t: any) => !t.used_at && t.is_valid !== false && new Date(t.expires_at).getTime() > now
   const stage1Live = tokens.find((t: any) => t.signature_stage === 'manager' && isLive(t))
   const stage2Live = tokens.find((t: any) => t.signature_stage === 'client' && isLive(t))
-  const canSendForApproval = rfq.status === 'QUOTED' && !stage1Live && (currentRole === 'HENDRIK' || currentRole === 'JUANIC')
+  const canSendForApproval = rfq.status === 'QUOTED' && !stage1Live && canWrite(currentRole)
   const showStage1AwaitingBadge = rfq.status === 'QUOTED' && !stage1Live && !canSendForApproval
   const showStage1SignBadge = rfq.status === 'QUOTED' && !!stage1Live
   const showStage2SignBadge = rfq.status === 'SENT_TO_CUSTOMER' && !!stage2Live
@@ -2886,7 +2886,7 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, activeEntity, onJobCreat
           {actionMsg && <div className="mx-5 mt-3 px-3 py-2 bg-green-50 border border-green-200 rounded-lg text-green-700 text-sm">{actionMsg}</div>}
 
           <div className="px-5 py-4 border-b border-gray-100 space-y-3">
-            {role === 'HENDRIK' && (status === 'NEW' || status === 'PENDING') && (
+            {canWrite(role) && (status === 'NEW' || status === 'PENDING') && (
               <div>
                 <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-2">Assign Quoter</p>
                 <div className="flex gap-2">
@@ -3031,7 +3031,7 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, activeEntity, onJobCreat
           </button>
         )}
 
-        {status === 'QUOTED' && (role === 'HENDRIK' || role === 'JUANIC') && (
+        {status === 'QUOTED' && canWrite(role) && (
           <button onClick={() => onSendForApproval(rfq)}
             className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg">
             Send for Manager Approval
@@ -5171,7 +5171,7 @@ function PurchaseRequestDetailModal({ pr, onClose, onUpdated, currentRole, activ
     } catch (e: any) { alert('Error: ' + e.message); setProcessing(false) }
   }
 
-  const canApproveReject = currentRole === 'HENDRIK' && pr.status === 'PENDING_APPROVAL'
+  const canApproveReject = canWrite(currentRole) && pr.status === 'PENDING_APPROVAL'
 
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-start justify-center overflow-y-auto py-8">
@@ -5328,7 +5328,7 @@ function PurchaseOrdersTab({ purchaseOrders, loading, onRefresh, currentRole, ac
   const [statusFilter, setStatusFilter] = React.useState<string>('ACTIVE')
   const [selectedPO, setSelectedPO] = React.useState<PurchaseOrder | null>(null)
   const [deliveryPO, setDeliveryPO] = React.useState<PurchaseOrder | null>(null)
-  const canLogDelivery = currentRole === 'CHARLES' || currentRole === 'HENDRIK'
+  const canLogDelivery = canWrite(currentRole)
 
   const filtered = React.useMemo(() => {
     let result = [...purchaseOrders]
@@ -5485,7 +5485,7 @@ function PODetailModal({ po, onClose, onUpdated, currentRole, activeEntity }: { 
   const today = new Date().toISOString().split('T')[0]
   const isOverdue = po.required_by_date && po.required_by_date < today && po.status !== 'FULLY_RECEIVED' && po.status !== 'CLOSED'
 
-  const canLogDelivery = (currentRole === 'CHARLES' || currentRole === 'HENDRIK') && (po.status === 'ISSUED' || po.status === 'PARTIALLY_RECEIVED')
+  const canLogDelivery = canWrite(currentRole) && (po.status === 'ISSUED' || po.status === 'PARTIALLY_RECEIVED')
 
   const handleDownloadPDF = () => {
     const fmtDate = (d: string | null | undefined) => d ? new Date(d).toLocaleDateString('en-ZA') : '-'
@@ -5643,7 +5643,7 @@ function PODetailModal({ po, onClose, onUpdated, currentRole, activeEntity }: { 
     return 'text-gray-400'
   }
 
-  const canClose = currentRole === 'HENDRIK' && po.status !== 'CLOSED'
+  const canClose = canWrite(currentRole) && po.status !== 'CLOSED'
 
   return (
     <div className="fixed inset-0 bg-black/50 z-50 flex items-start justify-center overflow-y-auto py-8">
