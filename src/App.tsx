@@ -2715,6 +2715,10 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, activeEntity, onJobCreat
   }
 
   const handleSaveOrder = async () => {
+    if (!canWrite(role)) {
+      alert('Permission denied: only a manager (Managing Director or Operations System Manager) can mark an order won and create the job.')
+      return
+    }
     if (!poNumber.trim()) { alert('Please enter the client PO number'); return }
     setSaving(true)
     try {
@@ -3049,7 +3053,7 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, activeEntity, onJobCreat
             Send for Manager Approval
           </button>
         )}
-        {status === 'SENT_TO_CUSTOMER' && (
+        {status === 'SENT_TO_CUSTOMER' && canWrite(role) && (
           <button onClick={handleSaveOrder} disabled={saving} className="w-full py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-lg disabled:opacity-50">
             {saving ? 'Saving...' : 'Save Order - Move to Order Won'}
           </button>
