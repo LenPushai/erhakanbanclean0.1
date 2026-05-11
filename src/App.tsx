@@ -343,6 +343,50 @@ const ROLE_DISPLAY_NAMES: Record<string, string> = {
   ZACH: 'Zach',
 }
 
+// ───────────────────────────────────────────────────────────
+// Phase 1 RBAC (ADR-009)
+// Three-tier role model — single source of truth for write permissions.
+// FULL    : HENDRIK, JUANIC — all write actions
+// QUOTER  : DEWALD          — RFQ writes scoped to his assigned RFQs
+// READER  : CHERISE         — no writes anywhere
+//
+// Dormant roles (SONJA, CHARLES, JACO, ELSJE, ALWYN, ZACH) are
+// intentionally absent from TIER_BY_ROLE. getTier() returns null for
+// them, which denies all writes via the canWrite* helpers below. They
+// remain in VALID_ROLES for backward compatibility with legacy data.
+// ───────────────────────────────────────────────────────────
+
+type RoleTier = 'FULL' | 'QUOTER' | 'READER'
+
+const TIER_BY_ROLE: Record<string, RoleTier> = {
+  HENDRIK: 'FULL',
+  JUANIC:  'FULL',
+  DEWALD:  'QUOTER',
+  CHERISE: 'READER',
+}
+
+function getTier(role: string | null): RoleTier | null {
+  return role ? (TIER_BY_ROLE[role] ?? null) : null
+}
+
+// Generic write gate. FULL tier only. Used for non-RFQ surfaces:
+// Workshop, Settings, Procurement, Supplier/Client CRUD, Job-level edits,
+// Direct Job creation, Jarison import.
+function canWrite(role: string | null): boolean {
+  return getTier(role) === 'FULL'
+}
+
+// RFQ-specific write gate. FULL tier always, plus QUOTER (DEWALD) when the
+// RFQ is assigned to him. The match is case-sensitive against the
+// proper-case string ('Dewald'), NOT the uppercase role key ('DEWALD').
+function canWriteRFQ(role: string | null, rfq: { assigned_quoter_name?: string | null }): boolean {
+  const tier = getTier(role)
+  if (tier === 'FULL') return true
+  if (tier === 'QUOTER' && role === 'DEWALD' && rfq.assigned_quoter_name === 'Dewald') return true
+  return false
+}
+
+
 function readStoredRole(): string | null {
   try {
     const raw = localStorage.getItem(ROLE_STORAGE_KEY)
@@ -499,14 +543,8 @@ function RoleSelector({ onSelect }: any) {
           {([
             { key: 'HENDRIK', label: 'Managing Director', initials: 'MD', color: 'orange' },
             { key: 'JUANIC', label: 'Operations System Manager', initials: 'OS', color: 'blue' },
-            { key: 'SONJA', label: 'Procurement and Buying', initials: 'PB', color: 'green' },
-            { key: 'CHARLES', label: 'Store Manager', initials: 'SM', color: 'amber' },
             { key: 'DEWALD', label: 'General Manager', initials: 'GM', color: 'purple' },
-            { key: 'JACO', label: 'Site Manager', initials: 'SI', color: 'teal' },
-            { key: 'ELSJE', label: 'Site Admin', initials: 'SA', color: 'rose' },
-            { key: 'ALWYN', label: 'Site Foreman', initials: 'SF', color: 'indigo' },
-            { key: 'CHERISE', label: 'Reception', initials: 'RC', color: 'cyan' },
-            { key: 'ZACH', label: 'Shop Foreman', initials: 'SH', color: 'lime' },
+            { key: 'CHERISE', label: 'Administration', initials: 'AD', color: 'cyan' },
           ] as const).map(role => (
             <button key={role.key} onClick={() => onSelect(role.key)}
               className={`w-full flex items-center gap-4 px-5 py-3 border-2 border-gray-200 rounded-xl hover:border-${role.color}-400 hover:bg-${role.color}-50 transition-all group`}>
