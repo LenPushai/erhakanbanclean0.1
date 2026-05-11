@@ -2637,6 +2637,10 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, activeEntity, onJobCreat
   // explicit Hendrik sign-off — it creates data-consistency risk with
   // downstream jobs, POs, and activity_log records.
   const handleSaveRFQDetails = async () => {
+    if (!canWriteRFQ(role, rfq)) {
+      alert('Permission denied: only the assigned quoter or a manager can edit RFQ details on this RFQ.')
+      return
+    }
     setSaving(true)
     try {
       const before: Record<string, any> = {
@@ -3111,7 +3115,7 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, activeEntity, onJobCreat
           <div className="px-5 py-4 border-b border-gray-100">
             <div className="flex items-center justify-between mb-3">
               <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest">RFQ Details</p>
-              <button onClick={handleSaveRFQDetails} disabled={saving} className="px-3 py-1 text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white rounded-lg disabled:opacity-50">{saving ? 'Saving...' : 'Save Changes'}</button>
+              {canWriteRFQ(role, rfq) && <button onClick={handleSaveRFQDetails} disabled={saving} className="px-3 py-1 text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white rounded-lg disabled:opacity-50">{saving ? 'Saving...' : 'Save Changes'}</button>}
             </div>
             <p className="text-xs font-medium text-gray-500 mb-2">Client Information</p>
             <div className="grid grid-cols-2 gap-2 mb-4 pb-4 border-b border-gray-100">
