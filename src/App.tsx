@@ -2913,7 +2913,7 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, activeEntity, onJobCreat
                 <div><label className="text-xs font-medium text-gray-600 block mb-1">Value (excl VAT) *</label><input type="number" value={quoteValue} onChange={e => setQuoteValue(e.target.value)} placeholder="0.00" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400" /></div>
                 <div><label className="text-xs font-medium text-gray-600 block mb-1">Valid Until</label><input type="date" value={validUntil} onChange={e => setValidUntil(e.target.value)} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400" /></div>
               </div>
-              {status === 'PENDING' && <button onClick={handleSaveQuote} disabled={saving} className="w-full py-2 bg-purple-600 hover:bg-purple-700 text-white text-sm font-semibold rounded-lg disabled:opacity-50">{saving ? 'Saving...' : 'Save Quote - Move to Quoted'}</button>}
+              {status === 'PENDING' && canWriteRFQ(role, rfq) && <button onClick={handleSaveQuote} disabled={saving} className="w-full py-2 bg-purple-600 hover:bg-purple-700 text-white text-sm font-semibold rounded-lg disabled:opacity-50">{saving ? 'Saving...' : 'Save Quote - Move to Quoted'}</button>}
               {status === 'QUOTED' && quoteNumber && <div className="flex items-center gap-2 text-sm text-purple-700 bg-purple-50 px-3 py-2 rounded-lg"><FileText size={14} /> Quote {quoteNumber} - R {parseFloat(quoteValue || '0').toLocaleString('en-ZA', { minimumFractionDigits: 2 })} excl VAT</div>}
             </div>
           )}
