@@ -2926,7 +2926,7 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, activeEntity, onJobCreat
 
                 <div><label className="text-xs font-medium text-gray-600 block mb-1">Order Date</label><input type="date" value={orderDate} onChange={e => setOrderDate(e.target.value)} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400" /></div>
               </div>
-        {(['PENDING','QUOTED','SENT_TO_CUSTOMER'].includes(status)) && !rfq.job_number && (
+        {(['PENDING','QUOTED','SENT_TO_CUSTOMER'].includes(status)) && !rfq.job_number && canWrite(role) && (
           <button onClick={async () => {
             if (!confirm('FAST TRACK: This will create a Job Card immediately without waiting for a PO number. The RFQ will stay in its current status until the quote is sent and the PO is captured. Continue?')) return
             setSaving(true)
