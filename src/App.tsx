@@ -2614,6 +2614,10 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, activeEntity, onJobCreat
   const updatePanelLineItem = (idx: number, field: string, value: string) => setPanelLineItems(prev => prev.map((item, i) => i === idx ? { ...item, [field]: value } : item))
 
   const handleSaveLineItems = async () => {
+    if (!canWriteRFQ(role, rfq)) {
+      alert('Permission denied: only the assigned quoter or a manager can edit line items on this RFQ.')
+      return
+    }
     setSaving(true)
     try {
       await supabase.from('rfq_line_items').delete().eq('rfq_id', rfq.id)
@@ -3147,7 +3151,7 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, activeEntity, onJobCreat
           <div className="px-5 py-4 border-b border-gray-100">
             <div className="flex items-center justify-between mb-3">
               <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest">Line Items</p>
-              <button onClick={addPanelLineItem} className="text-xs font-semibold text-orange-600 hover:text-orange-700">+ Add Item</button>
+              {canWriteRFQ(role, rfq) && <button onClick={addPanelLineItem} className="text-xs font-semibold text-orange-600 hover:text-orange-700">+ Add Item</button>}
             </div>
             {loadingItems ? <p className="text-xs text-gray-400">Loading...</p> : (
               <>
@@ -3163,13 +3167,13 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, activeEntity, onJobCreat
                           <div className="col-span-7"><input value={item.description} onChange={e => updatePanelLineItem(idx, 'description', e.target.value)} placeholder="Description" className="w-full border border-gray-200 rounded px-1.5 py-1 text-xs focus:outline-none focus:border-blue-400" /></div>
                           <div className="col-span-2"><input type="number" value={item.quantity} onChange={e => updatePanelLineItem(idx, 'quantity', e.target.value)} className="w-full border border-gray-200 rounded px-1.5 py-1 text-xs focus:outline-none focus:border-blue-400" /></div>
                           <div className="col-span-2"><select value={item.unit_of_measure} onChange={e => updatePanelLineItem(idx, 'unit_of_measure', e.target.value)} className="w-full border border-gray-200 rounded px-1.5 py-1 text-xs focus:outline-none focus:border-blue-400 bg-white">{['EA','M','KG','L','SET','LOT','HR','DAY'].map(u => <option key={u} value={u}>{u}</option>)}</select></div>
-                          <div className="col-span-1 flex justify-center"><button onClick={() => removePanelLineItem(idx)} className="text-red-400 hover:text-red-600"><X size={12} /></button></div>
+                          <div className="col-span-1 flex justify-center">{canWriteRFQ(role, rfq) && <button onClick={() => removePanelLineItem(idx)} className="text-red-400 hover:text-red-600"><X size={12} /></button>}</div>
                         </div>
                       ))}
                     </div>
                   )
                 }
-                <button onClick={handleSaveLineItems} disabled={saving} className="w-full py-1.5 text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white rounded-lg disabled:opacity-50">{saving ? 'Saving...' : 'Save Line Items'}</button>
+                {canWriteRFQ(role, rfq) && <button onClick={handleSaveLineItems} disabled={saving} className="w-full py-1.5 text-xs font-semibold bg-blue-600 hover:bg-blue-700 text-white rounded-lg disabled:opacity-50">{saving ? 'Saving...' : 'Save Line Items'}</button>}
               </>
             )}
           </div>
