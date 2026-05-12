@@ -1106,7 +1106,7 @@ table { border-collapse:collapse; width:100%; }
       {showCreateModal && <CreateRFQModal activeEntity={activeEntity} role={currentRole} onClose={() => setShowCreateModal(false)} onCreated={handleRFQCreated} />}
       {showCreateDirectJob && <CreateDirectJobModal key={directJobModalKey} activeEntity={activeEntity} role={currentRole} onClose={() => setShowCreateDirectJob(false)} onCreated={fetchJobs} />}
       {showJarisonImport && <JarisonImportModal activeEntity={activeEntity} role={currentRole} onClose={() => setShowJarisonImport(false)} onImported={fetchJobs} />}
-      {selectedJob && <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4"><JobDetailPanel key={selectedJob.id} job={selectedJob} parentJobNumber={jobs.find(j=>j.id===selectedJob?.parent_job_id)?.job_number} activeEntity={activeEntity} onClose={() => setSelectedJob(null)} onUpdate={(j) => { setSelectedJob(j); fetchJobs() }} /></div>}
+      {selectedJob && <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4"><JobDetailPanel key={selectedJob.id} job={selectedJob} parentJobNumber={jobs.find(j=>j.id===selectedJob?.parent_job_id)?.job_number} activeEntity={activeEntity} role={currentRole} onClose={() => setSelectedJob(null)} onUpdate={(j) => { setSelectedJob(j); fetchJobs() }} /></div>}
     </div>
   )
 }
@@ -1484,7 +1484,7 @@ function JobBoard({ jobs, loading, onCardClick, selectedId, onStatusChange, onPr
 
 // JOB DETAIL PANEL
 
-function JobDetailPanel({ job, parentJobNumber, activeEntity, onClose, onUpdate }: { job: Job; parentJobNumber?: string; activeEntity: OperatingEntity; onClose: () => void; onUpdate: (j: Job) => void }) {
+function JobDetailPanel({ job, parentJobNumber, activeEntity, role, onClose, onUpdate }: { job: Job; parentJobNumber?: string; activeEntity: OperatingEntity; role: string | null; onClose: () => void; onUpdate: (j: Job) => void }) {
   const actionTypeOptions = useDropdownOptions('action_types', ACTIONS_LIST_FALLBACK)
   const compiledByOptions = useDropdownOptions('compiled_by', ['Cherise', 'Jeanic', 'Hendrik'])
   const [saving, setSaving] = React.useState(false)
@@ -1625,6 +1625,10 @@ function JobDetailPanel({ job, parentJobNumber, activeEntity, onClose, onUpdate 
 
 
   const handleSave = async () => {
+    if (!canWrite(role)) {
+      alert('Permission denied: only a manager (Managing Director or Operations System Manager) can save job changes.')
+      return
+    }
     setSaving(true)
     try {
       const before: Record<string, any> = {
@@ -1947,9 +1951,9 @@ function JobDetailPanel({ job, parentJobNumber, activeEntity, onClose, onUpdate 
       </div>
       <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-gray-100 shrink-0">
         <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900 hover:bg-gray-100 rounded-lg transition-colors">Close</button>
-        <button onClick={handleSave} disabled={saving} className="flex items-center gap-2 px-5 py-2 bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white text-sm font-semibold rounded-lg transition-colors">
+        {canWrite(role) && <button onClick={handleSave} disabled={saving} className="flex items-center gap-2 px-5 py-2 bg-green-600 hover:bg-green-700 disabled:opacity-50 text-white text-sm font-semibold rounded-lg transition-colors">
           <Check size={14} />{saving ? 'Saving...' : 'Save Changes'}
-        </button>
+        </button>}
       </div>
       {spawnTarget && (
         <SpawnJobModal
