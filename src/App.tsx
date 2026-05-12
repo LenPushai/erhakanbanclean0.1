@@ -1105,7 +1105,7 @@ table { border-collapse:collapse; width:100%; }
 
       {showCreateModal && <CreateRFQModal activeEntity={activeEntity} role={currentRole} onClose={() => setShowCreateModal(false)} onCreated={handleRFQCreated} />}
       {showCreateDirectJob && <CreateDirectJobModal key={directJobModalKey} activeEntity={activeEntity} role={currentRole} onClose={() => setShowCreateDirectJob(false)} onCreated={fetchJobs} />}
-      {showJarisonImport && <JarisonImportModal activeEntity={activeEntity} onClose={() => setShowJarisonImport(false)} onImported={fetchJobs} />}
+      {showJarisonImport && <JarisonImportModal activeEntity={activeEntity} role={currentRole} onClose={() => setShowJarisonImport(false)} onImported={fetchJobs} />}
       {selectedJob && <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4"><JobDetailPanel key={selectedJob.id} job={selectedJob} parentJobNumber={jobs.find(j=>j.id===selectedJob?.parent_job_id)?.job_number} activeEntity={activeEntity} onClose={() => setSelectedJob(null)} onUpdate={(j) => { setSelectedJob(j); fetchJobs() }} /></div>}
     </div>
   )
@@ -1202,7 +1202,7 @@ function RFQCard({ rfq, hoverColor, onClick, isSelected, tokens, currentRole, on
 // JOB BOARD
 
 
-function JarisonImportModal({ activeEntity, onClose, onImported }: { activeEntity: OperatingEntity; onClose: () => void; onImported: () => void }) {
+function JarisonImportModal({ activeEntity, role, onClose, onImported }: { activeEntity: OperatingEntity; role: string | null; onClose: () => void; onImported: () => void }) {
   const [csvRows, setCsvRows] = React.useState<any[]>([])
   const [fileName, setFileName] = React.useState('')
   const [importing, setImporting] = React.useState(false)
@@ -1236,6 +1236,10 @@ function JarisonImportModal({ activeEntity, onClose, onImported }: { activeEntit
   }
 
   const handleImport = async () => {
+    if (!canWrite(role)) {
+      alert('Permission denied: only a manager (Managing Director or Operations System Manager) can import from Jarison.')
+      return
+    }
     if (csvRows.length === 0) return
     setImporting(true)
     let success = 0, errors = 0
@@ -1343,10 +1347,10 @@ function JarisonImportModal({ activeEntity, onClose, onImported }: { activeEntit
 
         <div className="flex items-center justify-end gap-3 px-6 py-4 border-t border-gray-200">
           <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
-          <button onClick={handleImport} disabled={csvRows.length === 0 || importing || !!importResult}
+          {canWrite(role) && <button onClick={handleImport} disabled={csvRows.length === 0 || importing || !!importResult}
             className="px-4 py-2 bg-amber-500 hover:bg-amber-600 disabled:bg-gray-300 text-white text-sm font-semibold rounded-lg transition-colors">
             {importing ? 'Importing...' : importResult ? 'Done' : `Import ${csvRows.length} Jobs`}
-          </button>
+          </button>}
         </div>
       </div>
     </div>
