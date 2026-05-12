@@ -1070,9 +1070,9 @@ table { border-collapse:collapse; width:100%; }
               <button onClick={() => setShowJarisonImport(true)} className="flex items-center gap-2 px-3 py-2 bg-amber-500 hover:bg-amber-600 text-white text-sm font-semibold rounded-lg transition-colors">
                 <Upload size={15} />Import Jarison
               </button>
-              <button onClick={() => { setDirectJobModalKey(k => k + 1); setShowCreateDirectJob(true) }} className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-lg transition-colors">
+              {canWrite(currentRole) && <button onClick={() => { setDirectJobModalKey(k => k + 1); setShowCreateDirectJob(true) }} className="flex items-center gap-2 px-4 py-2 bg-green-600 hover:bg-green-700 text-white text-sm font-semibold rounded-lg transition-colors">
                 <Plus size={15} />New Job
-              </button>
+              </button>}
             </>)}
             <div className="flex items-center gap-1.5 text-xs text-gray-500 pr-1 border-r border-gray-200">
               <span className="pr-2">Role: <span className="font-semibold text-gray-700">{ROLE_DISPLAY_NAMES[currentRole] || currentRole}</span></span>
