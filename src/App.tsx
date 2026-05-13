@@ -1547,6 +1547,10 @@ function JobDetailPanel({ job, parentJobNumber, activeEntity, role, onClose, onU
   const showMsg = (m: string) => { setMsg(m); setTimeout(() => setMsg(''), 3000) }
 
   const handleSpawnJob = async (lineItem: any) => {
+    if (!canWrite(role)) {
+      alert('Permission denied: only a manager (Managing Director or Operations System Manager) can spawn a child job.')
+      return
+    }
     setSpawning(lineItem.id)
     try {
       // Count existing children to determine suffix (A, B, C...)
@@ -1849,7 +1853,7 @@ function JobDetailPanel({ job, parentJobNumber, activeEntity, role, onClose, onU
                             {item.child_job_number || 'Spawned'}
                           </span>
                         ) : (
-                          <button onClick={() => setSpawnTarget(item)} disabled={spawning === item.id} className="px-2 py-0.5 text-xs font-semibold text-white bg-indigo-500 hover:bg-indigo-600 disabled:opacity-50 rounded transition-colors">
+                          canWrite(role) && <button onClick={() => setSpawnTarget(item)} disabled={spawning === item.id} className="px-2 py-0.5 text-xs font-semibold text-white bg-indigo-500 hover:bg-indigo-600 disabled:opacity-50 rounded transition-colors">
                             {spawning === item.id ? '...' : 'Spawn'}
                           </button>
                         )}
