@@ -1741,7 +1741,13 @@ function JobDetailPanel({ job, parentJobNumber, activeEntity, role, onClose, onU
         </div>
         <div>
           <label className="block text-xs font-medium text-gray-500 mb-1">Drawing Number</label>
-          <input type="text" defaultValue={job.drawing_number || ''} onBlur={async (e) => { await supabase.from('jobs').update({ drawing_number: e.target.value || null }).eq('id', job.id) }} placeholder="DWG-001" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
+          <input type="text" defaultValue={job.drawing_number || ''} onBlur={async (e) => {
+            if (!canWrite(role)) {
+              alert('Permission denied: only a manager (Managing Director or Operations System Manager) can save job changes.')
+              return
+            }
+            await supabase.from('jobs').update({ drawing_number: e.target.value || null }).eq('id', job.id)
+          }} placeholder="DWG-001" className="w-full border border-gray-300 rounded-lg px-3 py-2 text-sm focus:outline-none focus:ring-2 focus:ring-green-500" />
         </div>
         <div>
           <label className="block text-xs font-medium text-gray-500 mb-1">Compiled By</label>
@@ -1763,6 +1769,10 @@ function JobDetailPanel({ job, parentJobNumber, activeEntity, role, onClose, onU
                 <label key={label} className="flex items-center gap-2 text-xs cursor-pointer">
                   <input type="checkbox" defaultChecked={isChecked}
                     onChange={async (e) => {
+                      if (!canWrite(role)) {
+                        alert('Permission denied: only a manager (Managing Director or Operations System Manager) can save job changes.')
+                        return
+                      }
                       const update: Record<string, any> = {}
                       if (col) update[col] = e.target.checked
                       // Also update dynamic column
@@ -1789,6 +1799,10 @@ function JobDetailPanel({ job, parentJobNumber, activeEntity, role, onClose, onU
               <label key={key} className="flex items-center gap-2 text-xs cursor-pointer">
                 <input type="checkbox" defaultChecked={!!(job as any)[key]}
                   onChange={async (e) => {
+                    if (!canWrite(role)) {
+                      alert('Permission denied: only a manager (Managing Director or Operations System Manager) can save job changes.')
+                      return
+                    }
                     await supabase.from('jobs').update({ [key]: e.target.checked }).eq('id', job.id)
                     if (key === 'has_info_for_quote' && e.target.checked) {
                       await supabase.from('import_events').insert({
