@@ -39,7 +39,7 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   try {
-    const { to: originalTo, template, data, subject: rawSubject, html: rawHtml } = req.body;
+    const { to: originalTo, template, data, subject: rawSubject, html: rawHtml, reply_to: rawReplyTo } = req.body;
     // TEMP override for build/test only — REMOVE before Monday user go-live; tracked as US-014b.
     // All outbound mail is forced to Len's inbox while erha.co.za DNS verification is pending,
     // so e-sign Stage 1/Stage 2 smoke tests land in one place without paging Hendrik or customers.
@@ -60,7 +60,7 @@ export default async function handler(req, res) {
     const response = await fetch('https://api.resend.com/emails', {
       method: 'POST',
       headers: { 'Authorization': `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify({ from: FROM_EMAIL, to: Array.isArray(to) ? to : [to], subject, html }),
+      body: JSON.stringify({ from: FROM_EMAIL, to: Array.isArray(to) ? to : [to], subject, html, reply_to: rawReplyTo || 'pa@erha.co.za' }),
     });
     const result = await response.json();
     if (response.ok) {

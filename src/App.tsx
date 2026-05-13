@@ -998,7 +998,6 @@ table { border-collapse:collapse; width:100%; }
         const job = workshopJobs.find((j:any) => j.id === jobId)
         if (job?.rfq_id) {
           await supabase.from('rfqs').update({ status: 'JOB_CREATED' }).eq('id', job.rfq_id)
-          emailOrderWon({ id: job.rfq_id, description: job.description || '' } as any, job.job_number || '')
         }
       }
       // Activity log for status transitions

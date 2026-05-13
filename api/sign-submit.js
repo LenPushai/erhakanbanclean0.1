@@ -57,7 +57,7 @@ async function sendCustomerSignEmail({ rfq, token }) {
   const response = await fetch('https://api.resend.com/emails', {
     method: 'POST',
     headers: { Authorization: `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ from: FROM_EMAIL, to, subject, html }),
+    body: JSON.stringify({ from: FROM_EMAIL, to, subject, html, reply_to: 'pa@erha.co.za' }),
   });
   if (!response.ok) {
     const err = await response.json().catch(() => ({}));
@@ -94,7 +94,7 @@ async function sendCustomerSignedNotification({ rfq, signerName }) {
   const response = await fetch('https://api.resend.com/emails', {
     method: 'POST',
     headers: { Authorization: `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ from: FROM_EMAIL, to, subject, html }),
+    body: JSON.stringify({ from: FROM_EMAIL, to, subject, html, reply_to: 'pa@erha.co.za' }),
   });
   if (!response.ok) {
     const err = await response.json().catch(() => ({}));

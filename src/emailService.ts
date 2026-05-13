@@ -203,9 +203,9 @@ export async function emailChildJobSpawned(parentJob: any, childJob: any) {
 }
 
 export async function emailJobStarted(job: any) {
-  const subject = `? Job Started ? ${job.job_number}`
+  const subject = `[Job Started] ${job.job_number}`
   const html = `<div style="max-width:600px;margin:0 auto">
-    <div style="${headerStyle}"><h2 style="margin:0">? Job Started</h2></div>
+    <div style="${headerStyle}"><h2 style="margin:0">Job Started</h2></div>
     <div style="${bodyStyle}">
       <p style="margin-bottom:16px">A job has been started on the workshop floor.</p>
       <table style="width:100%;border-collapse:collapse;background:#f9fafb;border-radius:6px">
@@ -222,9 +222,9 @@ export async function emailJobStarted(job: any) {
 }
 
 export async function emailJobQCCheck(job: any) {
-  const subject = `?? QC Check Required ? ${job.job_number}`
+  const subject = `[QC Check Required] ${job.job_number}`
   const html = `<div style="max-width:600px;margin:0 auto">
-    <div style="${headerStyle}"><h2 style="margin:0">?? QC Check Required</h2></div>
+    <div style="${headerStyle}"><h2 style="margin:0">QC Check Required</h2></div>
     <div style="${bodyStyle}">
       <p style="margin-bottom:16px">A job is ready for quality control inspection.</p>
       <table style="width:100%;border-collapse:collapse;background:#f9fafb;border-radius:6px">
@@ -241,9 +241,9 @@ export async function emailJobQCCheck(job: any) {
 }
 
 export async function emailJobComplete(job: any) {
-  const subject = `? Job Complete ? ${job.job_number}`
+  const subject = `[Job Complete] ${job.job_number}`
   const html = `<div style="max-width:600px;margin:0 auto">
-    <div style="${headerStyle}"><h2 style="margin:0">? Job Complete</h2></div>
+    <div style="${headerStyle}"><h2 style="margin:0">Job Complete</h2></div>
     <div style="${bodyStyle}">
       <p style="margin-bottom:16px">A job has been completed and is ready for dispatch.</p>
       <table style="width:100%;border-collapse:collapse;background:#f9fafb;border-radius:6px">
@@ -291,9 +291,9 @@ export async function emailManagerReviewAndSign(rfq: any, token: string) {
 }
 
 export async function emailJobDispatched(job: any) {
-  const subject = `?? Job Dispatched ? ${job.job_number}`
+  const subject = `[Job Dispatched] ${job.job_number}`
   const html = `<div style="max-width:600px;margin:0 auto">
-    <div style="${headerStyle}"><h2 style="margin:0">?? Job Dispatched</h2></div>
+    <div style="${headerStyle}"><h2 style="margin:0">Job Dispatched</h2></div>
     <div style="${bodyStyle}">
       <p style="margin-bottom:16px">A job has been dispatched to the client.</p>
       <table style="width:100%;border-collapse:collapse;background:#f9fafb;border-radius:6px">
