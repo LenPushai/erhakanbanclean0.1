@@ -4047,6 +4047,10 @@ function JobExecutionPanel({ job, onClose, onStatusChange, onRefresh, role }: {
   }
 
   const handleSaveNotes = async () => {
+    if (!canWrite(role)) {
+      alert('Permission denied: only a manager (Managing Director or Operations System Manager) can save workshop notes.')
+      return
+    }
     setSavingNotes(true)
     const { supabase: sb } = await import('./lib/supabase')
     await sb.from('jobs').update({ workshop_notes: notes }).eq('id', job.id)
@@ -4592,12 +4596,12 @@ function JobExecutionPanel({ job, onClose, onStatusChange, onRefresh, role }: {
             rows={3}
             style={{ width: '100%', border: '1px solid #dde3ec', borderRadius: '6px', padding: '10px 12px', fontSize: '13px', color: '#1d3461', resize: 'none', outline: 'none', fontFamily: 'sans-serif', boxSizing: 'border-box' }}
             placeholder="Add workshop notes..." />
-          <button
+          {canWrite(role) && <button
             onClick={handleSaveNotes}
             disabled={savingNotes}
             style={{ marginTop: '10px', background: savingNotes ? '#8ec88b' : '#4db848', color: 'white', border: 'none', borderRadius: '6px', padding: '10px 24px', fontSize: '13px', fontWeight: 700, cursor: savingNotes ? 'not-allowed' : 'pointer' }}>
             {savingNotes ? 'Saving...' : 'Save Notes'}
-          </button>
+          </button>}
         </div>
       </div>
     </div>
