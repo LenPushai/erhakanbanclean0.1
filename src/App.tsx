@@ -1509,6 +1509,10 @@ function JobDetailPanel({ job, parentJobNumber, activeEntity, role, onClose, onU
   const removeNewLine = (i:number) => setNewLineItems(p => p.filter((_,idx)=>idx!==i))
   const updateNewLine = (i:number,field:string,val:any) => setNewLineItems(p => p.map((x,idx)=>idx===i?{...x,[field]:val}:x))
   const saveNewLines = async () => {
+    if (!canWrite(role)) {
+      alert('Permission denied: only a manager (Managing Director or Operations System Manager) can save line item changes.')
+      return
+    }
     const valid = newLineItems.filter(l => l.description.trim())
     if (!valid.length) return
     setSavingLines(true)
@@ -1868,7 +1872,7 @@ function JobDetailPanel({ job, parentJobNumber, activeEntity, role, onClose, onU
             <div className="mt-3 border border-green-200 rounded-lg overflow-hidden">
               <div className="bg-green-50 px-3 py-1.5 flex items-center justify-between">
                 <span className="text-xs font-medium text-green-700">New Line Items</span>
-                <button onClick={saveNewLines} disabled={savingLines} className="text-xs font-semibold text-white bg-green-600 hover:bg-green-700 disabled:opacity-50 px-3 py-0.5 rounded">{savingLines ? 'Saving...' : 'Save Lines'}</button>
+                {canWrite(role) && <button onClick={saveNewLines} disabled={savingLines} className="text-xs font-semibold text-white bg-green-600 hover:bg-green-700 disabled:opacity-50 px-3 py-0.5 rounded">{savingLines ? 'Saving...' : 'Save Lines'}</button>}
               </div>
               <table className="w-full text-xs">
                 <thead className="bg-gray-50"><tr>
