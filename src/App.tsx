@@ -1109,7 +1109,7 @@ table { border-collapse:collapse; width:100%; }
               ? <ClientManagement clients={clientsList} loading={clientsLoading} onRefresh={fetchClients} />
               : activeBoard === 'settings'
               ? <SettingsPage />
-              : <WorkshopBoard jobs={workshopJobs} loading={workshopLoading} onRefresh={fetchWorkshopJobs} onStatusChange={handleWorkshopStatusChange} />}
+              : <WorkshopBoard jobs={workshopJobs} loading={workshopLoading} onRefresh={fetchWorkshopJobs} onStatusChange={handleWorkshopStatusChange} role={currentRole} />}
           </div>
           {selectedRFQ && <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4"><RFQDetailPanel rfq={selectedRFQ} onClose={() => setSelectedRFQ(null)} onUpdate={handleRFQUpdate} role={currentRole} activeEntity={activeEntity} onJobCreated={fetchJobs} onNavigateToJob={(jobNumber) => { setSelectedRFQ(null); setActiveBoard('job'); const job = jobs.find(j => j.job_number === jobNumber); if (job) setSelectedJob(job); }} onSendForApproval={handleSendForManagerApproval} /></div>}
         </div>
@@ -3598,8 +3598,8 @@ function SpawnJobModal({ lineItem, parentJob, activeEntity, role, onClose, onSpa
 
 
 // WORKSHOP BOARD
-function WorkshopBoard({ jobs, loading, onRefresh, onStatusChange }: {
-  jobs: Job[]; loading: boolean; onRefresh: () => void; onStatusChange: (jobId: string, status: string) => void
+function WorkshopBoard({ jobs, loading, onRefresh, onStatusChange, role }: {
+  jobs: Job[]; loading: boolean; onRefresh: () => void; onStatusChange: (jobId: string, status: string) => void; role: string | null
 }) {
   const [selectedJob, setSelectedJob] = React.useState<Job | null>(null)
   const [notes, setNotes] = React.useState<Record<string,string>>({})
@@ -3725,6 +3725,7 @@ function WorkshopBoard({ jobs, loading, onRefresh, onStatusChange }: {
           onClose={() => setSelectedJob(null)}
           onStatusChange={onStatusChange}
           onRefresh={onRefresh}
+          role={role}
         />
       )}
     </div>
@@ -3732,8 +3733,8 @@ function WorkshopBoard({ jobs, loading, onRefresh, onStatusChange }: {
 }
 
 // â”€â”€ JOB EXECUTION PANEL â€” E6 â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€â”€
-function JobExecutionPanel({ job, onClose, onStatusChange, onRefresh }: {
-  job: any; onClose: () => void; onStatusChange: (id: string, status: string) => void; onRefresh: () => void
+function JobExecutionPanel({ job, onClose, onStatusChange, onRefresh, role }: {
+  job: any; onClose: () => void; onStatusChange: (id: string, status: string) => void; onRefresh: () => void; role: string | null
 }) {
   const { activeEntity } = useEntity()
   const [activeTab, setActiveTab] = React.useState<'workers'|'time'|'qc'|'materials'|'reconcile'|'line_items'>('line_items')
@@ -3772,6 +3773,10 @@ function JobExecutionPanel({ job, onClose, onStatusChange, onRefresh }: {
   }, [job.id])
 
   const handleLineItemToggle = async (li: any, field: 'qc_done' | 'ready_for_delivery' | 'dispatched', value: boolean) => {
+    if (!canWrite(role)) {
+      alert('Permission denied: only a manager (Managing Director or Operations System Manager) can update workshop line items.')
+      return
+    }
     const update: Record<string, any> = { [field]: value }
     const now = new Date().toISOString()
     if (field === 'qc_done') {
