@@ -699,6 +699,10 @@ App() {
   }
 
   const handlePrintJobCard = async (job: Job) => {
+    if (!canWrite(currentRole)) {
+      alert('Permission denied: only a manager (Managing Director or Operations System Manager) can print and mark a job card.')
+      return
+    }
     await supabase.from('jobs').update({ status: 'PRINTED', workshop_status: 'NOT_STARTED' }).eq('id', job.id)
     fetchJobs()
     const { data: rfqRecord } = job.rfq_id ? await supabase.from('rfqs').select('*').eq('id', job.rfq_id).single() : { data: null }
