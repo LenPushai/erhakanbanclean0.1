@@ -3933,6 +3933,10 @@ function JobExecutionPanel({ job, onClose, onStatusChange, onRefresh, role }: {
   }, [job.id])
 
   const handleSignOff = async (checkpointId: string) => {
+    if (!canWrite(role)) {
+      alert('Permission denied: only a manager (Managing Director or Operations System Manager) can sign off QC checkpoints.')
+      return
+    }
     if (!signerName.trim()) return
     setSavingSign(true)
     const sb = (await import('./lib/supabase')).supabase
@@ -4294,7 +4298,7 @@ function JobExecutionPanel({ job, onClose, onStatusChange, onRefresh, role }: {
                         <div style={{ fontSize: '11px', color: '#8896a8', marginTop: '3px' }}>Awaiting sign-off</div>
                       )}
                     </div>
-                    {!cp.signed_off && (
+                    {!cp.signed_off && canWrite(role) && (
                       <button onClick={() => setShowSignModal(cp.id)} style={{ background: '#4db848', color: 'white', border: 'none', borderRadius: '6px', padding: '8px 16px', fontSize: '12px', fontWeight: 700, cursor: 'pointer', flexShrink: 0 }}>Sign Off</button>
                     )}
                     {cp.signed_off && (
@@ -4319,7 +4323,7 @@ function JobExecutionPanel({ job, onClose, onStatusChange, onRefresh, role }: {
                   />
                   <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
                     <button onClick={() => { setShowSignModal(null); setSignerName('') }} style={{ border: '1px solid #dde3ec', background: 'white', borderRadius: '6px', padding: '9px 18px', fontSize: '13px', cursor: 'pointer' }}>Cancel</button>
-                    <button onClick={() => handleSignOff(showSignModal as unknown as string)} disabled={savingSign || !signerName.trim()} style={{ background: savingSign || !signerName.trim() ? '#ccc' : '#4db848', color: 'white', border: 'none', borderRadius: '6px', padding: '9px 18px', fontSize: '13px', fontWeight: 700, cursor: savingSign || !signerName.trim() ? 'not-allowed' : 'pointer' }}>{savingSign ? 'Saving...' : 'Confirm Sign-Off'}</button>
+                    {canWrite(role) && <button onClick={() => handleSignOff(showSignModal as unknown as string)} disabled={savingSign || !signerName.trim()} style={{ background: savingSign || !signerName.trim() ? '#ccc' : '#4db848', color: 'white', border: 'none', borderRadius: '6px', padding: '9px 18px', fontSize: '13px', fontWeight: 700, cursor: savingSign || !signerName.trim() ? 'not-allowed' : 'pointer' }}>{savingSign ? 'Saving...' : 'Confirm Sign-Off'}</button>}
                   </div>
                 </div>
               </div>
