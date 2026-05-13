@@ -3971,6 +3971,10 @@ function JobExecutionPanel({ job, onClose, onStatusChange, onRefresh, role }: {
   }
 
   const handleAssignWorker = async () => {
+    if (!canWrite(role)) {
+      alert('Permission denied: only a manager (Managing Director or Operations System Manager) can assign workers to jobs.')
+      return
+    }
     if (!wForm.workerName) return
     setSavingWorker(true)
     const { supabase: sb } = await import('./lib/supabase')
@@ -4102,9 +4106,9 @@ function JobExecutionPanel({ job, onClose, onStatusChange, onRefresh, role }: {
                     <div style={{ fontSize: '16px', fontWeight: 700, color: '#1d3461' }}>Worker Assignment</div>
                     <div style={{ fontSize: '12px', color: '#8896a8', marginTop: '2px' }}>Assign casual workers from Casuals_2025 to this job</div>
                   </div>
-                  <button onClick={() => setShowAssignModal(true)} style={{ background: '#4db848', color: 'white', border: 'none', borderRadius: '6px', padding: '10px 20px', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>
+                  {canWrite(role) && <button onClick={() => setShowAssignModal(true)} style={{ background: '#4db848', color: 'white', border: 'none', borderRadius: '6px', padding: '10px 20px', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>
                     + Assign Worker
-                  </button>
+                  </button>}
                 </div>
                 {loadingWorkers ? (
                   <div style={{ textAlign: 'center', padding: '48px', color: '#8896a8' }}>Loading workers...</div>
@@ -4164,7 +4168,7 @@ function JobExecutionPanel({ job, onClose, onStatusChange, onRefresh, role }: {
                       </div>
                       <div style={{ display: 'flex', gap: '12px', justifyContent: 'flex-end' }}>
                         <button onClick={() => { setShowAssignModal(false); setWSearch('') }} style={{ border: '1px solid #dde3ec', background: 'white', borderRadius: '6px', padding: '10px 20px', fontSize: '13px', cursor: 'pointer' }}>Cancel</button>
-                        <button onClick={handleAssignWorker} disabled={savingWorker || !wForm.workerName} style={{ background: (savingWorker || !wForm.workerName) ? '#ccc' : '#4db848', color: 'white', border: 'none', borderRadius: '6px', padding: '10px 20px', fontSize: '13px', fontWeight: 700, cursor: (savingWorker || !wForm.workerName) ? 'not-allowed' : 'pointer' }}>{savingWorker ? 'Saving...' : 'Assign Worker'}</button>
+                        {canWrite(role) && <button onClick={handleAssignWorker} disabled={savingWorker || !wForm.workerName} style={{ background: (savingWorker || !wForm.workerName) ? '#ccc' : '#4db848', color: 'white', border: 'none', borderRadius: '6px', padding: '10px 20px', fontSize: '13px', fontWeight: 700, cursor: (savingWorker || !wForm.workerName) ? 'not-allowed' : 'pointer' }}>{savingWorker ? 'Saving...' : 'Assign Worker'}</button>}
                       </div>
                     </div>
                   </div>
