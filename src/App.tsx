@@ -970,6 +970,10 @@ table { border-collapse:collapse; width:100%; }
 
 
   const handleWorkshopStatusChange = async (jobId: string, newStatus: string) => {
+    if (!canWrite(currentRole)) {
+      alert('Permission denied: only a manager (Managing Director or Operations System Manager) can change workshop status.')
+      return
+    }
     try {
       // US-11: QC gate - block QUALITY_CHECK unless all 9 checkpoints signed
       if (newStatus === 'QUALITY_CHECK') {
