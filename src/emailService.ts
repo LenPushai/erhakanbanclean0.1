@@ -3,7 +3,6 @@
 // PUSH AI Foundation — Proverbs 16:3
 // ============================================================================
 
-const RESEND_API_KEY = 're_Q3RKYakG_9yGoARH977FNLhwF2rG9Y8vk'
 const FROM_EMAIL = 'ERHA Operations <onboarding@resend.dev>'
 
 // Resolved at module load. Browser-side fallback to current origin keeps dev

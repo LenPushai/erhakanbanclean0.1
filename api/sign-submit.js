@@ -11,7 +11,7 @@ import { createClient } from '@supabase/supabase-js';
 const SUPABASE_URL = process.env.VITE_SUPABASE_URL;
 const SUPABASE_ANON_KEY = process.env.VITE_SUPABASE_ANON_KEY;
 const APP_URL = process.env.VITE_APP_URL;
-const RESEND_API_KEY = process.env.VITE_RESEND_API_KEY || 're_Q3RKYakG_9yGoARH977FNLhwF2rG9Y8vk';
+const RESEND_API_KEY = process.env.RESEND_API_KEY || process.env.VITE_RESEND_API_KEY;
 const FROM_EMAIL = 'ERHA Operations <onboarding@resend.dev>';
 
 const BRAND_FROM_ENTITY = {

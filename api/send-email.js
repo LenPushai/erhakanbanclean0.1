@@ -1,4 +1,4 @@
-const RESEND_API_KEY = 're_Q3RKYakG_9yGoARH977FNLhwF2rG9Y8vk';
+const RESEND_API_KEY = process.env.RESEND_API_KEY || process.env.VITE_RESEND_API_KEY;
 const FROM_EMAIL = 'ERHA Operations <onboarding@resend.dev>';
 
 const templates = {

@@ -3331,20 +3331,16 @@ function EmailModal({ rfq, role, onClose }: { rfq: RFQ; role: string | null; onC
     if (!to) { alert('Please enter a recipient email address'); return }
     setSending(true)
     try {
-      const apiKey = import.meta.env.VITE_RESEND_API_KEY
-      if (!apiKey) throw new Error('Resend API key not configured')
-      const res = await fetch('http://localhost:3001/send', {
+      const res = await fetch('/api/send-email', {
         method: 'POST',
-        headers: { 'Authorization': `Bearer ${apiKey}`, 'Content-Type': 'application/json' },
+        headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          from: 'ERHA Operations <onboarding@resend.dev>',
           to: [to],
           subject: subject,
-          text: body,
           html: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;"><div style="background:#1e3a5f;color:white;padding:20px 24px;border-radius:8px 8px 0 0;"><h2 style="margin:0;font-size:18px;">${brandName.replace(/&/g, '&amp;')}</h2><p style="margin:4px 0 0;font-size:13px;opacity:0.8;">${enqNo}</p></div><div style="padding:24px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px;white-space:pre-line;">${body.replace(/\n/g,'<br>')}</div><p style="font-size:11px;color:#9ca3af;margin-top:12px;text-align:center;">ERHA Operations System</p></div>`,
         }),
       })
-      if (!res.ok) { const err = await res.json(); throw new Error(err.message || 'Send failed') }
+      if (!res.ok) { const err = await res.json(); throw new Error(err.error || err.message || 'Send failed') }
       setSent(true)
       setTimeout(onClose, 1500)
     } catch (err: any) { alert('Failed to send email: ' + err.message) }
