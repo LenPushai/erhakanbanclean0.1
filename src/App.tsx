@@ -3878,6 +3878,10 @@ function JobExecutionPanel({ job, onClose, onStatusChange, onRefresh, role }: {
   }, [job.id])
 
   const handleLogMaterial = async () => {
+    if (!canWrite(role)) {
+      alert('Permission denied: only a manager (Managing Director or Operations System Manager) can log materials.')
+      return
+    }
     if (!matForm.description.trim() || !matForm.quantity) return
     setSavingMat(true)
     const sb = (await import('./lib/supabase')).supabase
@@ -3895,6 +3899,10 @@ function JobExecutionPanel({ job, onClose, onStatusChange, onRefresh, role }: {
   }
 
   const handleDeleteMaterial = async (id: string) => {
+    if (!canWrite(role)) {
+      alert('Permission denied: only a manager (Managing Director or Operations System Manager) can delete material records.')
+      return
+    }
     const sb = (await import('./lib/supabase')).supabase
     await sb.from('job_materials').delete().eq('id', id)
     setJobMaterials(prev => prev.filter((m: any) => m.id !== id))
@@ -4336,7 +4344,7 @@ function JobExecutionPanel({ job, onClose, onStatusChange, onRefresh, role }: {
           <div style={{ position: 'relative' }}>
             <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px' }}>
               <div><div style={{ fontSize: '16px', fontWeight: 700, color: '#1d3461' }}>Materials Used</div><div style={{ fontSize: '12px', color: '#8896a8', marginTop: '2px' }}>Log materials consumed against this job</div></div>
-              <button onClick={() => setShowMatModal(true)} style={{ background: '#1d3461', color: 'white', border: 'none', borderRadius: '6px', padding: '10px 20px', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>+ Log Material</button>
+              {canWrite(role) && <button onClick={() => setShowMatModal(true)} style={{ background: '#1d3461', color: 'white', border: 'none', borderRadius: '6px', padding: '10px 20px', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>+ Log Material</button>}
             </div>
             {loadingMaterials ? (<div style={{ textAlign: 'center', padding: '40px', color: '#8896a8', fontSize: '13px' }}>Loading...</div>) : jobMaterials.length === 0 ? (
               <div style={{ background: 'white', border: '1px solid #dde3ec', borderRadius: '8px', padding: '48px', textAlign: 'center' }}><div style={{ fontSize: '14px', fontWeight: 600, color: '#1d3461', marginBottom: '4px' }}>No materials logged yet</div><div style={{ fontSize: '12px', color: '#8896a8' }}>Click Log Material to record materials consumed on this job</div></div>
@@ -4358,7 +4366,7 @@ function JobExecutionPanel({ job, onClose, onStatusChange, onRefresh, role }: {
                       <td style={{ padding: '12px 14px', textAlign: 'center', color: '#64748b', fontSize: '12px' }}>{m.unit}</td>
                       <td style={{ padding: '12px 14px', color: '#64748b', fontSize: '12px' }}>{m.notes || '-'}</td>
                       <td style={{ padding: '12px 14px', color: '#64748b', fontSize: '12px' }}>{m.created_at ? new Date(m.created_at).toLocaleString('en-ZA', { dateStyle: 'short', timeStyle: 'short' }) : '-'}</td>
-                      <td style={{ padding: '12px 14px', textAlign: 'center' }}><button onClick={() => handleDeleteMaterial(m.id)} style={{ background: 'none', border: 'none', color: '#e24b4a', cursor: 'pointer', fontSize: '14px', fontWeight: 700 }}>x</button></td>
+                      <td style={{ padding: '12px 14px', textAlign: 'center' }}>{canWrite(role) && <button onClick={() => handleDeleteMaterial(m.id)} style={{ background: 'none', border: 'none', color: '#e24b4a', cursor: 'pointer', fontSize: '14px', fontWeight: 700 }}>x</button>}</td>
                     </tr>
                   ))}</tbody>
                   <tfoot><tr style={{ borderTop: '2px solid #e2e8f0', background: '#f8fafc' }}><td colSpan={5} style={{ padding: '10px 14px', fontWeight: 700, color: '#1d3461', fontSize: '12px' }}>Total items: {jobMaterials.length}</td><td></td></tr></tfoot>
@@ -4377,7 +4385,7 @@ function JobExecutionPanel({ job, onClose, onStatusChange, onRefresh, role }: {
                   <div style={{ marginBottom: '20px' }}><label style={{ fontSize: '11px', fontWeight: 700, color: '#8896a8', textTransform: 'uppercase', display: 'block', marginBottom: '5px' }}>Logged by</label><input type='text' value={matForm.logged_by} onChange={e => setMatForm(f => ({...f, logged_by: e.target.value}))} placeholder='Your name...' style={{ width: '100%', border: '1px solid #dde3ec', borderRadius: '6px', padding: '9px 12px', fontSize: '13px', boxSizing: 'border-box' }} /></div>
                   <div style={{ display: 'flex', gap: '10px', justifyContent: 'flex-end' }}>
                     <button onClick={() => { setShowMatModal(false); setMatForm({ description: '', quantity: '', unit: 'EA', logged_by: '' }) }} style={{ border: '1px solid #dde3ec', background: 'white', borderRadius: '6px', padding: '9px 18px', fontSize: '13px', cursor: 'pointer' }}>Cancel</button>
-                    <button onClick={handleLogMaterial} disabled={savingMat || !matForm.description.trim() || !matForm.quantity} style={{ background: savingMat || !matForm.description.trim() || !matForm.quantity ? '#ccc' : '#1d3461', color: 'white', border: 'none', borderRadius: '6px', padding: '9px 18px', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>{savingMat ? 'Saving...' : 'Log Material'}</button>
+                    {canWrite(role) && <button onClick={handleLogMaterial} disabled={savingMat || !matForm.description.trim() || !matForm.quantity} style={{ background: savingMat || !matForm.description.trim() || !matForm.quantity ? '#ccc' : '#1d3461', color: 'white', border: 'none', borderRadius: '6px', padding: '9px 18px', fontSize: '13px', fontWeight: 700, cursor: 'pointer' }}>{savingMat ? 'Saving...' : 'Log Material'}</button>}
                   </div>
                 </div>
               </div>
