@@ -3841,6 +3841,10 @@ function JobExecutionPanel({ job, onClose, onStatusChange, onRefresh, role }: {
   }
 
   const handleDeliveryField = async (li: any, field: 'delivery_number' | 'delivery_date', value: string) => {
+    if (!canWrite(role)) {
+      alert('Permission denied: only a manager (Managing Director or Operations System Manager) can update delivery information.')
+      return
+    }
     const next = value || null
     await supabase.from('job_line_items').update({ [field]: next }).eq('id', li.id)
     setExecLineItems(prev => prev.map(x => x.id === li.id ? { ...x, [field]: next } : x))
