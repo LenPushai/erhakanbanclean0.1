@@ -3994,12 +3994,20 @@ function JobExecutionPanel({ job, onClose, onStatusChange, onRefresh, role }: {
   }
 
   const handleClockIn = async (workerId: string) => {
+    if (!canWrite(role)) {
+      alert('Permission denied: only a manager (Managing Director or Operations System Manager) can clock workers in.')
+      return
+    }
     const { supabase: sb } = await import('./lib/supabase')
     await sb.from('job_workers').update({ clocked_in_at: new Date().toISOString() }).eq('id', workerId)
     await loadWorkers()
   }
 
   const handleClockOut = async (worker: any) => {
+    if (!canWrite(role)) {
+      alert('Permission denied: only a manager (Managing Director or Operations System Manager) can clock workers out.')
+      return
+    }
     const now = new Date()
     const mins = Math.round((now.getTime() - new Date(worker.clocked_in_at).getTime()) / 60000)
     const { supabase: sb } = await import('./lib/supabase')
@@ -4129,8 +4137,8 @@ function JobExecutionPanel({ job, onClose, onStatusChange, onRefresh, role }: {
                           {!w.clocked_in_at && <span style={{ fontSize: '11px', color: '#8896a8', background: '#f0f2f7', padding: '4px 10px', borderRadius: '12px' }}>Not Started</span>}
                           {w.clocked_in_at && !w.clocked_out_at && <span style={{ fontSize: '11px', color: '#4db848', background: '#edf9ea', padding: '4px 10px', borderRadius: '12px' }}>Clocked In</span>}
                           {w.clocked_out_at && <span style={{ fontSize: '11px', color: '#1d3461', background: '#e8ecf4', padding: '4px 10px', borderRadius: '12px' }}>{Math.floor(w.total_minutes/60)}h {w.total_minutes%60}m</span>}
-                          {!w.clocked_in_at && <button onClick={() => handleClockIn(w.id)} style={{ background: '#4db848', color: 'white', border: 'none', borderRadius: '6px', padding: '8px 14px', fontSize: '12px', fontWeight: 700, cursor: 'pointer' }}>Clock In</button>}
-                          {w.clocked_in_at && !w.clocked_out_at && <button onClick={() => handleClockOut(w)} style={{ background: '#e53e3e', color: 'white', border: 'none', borderRadius: '6px', padding: '8px 14px', fontSize: '12px', fontWeight: 700, cursor: 'pointer' }}>Clock Out</button>}
+                          {!w.clocked_in_at && canWrite(role) && <button onClick={() => handleClockIn(w.id)} style={{ background: '#4db848', color: 'white', border: 'none', borderRadius: '6px', padding: '8px 14px', fontSize: '12px', fontWeight: 700, cursor: 'pointer' }}>Clock In</button>}
+                          {w.clocked_in_at && !w.clocked_out_at && canWrite(role) && <button onClick={() => handleClockOut(w)} style={{ background: '#e53e3e', color: 'white', border: 'none', borderRadius: '6px', padding: '8px 14px', fontSize: '12px', fontWeight: 700, cursor: 'pointer' }}>Clock Out</button>}
                         </div>
                       </div>
                     ))}
