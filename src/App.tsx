@@ -1946,13 +1946,17 @@ function JobDetailPanel({ job, parentJobNumber, activeEntity, role, onClose, onU
         {/* US-D1: Job-stage attachment upload (mirrors RFQ panel pattern) */}
         <div className="border-t border-gray-200 pt-4">
           <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-3">Add Attachments</p>
-          <label className="flex items-center gap-3 px-4 py-3 border-2 border-dashed border-gray-300 hover:border-green-400 hover:bg-green-50 rounded-lg cursor-pointer transition-colors">
+          {canWrite(role) && <label className="flex items-center gap-3 px-4 py-3 border-2 border-dashed border-gray-300 hover:border-green-400 hover:bg-green-50 rounded-lg cursor-pointer transition-colors">
             <Paperclip size={16} className="text-gray-400" />
             <div className="flex-1">
               <p className="text-xs font-medium text-gray-700">Click to attach files</p>
               <p className="text-xs text-gray-400">Drawings, QCPs, photos, internal orders - any file type</p>
             </div>
             <input type="file" multiple className="hidden" onChange={async (e) => {
+              if (!canWrite(role)) {
+                alert('Permission denied: only a manager (Managing Director or Operations System Manager) can upload job attachments.')
+                return
+              }
               const files = e.target.files
               if (!files || files.length === 0) return
               for (const file of Array.from(files)) {
@@ -1976,7 +1980,7 @@ function JobDetailPanel({ job, parentJobNumber, activeEntity, role, onClose, onU
               if (data) setAttachments(data)
               showMsg('Attachment(s) added')
             }} />
-          </label>
+          </label>}
         </div>
         <div>
           <label className="block text-xs font-medium text-gray-500 mb-1">Notes</label>
