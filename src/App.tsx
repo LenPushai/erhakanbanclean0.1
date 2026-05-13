@@ -859,6 +859,10 @@ table { border-collapse:collapse; width:100%; }
   }
 
   const handleJobStatusChange = async (jobId: string, newStatus: string) => {
+    if (!canWrite(currentRole)) {
+      alert('Permission denied: only a manager (Managing Director or Operations System Manager) can change job status.')
+      return
+    }
     await supabase.from('jobs').update({ status: newStatus }).eq('id', jobId)
     const { data: job } = await supabase.from('jobs').select('*').eq('id', jobId).single()
     if (job) {
