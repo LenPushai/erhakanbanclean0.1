@@ -1964,6 +1964,7 @@ function JobDetailPanel({ job, parentJobNumber, activeEntity, role, onClose, onU
           lineItem={spawnTarget}
           parentJob={job}
           activeEntity={activeEntity}
+          role={role}
           onClose={() => setSpawnTarget(null)}
           onSpawned={async (childJob) => {
             setSpawnTarget(null)
@@ -3372,8 +3373,8 @@ function NavItem({ icon, label, description, active, accentColor, onClick }: Nav
 }
 
 // SPAWN JOB MODAL
-function SpawnJobModal({ lineItem, parentJob, activeEntity, onClose, onSpawned }: {
-  lineItem: any; parentJob: Job; activeEntity: OperatingEntity; onClose: () => void; onSpawned: (child: any) => void
+function SpawnJobModal({ lineItem, parentJob, activeEntity, role, onClose, onSpawned }: {
+  lineItem: any; parentJob: Job; activeEntity: OperatingEntity; role: string | null; onClose: () => void; onSpawned: (child: any) => void
 }) {
   const [saving, setSaving] = React.useState(false)
   const [description, setDescription] = React.useState(lineItem.description || '')
@@ -3396,6 +3397,10 @@ function SpawnJobModal({ lineItem, parentJob, activeEntity, onClose, onSpawned }
   const [spawnNoCard, setSpawnNoCard] = React.useState(false)
 
   const handleCreate = async () => {
+    if (!canWrite(role)) {
+      alert('Permission denied: only a manager (Managing Director or Operations System Manager) can spawn a child job.')
+      return
+    }
     if (!description.trim()) { alert('Description is required'); return }
     // D2 hotfix: cap child qty at parent line item qty (RFQ canonical)
     const parentQty = lineItem.quantity || 0
@@ -3550,10 +3555,10 @@ function SpawnJobModal({ lineItem, parentJob, activeEntity, onClose, onSpawned }
         </div>
         <div className="flex items-center justify-end gap-3 px-5 py-4 border-t border-gray-100 shrink-0">
           <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
-          <button onClick={handleCreate} disabled={saving}
+          {canWrite(role) && <button onClick={handleCreate} disabled={saving}
             className="flex items-center gap-2 px-5 py-2 bg-indigo-600 hover:bg-indigo-700 disabled:opacity-50 text-white text-sm font-semibold rounded-lg transition-colors">
             <Plus size={14}/>{saving ? 'Creating...' : 'Create Child Job'}
-          </button>
+          </button>}
         </div>
       </div>
     </div>
