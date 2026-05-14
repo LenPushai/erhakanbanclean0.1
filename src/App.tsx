@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react'
 import { ClipboardList, Briefcase, ChevronRight, ChevronDown, ChevronUp, Factory, Building2, Calendar, Hash, RefreshCw, ArrowDownToLine, ArrowUpFromLine, X, Mail, FileText, Paperclip, Send, Plus, Check, Printer, Upload, Package, Search, Filter, Edit3, XCircle, Trash2, Eye, CheckCircle, ShoppingCart, Download, Truck, DollarSign, AlertTriangle, Receipt, Users, Settings }  from 'lucide-react'
 import { supabase } from './lib/supabase'
-import { emailRFQCreated, emailQuoterAssigned, emailQuoteReady, emailOrderWon, emailJobInReview, emailJobReadyToPrint, emailJobPrinted, emailChildJobSpawned, emailJobStarted, emailJobQCCheck, emailJobComplete, emailJobDispatched, emailManagerReviewAndSign } from './emailService'
+import { emailRFQCreated, emailQuoterAssigned, emailQuoteReady, emailOrderWon, emailJobInReview, emailJobReadyToPrint, emailJobPrinted, emailChildJobSpawned, emailJobStarted, emailJobQCCheck, emailJobComplete, emailJobDispatched } from './emailService'
 import { format } from 'date-fns'
 import { useEntity, type OperatingEntity } from './contexts/EntityContext'
 import { EntitySwitcher, getBrandName, getHeaderLogo } from './components/EntitySwitcher'
@@ -918,10 +918,15 @@ table { border-collapse:collapse; width:100%; }
   const [tokensByRfq, setTokensByRfq] = useState<Record<string, any[]>>({})
   const fetchSignatureTokens = async () => {
     try {
-      const { data, error } = await supabase.from('signature_tokens').select('*').order('created_at', { ascending: false })
-      if (error) { console.error('signature_tokens fetch failed:', error.message); return }
+      const res = await fetch('/api/sign-tokens-list')
+      if (!res.ok) {
+        const err = await res.json().catch(() => ({}))
+        console.error('signature_tokens fetch failed:', err.error)
+        return
+      }
+      const { tokens } = await res.json()
       const map: Record<string, any[]> = {}
-      for (const t of data || []) {
+      for (const t of tokens || []) {
         if (!map[t.rfq_id]) map[t.rfq_id] = []
         map[t.rfq_id].push(t)
       }
@@ -935,22 +940,17 @@ table { border-collapse:collapse; width:100%; }
   const handleSendForManagerApproval = async (rfq: RFQ) => {
     if (!confirm(`Send "${rfq.rfq_no || rfq.enq_number || 'this quote'}" to Hendrik for manager sign-off?`)) return
     try {
-      const token = (globalThis.crypto?.randomUUID?.()) || (Date.now() + '-' + Math.random().toString(36).slice(2))
-      const expiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString()
-      const { error } = await supabase.from('signature_tokens').insert({
-        rfq_id: rfq.id,
-        token,
-        client_email: 'hendrik@erha.co.za',
-        client_name: 'Hendrik',
-        expires_at: expiresAt,
-        is_valid: true,
-        used_at: null,
-        signature_stage: 'manager',
+      const res = await fetch('/api/manager-approval-send', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ rfq_id: rfq.id }),
       })
-      if (error) { alert('Could not create sign token: ' + error.message); return }
-      // Email send is best-effort - the token is the legal record. If the
-      // email fails, Jeanic can re-issue or the token can be re-emailed.
-      try { await emailManagerReviewAndSign(rfq, token) } catch (e: any) { console.error('manager email failed:', e.message) }
+      const body = await res.json().catch(() => ({}))
+      if (!res.ok || !body.success) {
+        alert('Could not send for approval: ' + (body.error || 'unknown error'))
+        return
+      }
+      if (body.email_error) console.error('manager email failed:', body.email_error)
       await fetchSignatureTokens()
       alert('Sent to Hendrik for sign-off. Once signed, the customer will be emailed automatically.')
     } catch (e: any) { alert('Send for manager approval failed: ' + e.message) }

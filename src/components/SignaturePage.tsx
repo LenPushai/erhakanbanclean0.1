@@ -10,14 +10,7 @@ import type React from 'react'
 import { supabase } from '../lib/supabase'
 
 interface TokenRecord {
-  id: string
   rfq_id: string
-  token: string
-  client_email: string
-  client_name: string | null
-  expires_at: string
-  used_at: string | null
-  is_valid: boolean
   signature_stage: string
 }
 
@@ -63,14 +56,18 @@ export function SignaturePage() {
     void (async () => {
       try {
         if (!token || token.length < 10) { setErrorMsg('Invalid sign link.'); return }
-        const { data: tk, error } = await supabase
-          .from('signature_tokens').select('*').eq('token', token).maybeSingle()
-        if (error) throw error
-        if (!tk) { setErrorMsg('This sign link is not recognised.'); return }
-        if (tk.used_at) { setErrorMsg('This sign link has already been used.'); return }
-        if (tk.is_valid === false) { setErrorMsg('This sign link has been invalidated. Please request a new one.'); return }
-        if (new Date(tk.expires_at) < new Date()) { setErrorMsg('This sign link has expired. Please request a new one.'); return }
-        setTokenRecord(tk)
+        const res = await fetch('/api/sign-validate', {
+          method: 'POST',
+          headers: { 'Content-Type': 'application/json' },
+          body: JSON.stringify({ token }),
+        })
+        if (!res.ok) {
+          const err = await res.json().catch(() => ({}))
+          setErrorMsg(err.error || 'Could not validate sign link.')
+          return
+        }
+        const tk = await res.json()
+        setTokenRecord({ rfq_id: tk.rfq_id, signature_stage: tk.signature_stage })
         const { data: rfqRow, error: rerr } = await supabase
           .from('rfqs').select('*, clients(company_name)').eq('id', tk.rfq_id).maybeSingle()
         if (rerr) throw rerr
