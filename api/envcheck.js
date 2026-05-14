@@ -14,9 +14,11 @@ export default async function handler(req, res) {
   ).length;
 
   return res.status(200).json({
+    has_SUPABASE_URL: !!process.env.SUPABASE_URL,
     has_VITE_SUPABASE_URL: !!process.env.VITE_SUPABASE_URL,
-    has_VITE_SUPABASE_ANON_KEY: !!process.env.VITE_SUPABASE_ANON_KEY,
     has_SUPABASE_SERVICE_ROLE_KEY: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
+    has_VITE_SUPABASE_ANON_KEY: !!process.env.VITE_SUPABASE_ANON_KEY,
+    has_APP_URL: !!process.env.APP_URL,
     has_VITE_APP_URL: !!process.env.VITE_APP_URL,
     has_RESEND_API_KEY: !!process.env.RESEND_API_KEY,
     has_VITE_RESEND_API_KEY: !!process.env.VITE_RESEND_API_KEY,
