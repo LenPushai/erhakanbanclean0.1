@@ -2,6 +2,18 @@
 // Returns boolean presence flags only — no values are exposed.
 // REMOVE in a follow-up commit immediately after the env issue is resolved.
 
+function jwtRoleClaim(token) {
+  if (!token || typeof token !== 'string') return null;
+  const parts = token.split('.');
+  if (parts.length !== 3) return 'not-a-jwt';
+  try {
+    const payload = JSON.parse(Buffer.from(parts[1], 'base64').toString('utf8'));
+    return payload.role || 'unknown';
+  } catch {
+    return 'decode-error';
+  }
+}
+
 export default async function handler(req, res) {
   res.setHeader('Cache-Control', 'no-store');
   res.setHeader('Access-Control-Allow-Origin', '*');
@@ -14,6 +26,8 @@ export default async function handler(req, res) {
   ).length;
 
   return res.status(200).json({
+    service_role_key_role_claim: jwtRoleClaim(process.env.SUPABASE_SERVICE_ROLE_KEY),
+    anon_key_role_claim: jwtRoleClaim(process.env.VITE_SUPABASE_ANON_KEY),
     has_SUPABASE_URL: !!process.env.SUPABASE_URL,
     has_VITE_SUPABASE_URL: !!process.env.VITE_SUPABASE_URL,
     has_SUPABASE_SERVICE_ROLE_KEY: !!process.env.SUPABASE_SERVICE_ROLE_KEY,
