@@ -92,10 +92,89 @@ This finding spawned **US-023.5** as a separate story, since the fix required a 
 
 ## Outstanding within US-023 scope
 
-The audit completed the security finding (queryroom 4a, RLS state) but **three of the four planned schema introspection queries were not run** — only 4a (RLS check) was executed. The remaining queries:
+The audit completed the security finding (query 4a, RLS state). Queries 1, 2, 3 (columns, constraints, indexes) ran on **2026-05-16** — results captured in the Schema Introspection Addendum below. Version-controlled migration files for both tables remain to be authored as **US-023-schema-migration** (separate story) so the live schema is reproducible from source — otherwise US-024 inherits the same drift risk.
 
-1. **Query 1** — Full column list with types and nullability for `signature_tokens` and `quote_signatures`.
-2. **Query 2** — Constraint listing (PK, FK, UNIQUE, CHECK) for both tables.
-3. **Query 3** — Index listing for both tables.
+---
 
-These should be run and captured either as an **addendum to this audit doc** or as a **separate US-023-schema-migration story** that produces version-controlled migration files for both tables. Doing this before US-024 closes the "schema not version controlled" gap noted under Schema Introspection State above — otherwise US-024 inherits the same drift risk.
+## Schema Introspection Addendum (2026-05-16)
+
+Queries 1, 2, 3 run against the live Supabase project (`lvaqqqyjqtguozmdjmfn`). Captured verbatim below; findings called out after.
+
+### Query 1 — Columns
+
+**`signature_tokens`**
+
+| column           | type                          | nullable | default              |
+| ---------------- | ----------------------------- | -------- | -------------------- |
+| id               | uuid                          | NO       | `gen_random_uuid()`  |
+| rfq_id           | uuid                          | NO       | —                    |
+| token            | character varying             | NO       | —                    |
+| client_email     | character varying             | NO       | —                    |
+| client_name      | character varying             | YES      | —                    |
+| expires_at       | timestamp with time zone      | NO       | —                    |
+| used_at          | timestamp with time zone      | YES      | —                    |
+| is_valid         | boolean                       | YES      | `true`               |
+| created_at       | timestamp with time zone      | YES      | `now()`              |
+| signature_stage  | text                          | YES      | `'manager'`          |
+
+**`quote_signatures`**
+
+| column            | type                          | nullable | default               |
+| ----------------- | ----------------------------- | -------- | --------------------- |
+| id                | uuid                          | NO       | `gen_random_uuid()`   |
+| rfq_id            | uuid                          | YES      | —                     |
+| quote_number      | character varying             | YES      | —                     |
+| signer_name       | character varying             | NO       | —                     |
+| signer_email      | character varying             | NO       | —                     |
+| signer_title      | character varying             | YES      | —                     |
+| signer_company    | character varying             | YES      | —                     |
+| signature_data    | text                          | YES      | —                     |
+| signature_type    | character varying             | YES      | `'click'`             |
+| signed_at         | timestamp with time zone      | YES      | `now()`               |
+| ip_address        | character varying             | YES      | —                     |
+| user_agent        | text                          | YES      | —                     |
+| quote_total       | numeric                       | YES      | —                     |
+| quote_description | text                          | YES      | —                     |
+| status            | character varying             | YES      | `'SIGNED'`            |
+| created_at        | timestamp with time zone      | YES      | `now()`               |
+| signature_stage   | character varying             | YES      | `'client'`            |
+
+### Query 2 — Constraints
+
+| table             | constraint                   | type        | definition         |
+| ----------------- | ---------------------------- | ----------- | ------------------ |
+| signature_tokens  | `signature_tokens_pkey`      | PRIMARY KEY | `(id)`             |
+| signature_tokens  | `signature_tokens_token_key` | UNIQUE      | `(token)`          |
+| quote_signatures  | `quote_signatures_pkey`      | PRIMARY KEY | `(id)`             |
+
+No FOREIGN KEY constraints. No CHECK constraints. No additional UNIQUE constraints.
+
+### Query 3 — Indexes
+
+| table             | index                          | definition                                         |
+| ----------------- | ------------------------------ | -------------------------------------------------- |
+| signature_tokens  | `signature_tokens_pkey`        | UNIQUE btree `(id)`                                |
+| signature_tokens  | `signature_tokens_token_key`   | UNIQUE btree `(token)`                             |
+| signature_tokens  | `idx_tokens_rfq`               | btree `(rfq_id)`                                   |
+| signature_tokens  | `idx_tokens_token`             | btree `(token)` *(redundant — covered by UNIQUE)*  |
+| quote_signatures  | `quote_signatures_pkey`        | UNIQUE btree `(id)`                                |
+| quote_signatures  | `idx_signatures_rfq`           | btree `(rfq_id)`                                   |
+| quote_signatures  | `idx_signatures_quote`         | btree `(quote_number)`                             |
+
+### Findings revealed by Queries 1–3
+
+These are deferred follow-ups under US-023, distinct from US-023.5's existing follow-up list. To be carried into the US-023-schema-migration story:
+
+**A. No FK from `signature_tokens.rfq_id` or `quote_signatures.rfq_id` to `rfqs.id`.** Both `rfq_id` columns reference rfqs by convention only. Cascading delete of an RFQ leaves orphan token/signature rows. `quote_signatures.rfq_id` is additionally nullable — a completed signature with no parent RFQ is currently a legal row.
+
+**B. No FK between `quote_signatures` and `signature_tokens`.** ADR-006's data model says these tables are linked via `signature_token_id` on `quote_signatures`, but the column does not exist. The audit trail between a token and the signature it produced is implicit (join on `rfq_id` + `signature_stage`), not deterministically enforceable. If two manager signatures were ever recorded for the same RFQ, there is no way to tell which token each one used.
+
+**C. `signature_stage` has no CHECK constraint and is nullable in both tables.** Valid values (`'manager'`, `'client'`) are enforced only in `api/sign-submit.js:136-138` (validation guard) and the column defaults. A direct INSERT bypassing the route can store any string. Recommendation: `CHECK (signature_stage IN ('manager','client'))` + `NOT NULL`, with a backfill of any nulls before applying.
+
+**D. Type inconsistency for `signature_stage`.** `signature_tokens.signature_stage` is `text`; `quote_signatures.signature_stage` is `character varying`. Functionally equivalent in PostgreSQL but a noise source for any future ORM / type-generation tooling. Normalise to one type (recommend `text`).
+
+**E. Redundant index `idx_tokens_token`.** The `UNIQUE` constraint on `signature_tokens(token)` already creates a unique btree index (`signature_tokens_token_key`). The separate `idx_tokens_token` btree on the same column is a duplicate — safe to `DROP INDEX`.
+
+**F. No index on `signature_tokens(client_email)` or `quote_signatures(signer_email)`.** Currently no query path uses email as a primary lookup, so not yet a problem; flag if a per-signer audit view is added under US-025–028.
+
+**G. Missing NOT NULL on `quote_signatures.rfq_id`.** Combined with finding A, this is the path to orphan signature rows. Backfill check + `ALTER COLUMN ... SET NOT NULL` once any existing nulls are reconciled.
