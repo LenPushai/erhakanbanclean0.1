@@ -3,7 +3,7 @@
 | Field   | Value                                                                                          |
 | ------- | ---------------------------------------------------------------------------------------------- |
 | Date    | 2026-05-16                                                                                     |
-| Status  | **Draft — Phase 1 ready to apply, Phase 2 plan-only**                                          |
+| Status  | **Phase 1 applied 2026-05-16 — Phase 2 plan-only**                                             |
 | Author  | Len Klopper / PUSH AI                                                                          |
 | Parent  | [US-023 e-sign audit](./US-023_esign_audit.md) — Findings A–G in the Schema Introspection Addendum |
 | Related ADR | [ADR-006 — E-Sign Built-in Two-Stage](./ADR-006-e-sign-built-in-two-stage.md)              |
@@ -37,7 +37,7 @@ This story splits cleanly into three phases:
 **File:** `supabase/migrations/000_baseline_signature_tables.sql`
 **Risk:** Zero. Idempotent — uses `CREATE TABLE IF NOT EXISTS` and `CREATE INDEX IF NOT EXISTS`. Re-applying against the live DB is a no-op.
 **Intent:** Capture the schema *exactly as observed* via introspection on 2026-05-16, including the redundant `idx_tokens_token` index. Phase 1 records reality; it does not fix it. Fixes live in Phase 2.
-**Status:** Ready to apply. **Not yet committed to repo** — see Phase 3 step 1 for the staged hand-off.
+**Status:** **Applied 2026-05-16.** SQL file landed at `supabase/migrations/000_baseline_signature_tables.sql` after idempotency verification in Supabase SQL Editor.
 
 ### Full SQL (inline for reviewer convenience)
 
@@ -326,3 +326,9 @@ This separation keeps the planning artefact reviewable as text and the source-of
 - `quote_signatures` duplicate RLS policy cleanup (US-023.5 follow-up #1) — own migration when picked up.
 - Legacy Supabase JWT API key migration to `sb_secret_xxx` format (US-023.5 follow-up #7) — unrelated.
 - Index on `client_email` / `signer_email` (finding F) — revisit at US-025–028.
+
+---
+
+## Status log
+
+- **2026-05-16** — Phase 1 baseline applied. Idempotency verified in Supabase SQL Editor before commit, file at `supabase/migrations/000_baseline_signature_tables.sql`. Phase 2 and 3 remain open.
