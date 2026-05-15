@@ -130,87 +130,26 @@ Findings A–G grouped by severity. Each one drafted here as inline SQL with its
 
 ### HIGH — must land before US-024 ships
 
-US-024 introduces real recipient routing, which means more `signature_tokens` rows from new senders and more `quote_signatures` rows from new signers. Both findings below get worse the more rows accumulate; fix them before US-024 starts writing into the tables.
+US-024 introduces real recipient routing, which means more `signature_tokens` rows from new senders and more `quote_signatures` rows from new signers. All findings below get worse the more rows accumulate; fix them before US-024 starts writing into the tables.
 
-#### A — FK on `rfq_id` (both tables) → `rfqs.id`
+Phase 2 HIGH ships as a **single combined migration file** rather than the per-finding files originally planned. Rationale: the pre-checks run 2026-05-16 showed the dataset is dev-sized (1 RFQ, 1 token, 2 quote_signatures rows — both audit-confirmed test junk). With the orphan rows deleted, all three findings (A, partial B, G) can land atomically with no inter-step risk, and the single file is easier to review and roll back than three.
 
-**Target file:** `supabase/migrations/001_signature_tables_fk_rfqs.sql`
+**Target file:** `supabase/migrations/001_signature_tables_phase2_high.sql`
 
-**Risk:** Depends on existing data. Any `signature_tokens.rfq_id` or `quote_signatures.rfq_id` that points at a missing RFQ will block the FK creation. Pre-check runs first and `RAISE EXCEPTION` so partial state is impossible.
+**Scope:**
 
-**ON DELETE semantics:** `CASCADE`. Per ADR-006 the signing artefacts belong to the RFQ — deleting an RFQ should atomically remove its tokens and signatures. `SET NULL` would create the orphan condition this migration is designed to prevent.
+1. `DELETE` 2 audit-confirmed orphan test rows from `quote_signatures` by explicit id (`c3a66453-27f0-477b-8cf4-65098697fc4b` and `1f8d1eb7-c47f-4eb4-ab86-ce0f45519e30`). Pre-delete row content is captured inline as a comment block so the deleted data is recoverable from version control.
+2. **Finding A — FKs on `rfq_id`.** Add `signature_tokens_rfq_fk` and `quote_signatures_rfq_fk` referencing `rfqs.id` with `ON DELETE RESTRICT`. ON DELETE semantics decided 2026-05-16 — RESTRICT not CASCADE, per [ADR-006 FK Activation & Delete-Semantics Amendment](./ADR-006-e-sign-built-in-two-stage.md#fk-activation--delete-semantics-amendment-2026-05-16). Rationale: signature evidence must not be silently cascade-deleted with its parent RFQ.
+3. **Finding G — `NOT NULL` on `quote_signatures.rfq_id`.** Bundled into Phase 2 HIGH (originally planned for MEDIUM tier) because the table is empty after Step 1, so the constraint applies for free.
+4. **Finding B (partial) — `signature_token_id` column + FK.** Add `quote_signatures.signature_token_id uuid` as a **NULLABLE** column, plus `quote_signatures_token_fk` referencing `signature_tokens.id` with `ON DELETE RESTRICT`. No heuristic backfill — pre-check B3 confirmed all historical rows are unmatchable and are deleted as junk in Step 1.
+5. **Finding B (NOT NULL) deferred to US-024.** The `NOT NULL` tightening on `signature_token_id` requires `api/sign-submit.js` to populate the column on the `quote_signatures` INSERT. Schema and code change together in US-024's PR. The exact location of that INSERT must be re-verified at US-024 implementation time — line numbers in `api/sign-submit.js` have drifted before, including during the US-023.5 server-side refactor.
 
-```sql
--- Phase 2.A — FK rfq_id -> rfqs.id on both e-sign tables.
-do $$
-declare
-  bad_tokens int; bad_sigs int;
-begin
-  select count(*) into bad_tokens from public.signature_tokens t
-    where not exists (select 1 from public.rfqs r where r.id = t.rfq_id);
-  select count(*) into bad_sigs from public.quote_signatures s
-    where s.rfq_id is not null
-      and not exists (select 1 from public.rfqs r where r.id = s.rfq_id);
-  if bad_tokens > 0 or bad_sigs > 0 then
-    raise exception 'FK pre-check failed: % orphan signature_tokens, % orphan quote_signatures', bad_tokens, bad_sigs;
-  end if;
-end $$;
+**Risk:** Low. The transaction is wrapped in `BEGIN`/`COMMIT`. Three independent `do $$ ... raise exception` guards (DELETE count check, orphan re-check, FK validation against now-empty table) ensure that any unexpected data state aborts and rolls back the whole migration. The migration is **one-shot, not idempotent** — accidental re-run aborts at the DELETE count guard.
 
-alter table public.signature_tokens
-  add constraint signature_tokens_rfq_fk
-  foreign key (rfq_id) references public.rfqs(id) on delete cascade;
+**Companion changes that must land in the same commit:**
 
-alter table public.quote_signatures
-  add constraint quote_signatures_rfq_fk
-  foreign key (rfq_id) references public.rfqs(id) on delete cascade;
-```
-
-#### B — Add `signature_token_id` column + FK on `quote_signatures` → `signature_tokens`
-
-**Target file:** `supabase/migrations/002_signature_tables_token_link.sql`
-
-**Risk:** Highest in Phase 2. Adds a new column, backfills via heuristic join, then enforces NOT NULL + FK. The backfill cannot be guaranteed correct for historical rows where multiple tokens existed for the same (rfq, stage) pair. **Requires synchronised code change** in `api/sign-submit.js` — see Implementation Notes below.
-
-```sql
--- Phase 2.B — Add signature_token_id column on quote_signatures per ADR-006.
-alter table public.quote_signatures
-  add column if not exists signature_token_id uuid;
-
--- Backfill: pick the most plausible token for each historical signature
--- (same rfq + same stage + used_at most recent and <= signed_at).
-update public.quote_signatures qs
-set signature_token_id = sub.token_id
-from (
-  select distinct on (qs2.id)
-    qs2.id   as sig_id,
-    st.id    as token_id
-  from public.quote_signatures qs2
-  join public.signature_tokens st
-    on st.rfq_id          = qs2.rfq_id
-   and st.signature_stage = qs2.signature_stage
-   and st.used_at is not null
-   and st.used_at <= qs2.signed_at
-  order by qs2.id, st.used_at desc
-) sub
-where qs.id = sub.sig_id
-  and qs.signature_token_id is null;
-
-do $$
-declare unlinked int;
-begin
-  select count(*) into unlinked from public.quote_signatures where signature_token_id is null;
-  if unlinked > 0 then
-    raise exception 'signature_token_id backfill incomplete: % unlinked rows require manual triage', unlinked;
-  end if;
-end $$;
-
-alter table public.quote_signatures
-  alter column signature_token_id set not null,
-  add constraint quote_signatures_token_fk
-  foreign key (signature_token_id) references public.signature_tokens(id) on delete restrict;
-```
-
-**Implementation note for Phase 2.B:** `api/sign-submit.js:158-174` inserts `quote_signatures` rows without `signature_token_id`. The token row that needs to be referenced (`tk`) is already in scope from the validation at line 127 — the fix is adding `signature_token_id: tk.id` to the insert payload. **This code change must land in the same commit/PR as the migration**, otherwise the new NOT NULL constraint will break Stage 1 + Stage 2 sign-submit immediately.
+- [ADR-006 FK Activation & Delete-Semantics Amendment](./ADR-006-e-sign-built-in-two-stage.md#fk-activation--delete-semantics-amendment-2026-05-16) — records the RESTRICT decision and the activation of `signature_token_id` FK that the ADR-006 Reconciliation Note had deferred.
+- This plan-doc update — supersedes the original two-file CASCADE plan with the single-file RESTRICT plan now adopted.
 
 ### MEDIUM — fix before public launch
 
@@ -305,8 +244,9 @@ Flag-only. Revisit when US-025–028 introduces per-signer audit views; an index
 | 1     | Apply `000_baseline_signature_tables.sql` to live DB via SQL Editor to verify idempotency | Now — pending Len's go-ahead before file lands in repo        |
 | 2     | Land the SQL file in `supabase/migrations/` (separate commit from this doc)             | Step 1 confirms no-op against live DB                         |
 | 3     | Run pre-check counts for HIGH-tier (orphan rfq_id, unlinked signatures)                 | Before authoring 001 / 002                                    |
-| 4     | Apply HIGH-tier (A, B) — author 001 + 002, ship 002 with the `api/sign-submit.js` code change in the same commit/PR | **Before US-024 starts writing into the tables** |
-| 5     | Apply MEDIUM-tier (C, G) — author 003 + 004                                             | Before public launch                                          |
+| 4     | Apply HIGH-tier (A + B-partial + G) — single file `001_signature_tables_phase2_high.sql`, ON DELETE RESTRICT, signature_token_id NOT NULL deferred to US-024 | **Before US-024 starts writing into the tables** |
+| 4a    | Author US-024 to land `signature_token_id` NOT NULL + the `api/sign-submit.js` code change populating the column in the same commit/PR | Immediately after step 4 commits cleanly |
+| 5     | Apply MEDIUM-tier (C only — G landed early in row 4) — author 003                       | Before public launch                                          |
 | 6     | Apply LOW-tier (D, E) — author 005 + 006                                                | Opportunistic — bundle with the next unrelated migration      |
 | 7     | Cut tag `phase1-us023-schema-migration-verified` after all of 001–006 are applied       | After step 6                                                  |
 
@@ -318,6 +258,18 @@ Flag-only. Revisit when US-025–028 introduces per-signer audit views; an index
 2. **Then ask before creating `supabase/migrations/000_baseline_signature_tables.sql`.** Len may want to apply the baseline SQL to the live Supabase project via SQL Editor first to confirm true idempotency (i.e. `CREATE TABLE IF NOT EXISTS` + `CREATE INDEX IF NOT EXISTS` + `ALTER TABLE ... ENABLE ROW LEVEL SECURITY` all return without error or behavioural change against the existing schema). Only after that smoke does the file land in repo as a separate commit.
 
 This separation keeps the planning artefact reviewable as text and the source-of-truth SQL file a deliberate, verified hand-off.
+
+### Phase 2 HIGH commit strategy (revised 2026-05-16)
+
+Phase 2 HIGH lands as **one atomic commit** containing:
+
+1. `supabase/migrations/001_signature_tables_phase2_high.sql` — the migration file (not yet applied to the live DB).
+2. `decisions/ADR-006-e-sign-built-in-two-stage.md` — the FK Activation & Delete-Semantics Amendment appended.
+3. `decisions/US-023-schema-migration.md` — this plan doc updated to match (Phase 2 HIGH section, Phase 3 sequencing rows 4–5, this Commit Strategy section, Status Log).
+
+Rationale for atomic-commit (departure from Phase 1's split-commit pattern): the three artefacts encode a single coordinated decision. Splitting them across commits would create review states where (a) the migration references an amendment that doesn't exist yet, or (b) the plan doc describes a strategy contradicted by the in-tree ADR. Atomic commit avoids both inconsistencies.
+
+After the commit lands, the migration is **applied separately** via the Supabase SQL Editor (same discipline as Phase 1 baseline). Apply success is recorded in the Status Log section below.
 
 ---
 
@@ -332,3 +284,5 @@ This separation keeps the planning artefact reviewable as text and the source-of
 ## Status log
 
 - **2026-05-16** — Phase 1 baseline applied. Idempotency verified in Supabase SQL Editor before commit, file at `supabase/migrations/000_baseline_signature_tables.sql`. Phase 2 and 3 remain open.
+- **2026-05-16** — Phase 2 HIGH pre-checks run against live DB (project `lvaqqqyjqtguozmdjmfn`). 10-row consolidated SELECT executed via SQL Editor. Findings: A1=0, A2=2, A3=0, B1=2, B2=0, B3=2, B4=0. Heuristic gate `B2 + B3 = B1` held. The 2 orphan `quote_signatures` rows were audit-confirmed as dev test artefacts (signer "Test Customer", quote_number Q001, signed 2026-05-10). DELETE-then-constrain path approved; CASCADE→RESTRICT decision recorded in ADR-006 amendment of the same date.
+- **2026-05-16** — Phase 2 HIGH migration `supabase/migrations/001_signature_tables_phase2_high.sql` authored (not yet applied). Single combined file replaces the two-file plan originally drafted under Phase 2 HIGH; all three FKs use `ON DELETE RESTRICT`. Migration awaits Len's review and approval to apply via Supabase SQL Editor.

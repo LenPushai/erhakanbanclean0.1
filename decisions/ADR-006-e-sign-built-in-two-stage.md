@@ -319,6 +319,56 @@ The next CC build brief must explicitly reference both the Reconciliation Note a
 
 ---
 
+## FK Activation & Delete-Semantics Amendment (2026-05-16)
+
+**Trigger:** US-023 schema migration Phase 2 HIGH — authoring of `supabase/migrations/001_signature_tables_phase2_high.sql`. The migration introduces foreign keys on `signature_tokens.rfq_id`, `quote_signatures.rfq_id`, and a new `quote_signatures.signature_token_id` column with its own FK to `signature_tokens.id`. Two decisions in this migration depart from the standing position of prior sections of this ADR and are recorded here.
+
+### Decision 1 — `signature_token_id` FK is activated (was: deferred)
+
+The Reconciliation Note above (row 205 of the reconciliation map) decided *against* the `signature_token_id` FK in v1, framing it as *"a Phase 2 enhancement if linkage proves ambiguous in practice."* Phase 2 has arrived, and the activation is justified on **two distinct grounds** that should not be conflated:
+
+**(a) Structural — ambiguity is real by design.** Nothing in the `signature_tokens` schema prevents more than one row sharing the same `(rfq_id, signature_stage)` pair. The implicit-linkage approach to associating a `quote_signature` with its originating token via that pair is therefore *not deterministic by construction*: if two manager tokens were ever generated for the same RFQ — by retry, by reissue, by parallel sign-send — a join on `(rfq_id, signature_stage)` would ambiguously match a signature to either. US-023's pre-check B4 found **zero** such duplicate pairs in current data, so the ambiguity is not empirically observed today. But the absence of duplicates is a property of data state, not of schema design. The structural ambiguity is the gating condition the Reconciliation Note anticipated, and it exists independently of whether the data has exhibited it yet.
+
+**(b) Empirical — separate observed unreliability.** US-023's pre-checks additionally found `B3 = 2` quote_signatures rows that match **no** signature_token via the heuristic predicate (`rfq_id` + `signature_stage` + `used_at ≤ signed_at`). This is a different failure mode from (a): not under-determined linkage (multiple candidates), but the complete absence of any candidate. The implicit-linkage approach was relying on the existence of a matching token; in real existing data, that existence cannot be assumed. (Those 2 rows are audit-confirmed test junk, deleted in Step 1 of the migration — but their *historical presence* is the demonstration that the implicit linkage was never enforced.)
+
+A strict FK collapses both unreliability modes into a single enforced linkage. (a) and (b) are independent, and each one alone is sufficient grounds for FK activation. Together they retire the "decided against" position in the Reconciliation Note.
+
+The migration therefore:
+
+- Adds `quote_signatures.signature_token_id uuid` as a **NULLABLE** column (no backfill — the historical rows that motivated (b) are deleted as junk in Step 1 of the migration).
+- Adds a foreign key constraint from `signature_token_id` to `signature_tokens.id`.
+- **Does NOT add NOT NULL on the column.** That tightening, plus the corresponding change in `api/sign-submit.js` to populate `signature_token_id` on the `quote_signatures` INSERT, is deferred to **US-024**. Schema and code move together to avoid a window where the new constraint breaks the live sign-submit flow. (The exact location of that INSERT in `api/sign-submit.js` must be re-verified at US-024 implementation time — line numbers in this file have drifted before, including during the US-023.5 server-side refactor.)
+
+**Supersedes:** Reconciliation Note row 205. The `signature_token_id` FK is no longer "decided against" — it is now part of the canonical schema.
+
+### Decision 2 — ON DELETE RESTRICT, not CASCADE, for all three signature-related FKs
+
+The CASCADE-vs-RESTRICT question is not addressed in ADR-006 itself; the choice of CASCADE entered the architecture in `decisions/US-023-schema-migration.md` (finding A) as a *derivation* from this ADR's framing that *"signing artefacts belong to the RFQ — deleting an RFQ should atomically remove its tokens and signatures."* That derivation is retired here.
+
+All three new FKs use **`ON DELETE RESTRICT`**:
+
+| FK | References | Delete behaviour |
+|----|------------|------------------|
+| `signature_tokens.rfq_id`             | `rfqs.id`              | `ON DELETE RESTRICT` |
+| `quote_signatures.rfq_id`             | `rfqs.id`              | `ON DELETE RESTRICT` |
+| `quote_signatures.signature_token_id` | `signature_tokens.id`  | `ON DELETE RESTRICT` |
+
+**Rationale:**
+
+1. **Signature evidence is legal evidence.** A completed `quote_signatures` row is the audit record of customer assent under the ECT Act (see *Legal Validity* in the original Decision section). Silently cascade-deleting that record when its parent RFQ is deleted destroys the very evidence the audit trail exists to preserve. RESTRICT forces a deliberate two-step (delete signatures *first*, then delete the RFQ) and surfaces accidental wipes as visible errors.
+2. **The pre-check data validated the failure mode.** US-023's Phase 2 HIGH pre-checks (run 2026-05-16) found 2 `quote_signatures` rows orphaned from RFQs that no longer exist. Whether those parent RFQs were deliberately deleted in dev or had typo `rfq_id` values from the start, the empirical fact is that **signature rows have survived their parent RFQ's deletion in this codebase before**. CASCADE would have silently destroyed them; RESTRICT would have surfaced the operation for review.
+3. **Reversibility.** RESTRICT is the strictly safer default. Loosening to CASCADE later is a one-line `ALTER CONSTRAINT` change. Tightening from CASCADE to RESTRICT after a production destructive incident is impossible — the evidence is already gone.
+
+**Supersedes:** The CASCADE derivation in `decisions/US-023-schema-migration.md`'s Phase 2 finding A inline SQL. That doc has been updated in the same commit as this amendment to reflect the change.
+
+### Standing forward
+
+Like the Reconciliation Note and Lifecycle Integration Addendum above, this amendment is **forward-only**. The original *Decision* and *Reasoning* sections at the top of this ADR remain the historical record; the Reconciliation Note and Lifecycle Integration Addendum remain the source of truth for data layer and lifecycle respectively; this Amendment is the source of truth for **FK constraints and delete semantics on the signature tables**.
+
+Future ADRs or migrations that touch signature-table FKs must reference this Amendment as authoritative for the CASCADE-vs-RESTRICT choice.
+
+---
+
 *This ADR was authored on 2026-05-08 prior to implementation. It documents both the original DocuSign choice (now superseded) and the Built-in E-Sign decision that replaces it. The DocuSign integration code that was partially built will not be migrated — it should be removed or archived as a separate cleanup task tracked outside this ADR.*
 
 *The Audit Trail Reconciliation Note appended on 2026-05-08 captures the discovery that the data layer pre-existed this ADR and the decision to adapt the spec to the live schema rather than recreate. The pre-existing schema is, in several material respects, better-designed than the original spec — denormalised quote data, readable stage names, and additive columns that improve both audit defensibility and ML-readiness.*
