@@ -15,7 +15,7 @@ Post-rebuild audit of the e-sign module infrastructure — schema state, code ar
 
 The audit is the upstream parent of:
 - **US-023.5** (RLS lockdown on `signature_tokens`) — closed at tag `phase1-us023-5-rls-lockdown-verified` (`8800e9b`).
-- US-024 (real recipient routing — Dewald/Jaco fallback).
+- US-024 (real recipient routing — design-blocked on [ADR-006 Q4](./ADR-006-e-sign-built-in-two-stage.md); see "Forward links" entry below).
 - US-025–028 (remainder of the E-Sign module per [ADR-006](./ADR-006-e-sign-built-in-two-stage.md)).
 
 ---
@@ -85,7 +85,7 @@ This finding spawned **US-023.5** as a separate story, since the fix required a 
 ## Forward links
 
 - **US-023.5** — RLS lockdown on `signature_tokens`. Closed 2026-05-16 at tag `phase1-us023-5-rls-lockdown-verified` (`8800e9b`). See [decisions/US-023.5-paused-supabase-js-mystery.md](./US-023.5-paused-supabase-js-mystery.md) for the pause-and-resume detail.
-- **US-024** — Real recipient routing for `api/manager-approval-send.js`. Currently hardcoded to Hendrik; needs routing by RFQ's assigned quoter with Dewald / Jaco fallback per [ADR-006](./ADR-006-e-sign-built-in-two-stage.md) v2.
+- **US-024** — Real recipient routing for `api/manager-approval-send.js`. Currently hardcoded to Hendrik at three sites (verified 2026-05-16): `client_email` at line 41 and `client_name` at line 42 inside the `signature_tokens` INSERT, and the `to` array at line 81 inside the `/api/send-email` fetch. Stage 1 recipient routing is **unresolved** per [ADR-006 Open Question Q4](./ADR-006-e-sign-built-in-two-stage.md) — the eligible-managers set, the RFQ field carrying the assignment, and the fallback rule for null assignments are all undecided. No `ADR-006 v2` exists. "Jaco" is an unverified name that does not appear anywhere in ADR-006 and may be a confabulation. Implementation is blocked pending an ERHA stakeholder decision and a new ADR-006 amendment formalising it.
 - **US-025 – US-028** — Remainder of the E-Sign module per [ADR-006](./ADR-006-e-sign-built-in-two-stage.md): Stage 2 implementation lift-out from checkpoint-pending, signature audit-log surfacing, signer identity hardening, and DocuSign-deferred reversal path documentation.
 
 ---

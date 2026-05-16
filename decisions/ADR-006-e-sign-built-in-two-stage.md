@@ -337,7 +337,7 @@ The migration therefore:
 
 - Adds `quote_signatures.signature_token_id uuid` as a **NULLABLE** column (no backfill — the historical rows that motivated (b) are deleted as junk in Step 1 of the migration).
 - Adds a foreign key constraint from `signature_token_id` to `signature_tokens.id`.
-- **Does NOT add NOT NULL on the column.** That tightening, plus the corresponding change in `api/sign-submit.js` to populate `signature_token_id` on the `quote_signatures` INSERT, is deferred to **US-024**. Schema and code move together to avoid a window where the new constraint breaks the live sign-submit flow. (The exact location of that INSERT in `api/sign-submit.js` must be re-verified at US-024 implementation time — line numbers in this file have drifted before, including during the US-023.5 server-side refactor.)
+- **Does NOT add NOT NULL on the column.** That tightening, plus the corresponding change in `api/sign-submit.js` to populate `signature_token_id` on the `quote_signatures` INSERT, is deferred to **US-024**. Schema and code move together to avoid a window where the new constraint breaks the live sign-submit flow. (Re-verify the exact INSERT location in `api/sign-submit.js` at implementation time as defensive practice — pinning specific line ranges in a long-lived decision record is a known maintenance hazard regardless of whether drift has actually occurred.)
 
 **Supersedes:** Reconciliation Note row 205. The `signature_token_id` FK is no longer "decided against" — it is now part of the canonical schema.
 
