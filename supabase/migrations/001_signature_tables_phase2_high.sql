@@ -60,7 +60,7 @@
 --          ip_address, user_agent,
 --          quote_total, quote_description, status, created_at,
 --          length(signature_data) as sig_data_len,
---          left(signature_data, 64) as sig_data_prefix
+--          left(signature_data, 80) as sig_data_prefix
 --     from public.quote_signatures
 --    where id in ('c3a66453-27f0-477b-8cf4-65098697fc4b',
 --                 '1f8d1eb7-c47f-4eb4-ab86-ce0f45519e30');
