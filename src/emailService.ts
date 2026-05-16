@@ -259,37 +259,6 @@ export async function emailJobComplete(job: any) {
   await sendEmail(ALL, subject, html)
 }
 
-// E-sign Stage 1 - internal manager review-and-sign email.
-// Always routed to Hendrik per US-012/US-013 v1 scope. Multi-manager routing
-// (Dewald fallback, etc.) is a v2 enhancement - see ADR-006.
-export async function emailManagerReviewAndSign(rfq: any, token: string) {
-  const link = `${APP_URL}/sign/${token}`
-  const enq = rfq.rfq_no || rfq.enq_number || 'RFQ'
-  const subject = `Quote Awaiting Your Sign-off - ${enq} (${rfq.quote_number || 'Quote'})`
-  const valueLine = rfq.quote_value_excl_vat
-    ? 'R ' + Number(rfq.quote_value_excl_vat).toLocaleString('en-ZA') + ' excl VAT'
-    : '-'
-  const html = `<div style="max-width:600px;margin:0 auto">
-    <div style="${headerStyle}"><h2 style="margin:0">Internal Quote Sign-off</h2></div>
-    <div style="${bodyStyle}">
-      <p style="margin-bottom:16px">A quote is ready for your internal sign-off before being sent to the customer.</p>
-      <table style="width:100%;border-collapse:collapse;background:#f9fafb;border-radius:6px">
-        ${infoRow('RFQ Number', enq)}
-        ${infoRow('Quote Number', rfq.quote_number)}
-        ${infoRow('Client', rfq.clients?.company_name || rfq.client_name)}
-        ${infoRow('Description', rfq.description)}
-        ${infoRow('Quote Value', valueLine)}
-      </table>
-      <div style="margin-top:24px;text-align:center">
-        <a href="${link}" style="display:inline-block;background:#1d4ed8;color:white;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:bold">Review &amp; Sign Quote</a>
-      </div>
-      <p style="margin-top:20px;font-size:11px;color:#6b7280">Single-use link, expires in 7 days. Once signed, the quote is automatically emailed to the customer for their acceptance.</p>
-      ${footer}
-    </div>
-  </div>`
-  await sendEmail([RECIPIENTS.hendrik], subject, html)
-}
-
 export async function emailJobDispatched(job: any) {
   const subject = `[Job Dispatched] ${job.job_number}`
   const html = `<div style="max-width:600px;margin:0 auto">
