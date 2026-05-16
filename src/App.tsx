@@ -935,10 +935,12 @@ table { border-collapse:collapse; width:100%; }
   }
 
   // E-sign Stage 1 trigger: create a 'manager' signature_token for the RFQ
-  // and dispatch the manager review-and-sign email. Hendrik is the only
-  // recipient in v1 per ADR-006 (Dewald fallback deferred to v2).
+  // and dispatch the manager review-and-sign email. Stage 1 approver
+  // routing is server-side per ADR-006 Stage 1 Signing Authority &
+  // Gatekeeper Amendment (2026-05-16); see api/manager-approval-send.js
+  // STAGE_1_APPROVER for the current target.
   const handleSendForManagerApproval = async (rfq: RFQ) => {
-    if (!confirm(`Send "${rfq.rfq_no || rfq.enq_number || 'this quote'}" to Hendrik for manager sign-off?`)) return
+    if (!confirm(`Send "${rfq.rfq_no || rfq.enq_number || 'this quote'}" for manager sign-off?`)) return
     try {
       const res = await fetch('/api/manager-approval-send', {
         method: 'POST',
@@ -952,7 +954,7 @@ table { border-collapse:collapse; width:100%; }
       }
       if (body.email_error) console.error('manager email failed:', body.email_error)
       await fetchSignatureTokens()
-      alert('Sent to Hendrik for sign-off. Once signed, the customer will be emailed automatically.')
+      alert('Sent for manager sign-off. Once signed, the customer will be emailed automatically.')
     } catch (e: any) { alert('Send for manager approval failed: ' + e.message) }
   }
 

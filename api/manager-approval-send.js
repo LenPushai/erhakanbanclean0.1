@@ -4,6 +4,15 @@ const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const APP_URL = process.env.APP_URL || process.env.VITE_APP_URL;
 
+// Stage 1 approver — see ADR-006 Stage 1 Signing Authority & Gatekeeper
+// Amendment (2026-05-16). Sole approver = Dewald; no assignment-field
+// routing, no automatic fallback. The Jeanic-authorised Hendrik fallback
+// path is US-024c and not implemented here.
+const STAGE_1_APPROVER = {
+  email: 'dewald@erha.co.za',
+  name: 'Dewald',
+};
+
 const headerStyle = 'background:linear-gradient(135deg,#1e3a5f,#2d5a8e);color:white;padding:20px;border-radius:8px 8px 0 0';
 const bodyStyle = 'padding:20px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px;font-family:Arial,sans-serif';
 const footerStyle = 'margin-top:20px;padding-top:12px;border-top:1px solid #e5e7eb;font-size:11px;color:#9ca3af;text-align:center';
@@ -38,8 +47,8 @@ export default async function handler(req, res) {
     const { error: insertErr } = await supabase.from('signature_tokens').insert({
       rfq_id: rfq.id,
       token,
-      client_email: 'hendrik@erha.co.za',
-      client_name: 'Hendrik',
+      client_email: STAGE_1_APPROVER.email,
+      client_name: STAGE_1_APPROVER.name,
       expires_at: expiresAt,
       is_valid: true,
       used_at: null,
@@ -78,7 +87,7 @@ export default async function handler(req, res) {
       const sendRes = await fetch(`${APP_URL}/api/send-email`, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ to: ['hendrik@erha.co.za'], subject, html }),
+        body: JSON.stringify({ to: [STAGE_1_APPROVER.email], subject, html }),
       });
       const sendBody = await sendRes.json().catch(() => ({}));
       emailDispatched = sendRes.ok && sendBody.success;
