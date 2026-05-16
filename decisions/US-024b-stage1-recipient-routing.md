@@ -3,7 +3,7 @@
 | Field   | Value                                                                                                                |
 | ------- | -------------------------------------------------------------------------------------------------------------------- |
 | Date    | 2026-05-16                                                                                                            |
-| Status  | **Buildable — pending Dewald's email address from ERHA**                                                              |
+| Status  | **Engineering-ready** (external prerequisite cleared 2026-05-16 — see *Prerequisite* below)                            |
 | Author  | Len Klopper / PUSH AI                                                                                                 |
 | Parent  | [ADR-006 *Stage 1 Signing Authority & Gatekeeper Amendment (2026-05-16)*](./ADR-006-e-sign-built-in-two-stage.md#stage-1-signing-authority--gatekeeper-amendment-2026-05-16) |
 | Blocks  | E-Sign module-complete (per [ESIGN-BACKLOG.md](./ESIGN-BACKLOG.md))                                                  |
@@ -26,12 +26,12 @@ A single named-approver constant at the top of `api/manager-approval-send.js`, r
 // routing, no automatic fallback. The Jeanic-authorised Hendrik fallback
 // path is US-024c and not implemented here.
 const STAGE_1_APPROVER = {
-  email: 'TBD — confirm Dewald\'s ERHA email address',
+  email: 'dewald@erha.co.za',
   name: 'Dewald',
 };
 ```
 
-**Open prerequisite (one line from ERHA):** Dewald's actual email address. The codebase has no reference to it currently — `Grep` for `[Dd]ewald.*@` returns no matches across `api/`, `src/`, `decisions/`, `scripts/` as of 2026-05-16. Hendrik's email (`hendrik@erha.co.za`) suggests a `firstname@erha.co.za` pattern but assuming `dewald@erha.co.za` without confirmation would be the same class of defect as the retracted "Jaco" confabulation. **The spec is incomplete until Dewald's email is confirmed by ERHA.**
+**Prerequisite — RESOLVED 2026-05-16.** ERHA confirmed Dewald's email address as `dewald@erha.co.za` — which does match the `firstname@erha.co.za` pattern Hendrik's address suggested, but the confirmation discipline mattered: `Grep` for `[Dd]ewald.*@` returned no matches across `api/`, `src/`, `decisions/`, `scripts/` as of the 2026-05-16 audit, and assuming the pattern without confirmation would have been the same class of defect as the retracted "Jaco" confabulation. The confirmed address is now embedded in `STAGE_1_APPROVER.email` above; the story moves to engineering-ready, code-only.
 
 ---
 

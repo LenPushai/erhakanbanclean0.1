@@ -436,6 +436,16 @@ Like the Reconciliation Note, Lifecycle Integration Addendum, and FK Activation 
 
 Future ADRs / migrations / code that touches Stage 1 signing authority or the gatekeeper matrix must reference this Amendment as authoritative.
 
+### Fallback semantics clarification (2026-05-16, same-day)
+
+Same-day forward refinement of Decision 1's fallback **semantics**, recording what is settled by the clarified business model and explicitly preserving what remains open for design.
+
+**Settled (authoritative as of this clarification):** the trigger is a **Dewald-unavailable period** (sick, leave, otherwise off), not a per-quote event; for that period Hendrik **assumes Dewald's full role** — estimation, quotation, and Stage 1 signing — not a per-quote co-sign; Jeanic is the **operational control point** and supplies Hendrik the internal-process information the role requires, consistent with Decision 1's "explicitly enable" power; the "authorised-by Jeanic, flagged fallback" provenance requirement recorded in Decision 1 is **unchanged**.
+
+**Explicitly deferred:** the **mechanism form** by which Jeanic operates the unavailable-mode (e.g. a temporary period-based mode toggled on/off, vs a per-quote toggle, vs another form) is **not settled** by this clarification — the business model strongly indicates a period-based mode, but the design decision lives in [`decisions/US-024c-stage1-fallback-approver.md`](./US-024c-stage1-fallback-approver.md) and is deliberately open there.
+
+This sharpens — but does not modify — Decision 1. The ADR records the **semantics**; the **mechanism** is US-024c's to resolve.
+
 ---
 
 *This ADR was authored on 2026-05-08 prior to implementation. It documents both the original DocuSign choice (now superseded) and the Built-in E-Sign decision that replaces it. The DocuSign integration code that was partially built will not be migrated — it should be removed or archived as a separate cleanup task tracked outside this ADR.*
