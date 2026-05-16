@@ -158,6 +158,7 @@ export default async function handler(req, res) {
     const { data: sig, error: sigErr } = await supabase
       .from('quote_signatures').insert({
         rfq_id: tk.rfq_id,
+        signature_token_id: tk.id,
         quote_number: rfq.quote_number || null,
         signer_name: String(signer_name).trim(),
         signer_email: tk.client_email,
