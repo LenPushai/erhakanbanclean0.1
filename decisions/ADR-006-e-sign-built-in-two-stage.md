@@ -369,6 +369,75 @@ Future ADRs or migrations that touch signature-table FKs must reference this Ame
 
 ---
 
+## Stage 1 Signing Authority & Gatekeeper Amendment (2026-05-16)
+
+**Trigger:** US-024b kickoff. Stage 1 recipient routing is currently hardcoded to Hendrik in `api/manager-approval-send.js`. Two of this ADR's open questions — Q4 (Stage 1 signing authority, line 122) and Q5 (Stage 1 gatekeeper, Lifecycle Integration Addendum line 310) — must be resolved before that hardcode can be replaced with real routing. This amendment records the resolved model and also retires a confabulation ("ADR-006 v2 / Jaco fallback") that had propagated through prior session records.
+
+### Decision 1 — Stage 1 signing authority (resolves Q4)
+
+**Sole approver:** **Dewald**. All Stage 1 sign-off tokens are issued to Dewald by default. Stage 1 recipient routing in `api/manager-approval-send.js` is replaced with a single named-approver config — there is no per-RFQ assignment field, and no automatic fallback chain.
+
+**Hendrik:** **view-only by default**. Hendrik does not sign Stage 1 in the default flow. He retains read access to the signing surface (the kanban, the e-sign audit trail, the activity log) consistent with his existing role — but the signing token does not go to him.
+
+**Jeanic:** holds **fallback-authorisation power** — i.e., the capability to explicitly enable Hendrik to sign Stage 1 as an exceptional approver when Dewald is unavailable. Jeanic does not herself sign Stage 1 (signing authority remains with Dewald in the default flow; with Hendrik in the authorised-fallback flow).
+
+**Fallback flow (Dewald unavailable):** Jeanic explicitly authorises Hendrik for the affected quote. Hendrik then signs as the exceptional approver. The resulting `quote_signatures` row records distinct provenance:
+
+| Field | Value in fallback flow |
+|-------|------------------------|
+| `signer_name` / `signer_email` | Hendrik |
+| (new) authorised-by | Jeanic |
+| (new) fallback flag | `true` |
+
+The "authorised-by" + "fallback flag" provenance is a **schema and code requirement** for the carved-out fallback story (US-024c — see *Standing forward* below) — `quote_signatures` does not currently have these columns. This amendment records the requirement; the schema change lives in US-024c's migration. **US-024b does not implement the fallback path** — it only replaces the Hendrik hardcode with the Dewald default. Until US-024c ships, the fallback path is operationally unavailable; if Dewald is unavailable, Stage 1 blocks.
+
+**Enabling mechanism for the fallback (deferred):** whether Jeanic's "authorise Hendrik" action is a per-quote toggle (authorise Hendrik for *this specific* RFQ) or a temporary mode (authorise Hendrik for Stage 1 broadly for the next N hours) is a design-time decision for US-024c. Both forms satisfy the provenance requirement above; the difference is UX and audit granularity. Resolve at US-024c design time, not now.
+
+**Supersedes:** Q4 (line 122 of this ADR's *Open Questions for Client Confirmation*):
+
+> ~~4. **Stage 1 routing** — confirm Hendrik and Dewald as the two managers authorised to sign Stage 1; or does Jeanic also sign in some scenarios?~~
+
+Q4 was "Hendrik *or* Dewald *or also Jeanic*". The resolution narrows to **Dewald only** for the default flow, with Hendrik available only via Jeanic-authorised fallback, and Jeanic never signing. The line above is preserved verbatim in the *Open Questions* section as historical record; the resolution lives here.
+
+### Decision 2 — Stage 1 gatekeeper (resolves Q5)
+
+**The "Send for Manager Approval" allowlist is `{Jeanic, Hendrik}`.** Recorded as a positive-space declaration: anyone not on the allowlist is excluded by construction.
+
+| Role | Can press "Send for Manager Approval"? |
+|------|----------------------------------------|
+| Jeanic (operational lead) | **Yes — gatekeeper** |
+| Hendrik | **Yes — also able** |
+| All other roles (Cherise, Dewald, future roles) | **No — excluded by construction** |
+
+**Status — RESOLVED.** Jeanic confirmed the gatekeeper role directly. Len confirmed Hendrik's dispatcher capability directly. Cherise and Dewald appear as negative-space examples consistent with ADR-006 v1's role context. There is no pending caveat — the matrix is fully confirmed as of 2026-05-16.
+
+**Future additions** (e.g. introducing a new operational role and granting it dispatch capability) land as **explicit forward ADR-006 amendments** — dated, one-line — not as a soft "still confirming" state on this amendment.
+
+**Supersedes:** Q5 (line 310, *Lifecycle Integration Addendum — Open Question for Client Confirmation*):
+
+> ~~5. **The "Send for Manager Approval" button — who can press it?** v1 proposes Jeanic as the gatekeeper (operational lead), with Hendrik also able to press it. Cherise (admin) and Dewald (quoter) cannot. Confirm with Jeanic.~~
+
+Resolution: v1-as-proposed adopted and fully confirmed. The "Confirm with Jeanic" caveat in the original Q5 text is discharged by Jeanic's direct confirmation 2026-05-16.
+
+### Retraction — "ADR-006 v2 / Jaco fallback" phantom
+
+Earlier session records had propagated a confabulation that ADR-006 v2 specified a "Dewald / Jaco fallback" for Stage 1 routing. No "ADR-006 v2" was ever authored, and no person named "Jaco" appears anywhere in ADR-006 or in any Stage 1 signing context. The Stage 1 fallback signer is **Hendrik** (with Jeanic's authorisation), not Jaco. This amendment is the formal ADR-006 record retiring that confabulation.
+
+The phantom has been retracted from `decisions/US-023_esign_audit.md` in commit `4fc19a5`. A memory entry (`memory/us-023-5-rls-lockdown.md` follow-up #4) still carries the phantom as of this amendment's authoring and is being corrected alongside this amendment as a memory-correctness fix.
+
+### Standing forward
+
+Like the Reconciliation Note, Lifecycle Integration Addendum, and FK Activation & Delete-Semantics Amendment above, this amendment is **forward-only**. The original *Open Questions* section and the Lifecycle Integration Addendum's Q5 remain as historical record. This Amendment is the source of truth for **Stage 1 signing authority, gatekeeper authorisation, and fallback semantics**.
+
+**Carved-out follow-on stories framed by this amendment:**
+
+- **US-024b** (now buildable) — replace the hardcoded Hendrik in `api/manager-approval-send.js` (three sites) with the Dewald-as-Stage-1-approver config. No assignment-field logic, no fallback logic. See [`decisions/US-024b-stage1-recipient-routing.md`](./US-024b-stage1-recipient-routing.md) for the precise spec; status tracked in [`decisions/ESIGN-BACKLOG.md`](./ESIGN-BACKLOG.md).
+- **US-024c** (newly created) — Stage 1 fallback approver mechanism. Adds `quote_signatures.authorised_by` + `quote_signatures.is_fallback` columns (or equivalent), the Jeanic-gated UI to authorise Hendrik per-quote-or-mode, the routing fork in `api/manager-approval-send.js`, and the audit-log surfacing. Blocked on the enabling-mechanism design decision (per-quote toggle vs temporary mode). See [`decisions/US-024c-stage1-fallback-approver.md`](./US-024c-stage1-fallback-approver.md) for the stub.
+
+Future ADRs / migrations / code that touches Stage 1 signing authority or the gatekeeper matrix must reference this Amendment as authoritative.
+
+---
+
 *This ADR was authored on 2026-05-08 prior to implementation. It documents both the original DocuSign choice (now superseded) and the Built-in E-Sign decision that replaces it. The DocuSign integration code that was partially built will not be migrated — it should be removed or archived as a separate cleanup task tracked outside this ADR.*
 
 *The Audit Trail Reconciliation Note appended on 2026-05-08 captures the discovery that the data layer pre-existed this ADR and the decision to adapt the spec to the live schema rather than recreate. The pre-existing schema is, in several material respects, better-designed than the original spec — denormalised quote data, readable stage names, and additive columns that improve both audit defensibility and ML-readiness.*
