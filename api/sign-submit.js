@@ -26,7 +26,41 @@ function getClientIp(req) {
   return req.socket?.remoteAddress || req.connection?.remoteAddress || null;
 }
 
-async function sendCustomerSignEmail({ rfq, token }) {
+/**
+ * Phase 1 — Pastel PDF lookup by filename convention.
+ * Convention: file_name in rfq_attachments starts with 'Quote-<quote_number>'
+ * (case-insensitive) and ends with '.pdf'. Returns the first match (or null
+ * if none found). If multiple files match, the choice is undefined — the
+ * operational expectation is one Pastel PDF per quote.
+ *
+ * If the convention changes, update BOTH api/sign-submit.js AND
+ * api/manager-approval-send.js — this helper is duplicated across both
+ * routes to keep each handler self-contained.
+ */
+async function findPastelQuotePdf(supabase, rfqId, quoteNumber) {
+  if (!quoteNumber) return null;
+  const { data: rows, error } = await supabase
+    .from('rfq_attachments')
+    .select('file_name, file_path')
+    .eq('rfq_id', rfqId)
+    .ilike('file_name', '%.pdf');
+  if (error) {
+    console.warn('[pastel-pdf] rfq_attachments lookup failed:', error.message);
+    return null;
+  }
+  if (!rows || rows.length === 0) return null;
+  const expectedPrefix = `quote-${String(quoteNumber).toLowerCase()}`;
+  const match = rows.find(r => String(r.file_name || '').toLowerCase().startsWith(expectedPrefix));
+  if (!match) return null;
+  const { data: urlData } = supabase.storage.from('rfq-attachments').getPublicUrl(match.file_path);
+  if (!urlData?.publicUrl) {
+    console.warn(`[pastel-pdf] getPublicUrl returned no publicUrl for ${match.file_path}`);
+    return null;
+  }
+  return { filename: match.file_name, url: urlData.publicUrl };
+}
+
+async function sendCustomerSignEmail({ rfq, token, pastelPdf }) {
   if (!APP_URL) throw new Error('VITE_APP_URL not configured server-side; cannot build sign link.');
   const link = `${APP_URL}/sign/${token}`;
   const enq = rfq.rfq_no || rfq.enq_number || 'RFQ';
@@ -54,10 +88,14 @@ async function sendCustomerSignEmail({ rfq, token }) {
   </div>`;
   // TEMP override mirrored from api/send-email.js — REMOVE with US-014b before Monday.
   const to = ['lenklopper03@gmail.com'];
+  const resendBody = { from: FROM_EMAIL, to, subject, html, reply_to: 'pa@erha.co.za' };
+  if (pastelPdf) {
+    resendBody.attachments = [{ filename: pastelPdf.filename, path: pastelPdf.url }];
+  }
   const response = await fetch('https://api.resend.com/emails', {
     method: 'POST',
     headers: { Authorization: `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ from: FROM_EMAIL, to, subject, html, reply_to: 'pa@erha.co.za' }),
+    body: JSON.stringify(resendBody),
   });
   if (!response.ok) {
     const err = await response.json().catch(() => ({}));
@@ -211,7 +249,14 @@ export default async function handler(req, res) {
         } else {
           stage2TokenId = t2.id;
           try {
-            await sendCustomerSignEmail({ rfq, token: stage2Token });
+            // Phase 1 — Pastel PDF attachment for Stage 2 customer email.
+            // If not found, send without attachment (warning logged); the
+            // digital signature flow is unchanged. See findPastelQuotePdf.
+            const pastelPdf = await findPastelQuotePdf(supabase, rfq.id, rfq.quote_number);
+            if (!pastelPdf) {
+              console.warn(`[sign-submit/stage2] No Pastel PDF matching 'Quote-${rfq.quote_number}*.pdf' found in rfq_attachments for RFQ ${rfq.id}; sending email without attachment.`);
+            }
+            await sendCustomerSignEmail({ rfq, token: stage2Token, pastelPdf });
             stage2EmailDispatched = true;
           } catch (e) {
             stage2DispatchError = e.message;
