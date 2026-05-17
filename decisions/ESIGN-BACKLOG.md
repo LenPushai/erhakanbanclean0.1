@@ -35,7 +35,7 @@ Definition of "E-Sign module complete":
 | US-023 Phase 2 LOW (Findings D, E) | NOT-STARTED | — | None (engineering-ready, opportunistic) |
 | US-023.5 (RLS lockdown) | DONE-VERIFIED | `phase1-us023-5-rls-lockdown-verified` @ `8800e9b` | — |
 | US-024a (token closure) | DONE-VERIFIED | `phase1-us024a-token-closure-verified` @ `fe67c2a` | — |
-| [US-024b](./US-024b-stage1-recipient-routing.md) (Stage 1 recipient routing) | **NOT-STARTED — engineering-ready** | — | None as of 2026-05-16 (Q4/Q5 resolved by ADR-006 *Stage 1 Signing Authority & Gatekeeper Amendment*; Dewald's email confirmed by ERHA 2026-05-16) |
+| [US-024b](./US-024b-stage1-recipient-routing.md) (Stage 1 recipient routing) | **DONE-VERIFIED** | `phase1-us024b-stage1-recipient-routing-verified` @ `ebc0786` | — |
 | [US-024c](./US-024c-stage1-fallback-approver.md) (Stage 1 fallback approver mechanism) | NOT-STARTED — design-blocked | — | Internal design decision: enabling mechanism (per-quote toggle vs temporary mode) — see [US-024c stub](./US-024c-stage1-fallback-approver.md) |
 | US-025 | **UNSPECIFIED** | — | **No spec exists** — see Unspecified Scope section |
 | US-026 | **UNSPECIFIED** | — | **No spec exists** — see Unspecified Scope section |
@@ -48,13 +48,13 @@ Definition of "E-Sign module complete":
 
 Ordered roughly quick-wins-first:
 
-1. **US-023.5 deferred #6** — remove dead-code `emailManagerReviewAndSign` from `src/emailService.ts`. Minutes.
-2. **US-023.5 deferred #1** — `DROP POLICY` cleanup for `quote_signatures`'s 4 RLS policies with 2 duplicate pairs. Small migration, low risk.
-3. **US-023 Phase 2 LOW** — Findings D (`signature_stage` `varchar`→`text` on `quote_signatures`) + E (`DROP INDEX idx_tokens_token`). Bundle or split as `005_..._signature_stage_type.sql` + `006_drop_redundant_idx_tokens_token.sql`. Idempotent.
-4. **US-023 Phase 2 MEDIUM** — Finding C (`signature_stage` CHECK constraint + NOT NULL on both tables). `003_signature_stage_check.sql`. Similar pattern to Phase 2 HIGH but no DELETE, no FK.
-5. **[US-024b](./US-024b-stage1-recipient-routing.md)** — replace hardcoded Hendrik with Dewald-as-Stage-1-approver config. Three sites in `api/manager-approval-send.js`.
-6. **US-023.5 deferred #5** — `SignaturePage.tsx` privileged-data hardening (anon-key read of full `rfqs` row including pricing).
-7. **US-027 (PDF stamping)** — ~3–4hr build per the spike. Synthetic Pastel fixture PDF as step 1.
+1. **US-023.5 deferred #1** — `DROP POLICY` cleanup for `quote_signatures`'s 4 RLS policies with 2 duplicate pairs. Small migration, low risk.
+2. **US-023 Phase 2 LOW** — Findings D (`signature_stage` `varchar`→`text` on `quote_signatures`) + E (`DROP INDEX idx_tokens_token`). Bundle or split as `005_..._signature_stage_type.sql` + `006_drop_redundant_idx_tokens_token.sql`. Idempotent.
+3. **US-023 Phase 2 MEDIUM** — Finding C (`signature_stage` CHECK constraint + NOT NULL on both tables). `003_signature_stage_check.sql`. Similar pattern to Phase 2 HIGH but no DELETE, no FK.
+4. **US-023.5 deferred #5** — `SignaturePage.tsx` privileged-data hardening (anon-key read of full `rfqs` row including pricing).
+5. **US-027 (PDF stamping)** — ~3–4hr build per the spike. Synthetic Pastel fixture PDF as step 1.
+
+*(US-023.5 deferred #6 closed 2026-05-17 — dead `emailManagerReviewAndSign` removed in commit `db769ee`. US-024b closed 2026-05-17 — tagged `phase1-us024b-stage1-recipient-routing-verified` on `ebc0786`. See Status Log for details.)*
 
 ---
 
@@ -126,3 +126,5 @@ This doc replaces the implicit pattern of carrying status in memory entries + au
 
 - **2026-05-16** — Document created from the 2026-05-16 E-Sign backlog audit. Initial status table verified against tags, commits, and the live `decisions/` + memory tree. Q4 + Q5 marked as resolved by the ADR-006 *Stage 1 Signing Authority & Gatekeeper Amendment* of the same date; Q1, Q2, Q3 recorded as open client-confirmation items. US-024c carved out as a new story (Stage 1 fallback approver mechanism). US-022 reclassified from "blocked on ERHA" to "held deliberately (our sequencing)" with DNS key obtained 2026-05-16; applied-vs-merely-obtained status to be verified before flip. US-025/026/028 marked UNSPECIFIED, with the gap explicitly logged.
 - **2026-05-16** — Dewald's email address confirmed by ERHA as `dewald@erha.co.za`. US-024b external prerequisite cleared; status moves from "Buildable — pending email" to "Engineering-ready". `STAGE_1_APPROVER.email` placeholder replaced in [`decisions/US-024b-stage1-recipient-routing.md`](./US-024b-stage1-recipient-routing.md). Remaining work for US-024b is code-only (three sites in `api/manager-approval-send.js`) plus the apply runbook.
+- **2026-05-17** — US-024b verified-complete and tagged `phase1-us024b-stage1-recipient-routing-verified` on `ebc0786`. Stage 1 routing now goes to Dewald (`dewald@erha.co.za`); six sites landed (3 server-side routing in `api/manager-approval-send.js` + 3 client-side approver-agnostic in `src/App.tsx`); completeness re-grep across the full Stage 1 path confirmed no Site 7; outbound override at `api/send-email.js:48` held active throughout the smoke-test, no ERHA recipient paged.
+- **2026-05-17** — US-023.5 deferred #6 closed. Dead-code `emailManagerReviewAndSign` (and its 3-line comment header) removed from `src/emailService.ts` in commit `db769ee`. Audit confirmed zero active call-sites, zero re-exports, zero test references; only consumers were inside the function body, in inert `src/App.tsx.bak*` snapshots, and in the in-our-hands engineering list (also removed). `RECIPIENTS` const and the `ALL` array left intact — both have 12 live consumers in the team-broadcast notification functions, independent of the removed function. No runtime behavior change; no smoke-test required.
