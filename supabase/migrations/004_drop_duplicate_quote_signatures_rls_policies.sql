@@ -1,0 +1,136 @@
+-- =====================================================================
+-- 004_drop_duplicate_quote_signatures_rls_policies.sql
+-- US-023.5 deferred #1 — drop redundant RLS policies on quote_signatures.
+-- Authored 2026-05-17. Reviewed before apply — see ESIGN-BACKLOG.md.
+-- =====================================================================
+--
+-- Scope: DROP two redundant RLS policies on public.quote_signatures.
+-- Four policies currently exist on the table (two duplicate pairs);
+-- after this migration, two survive — the canonical names per the
+-- US-023.5 RLS-lockdown convention.
+--
+-- Discharges US-023.5 deferred follow-up #1 ("quote_signatures has
+-- 4 RLS policies with 2 duplicate pairs — DROP POLICY cleanup").
+--
+-- Idempotency: DROP POLICY IF EXISTS is naturally idempotent — re-
+-- applying after success is harmless (the redundant policies are
+-- already gone). This is NOT a destructive one-shot migration in the
+-- Phase 2 HIGH sense (no DELETE on data rows); it can re-run safely.
+--
+-- =====================================================================
+-- *** AUDIT EVIDENCE — 2026-05-17 ***
+-- =====================================================================
+-- Captured from live pg_policies via:
+--   select policyname, cmd, permissive, roles, qual, with_check
+--     from pg_policies
+--    where schemaname='public' and tablename='quote_signatures'
+--    order by cmd, policyname;
+--
+-- Pre-state (4 rows from live pg_policies, 2026-05-17):
+--
+--   policyname                          | cmd    | permissive | roles    | qual | with_check
+--   ------------------------------------|--------|------------|----------|------|-----------
+--   Allow public insert signatures      | INSERT | PERMISSIVE | {public} | null | true
+--   Allow public signature recording    | INSERT | PERMISSIVE | {public} | null | true
+--   Allow public read signatures        | SELECT | PERMISSIVE | {public} | true | null
+--   Allow public signature read         | SELECT | PERMISSIVE | {public} | true | null
+--
+-- Identity is byte-trivial: within each cmd, both rows have identical
+-- permissive (PERMISSIVE), roles ({public}), qual, and with_check
+-- columns. INSERT policies: qual=null (correct — INSERT has no USING),
+-- with_check=true (unconditional accept). SELECT policies: qual=true
+-- (unconditional read), with_check=null (correct — SELECT has no
+-- WITH CHECK). The dedup is genuinely a no-op semantically because
+-- the surviving twin admits/denies exactly what the dropped sibling
+-- did — to the byte.
+--
+-- Per-pair identity proof (operator-confirmed 2026-05-17):
+--
+--   PAIR A — INSERT policies, byte-identical on
+--            cmd / permissive / roles / qual / with_check:
+--     SURVIVOR: "Allow public insert signatures"
+--               (canonical per US-023.5 RLS-lockdown naming)
+--     DROP:     "Allow public signature recording"
+--               (historical-redundant sibling, non-canonical name)
+--
+--   PAIR B — SELECT policies, byte-identical on
+--            cmd / permissive / roles / qual / with_check:
+--     SURVIVOR: "Allow public read signatures"
+--               (canonical per US-023.5 RLS-lockdown naming)
+--     DROP:     "Allow public signature read"
+--               (historical-redundant sibling, non-canonical name)
+--
+-- Survivor selection rule: keep the policy whose name matches the
+-- US-023.5 RLS-lockdown canonical naming convention ("Allow public
+-- {insert,read} signatures"). Drop the historical sibling with the
+-- non-canonical name. The drop is semantically a no-op because the
+-- survivor's qual / with_check are byte-identical to the dropped
+-- policy's — anyone the redundant policy admitted is admitted by
+-- the survivor; anyone it denied is denied by the survivor.
+--
+-- =====================================================================
+-- *** WHAT THIS DOES NOT CHANGE ***
+-- =====================================================================
+-- - RLS itself stays enabled on quote_signatures (it was enabled
+--   pre-US-023 and remains so post-US-023.5 lockdown).
+-- - The surviving INSERT + SELECT policies retain their exact
+--   definitions (qual / with_check unchanged).
+-- - No semantic change to who can do what on the table. The identity
+--   proof above is exactly what makes the drop safe — every access
+--   path the redundant policy admitted is admitted by its surviving
+--   twin, byte-for-byte.
+-- =====================================================================
+
+begin;
+
+-- ----------------------------------------------------------------------
+-- Step 1 — DROP the two redundant policies.
+-- IF EXISTS keeps this safe to re-apply if the dedup has already
+-- partially landed manually via the Dashboard.
+-- ----------------------------------------------------------------------
+drop policy if exists "Allow public signature recording" on public.quote_signatures;
+drop policy if exists "Allow public signature read"      on public.quote_signatures;
+
+-- ----------------------------------------------------------------------
+-- Step 2 — Reload PostgREST schema cache (precaution).
+-- Supabase normally picks up policy changes within ~30s; explicit
+-- reload removes the lag for the supabase-js / PostgREST layer.
+-- NOTIFY is queued and delivered at COMMIT.
+-- ----------------------------------------------------------------------
+notify pgrst, 'reload schema';
+
+commit;
+
+-- =====================================================================
+-- Post-apply verification (run manually after commit; this block is
+-- commented scaffolding, not executed by the migration):
+--
+-- 1. Confirm exactly the two canonical survivors remain, each
+--    definition byte-identical to its pre-state.
+--
+--   select policyname, cmd, permissive, roles, qual, with_check
+--     from pg_policies
+--    where schemaname='public' and tablename='quote_signatures'
+--    order by cmd, policyname;
+--
+--   Expected (exactly 2 rows):
+--     - "Allow public insert signatures"  | INSERT | PERMISSIVE | ...
+--     - "Allow public read signatures"    | SELECT | PERMISSIVE | ...
+--
+--   The qual / with_check columns must match the SURVIVOR rows in
+--   the AUDIT EVIDENCE block at the top of this file byte-for-byte:
+--   INSERT survivor has qual=null, with_check=true; SELECT survivor
+--   has qual=true, with_check=null.
+--
+-- 2. Confirm RLS still enabled on the table:
+--
+--   select rowsecurity
+--     from pg_tables
+--    where schemaname='public' and tablename='quote_signatures';
+--
+--   Expected: t (true)
+--
+-- After both pass, US-023.5 deferred #1 is closed. Update
+-- decisions/ESIGN-BACKLOG.md Status Log to record the apply event +
+-- the commit hash that applied this migration.
+-- =====================================================================
