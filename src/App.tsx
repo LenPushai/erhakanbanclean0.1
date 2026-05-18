@@ -3323,6 +3323,22 @@ function EmailModal({ rfq, role, onClose }: { rfq: RFQ; role: string | null; onC
   const [body, setBody] = useState(template.body.replace(/\{enq\}/g, enqNo).replace('{contact}', contactName).replace('{brand}', brandName))
   const [sending, setSending] = useState(false)
   const [sent, setSent] = useState(false)
+  const [attachments, setAttachments] = useState<File[]>([])
+  const [attachError, setAttachError] = useState<string | null>(null)
+  const MAX_FILE_BYTES = 15 * 1024 * 1024
+  const MAX_TOTAL_BYTES = 30 * 1024 * 1024
+  const handleAddFiles = (fileList: FileList | null) => {
+    if (!fileList || fileList.length === 0) return
+    const picked = Array.from(fileList)
+    const oversized = picked.filter(f => f.size > MAX_FILE_BYTES)
+    if (oversized.length > 0) {
+      setAttachError(`File too large (max 15 MB each): ${oversized.map(f => f.name).join(', ')}`)
+      return
+    }
+    setAttachError(null)
+    setAttachments(prev => [...prev, ...picked])
+  }
+  const removeAttachment = (idx: number) => setAttachments(prev => prev.filter((_, i) => i !== idx))
 
   const handleSend = async () => {
     if (!canWriteRFQ(role, rfq)) {
@@ -3333,6 +3349,25 @@ function EmailModal({ rfq, role, onClose }: { rfq: RFQ; role: string | null; onC
     if (recipients.length === 0) { alert('Please enter at least one recipient email address'); return }
     setSending(true)
     try {
+      // Upload any picked files to the rfq-attachments bucket and collect
+      // their public URLs to pass to Resend as `path`. Same mechanism as
+      // the Phase 1 Pastel PDF attachment in api/manager-approval-send.js.
+      const totalBytes = attachments.reduce((s, f) => s + f.size, 0)
+      if (totalBytes > MAX_TOTAL_BYTES) {
+        alert(`Total attachment size ${(totalBytes / 1024 / 1024).toFixed(1)} MB exceeds the 30 MB limit. Remove a file and try again.`)
+        setSending(false)
+        return
+      }
+      const uploaded: Array<{ filename: string; path: string }> = []
+      for (const file of attachments) {
+        const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_')
+        const filePath = `${rfq.id}/email-${Date.now()}-${safeName}`
+        const { error: upErr } = await supabase.storage.from('rfq-attachments').upload(filePath, file)
+        if (upErr) { alert(`Upload failed for "${file.name}": ${upErr.message}`); setSending(false); return }
+        const { data: urlData } = supabase.storage.from('rfq-attachments').getPublicUrl(filePath)
+        if (!urlData?.publicUrl) { alert(`Could not get public URL for "${file.name}".`); setSending(false); return }
+        uploaded.push({ filename: file.name, path: urlData.publicUrl })
+      }
       const res = await fetch('/api/send-email', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -3340,6 +3375,7 @@ function EmailModal({ rfq, role, onClose }: { rfq: RFQ; role: string | null; onC
           to: recipients,
           subject: subject,
           html: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;"><div style="background:#1e3a5f;color:white;padding:20px 24px;border-radius:8px 8px 0 0;"><h2 style="margin:0;font-size:18px;">${brandName.replace(/&/g, '&amp;')}</h2><p style="margin:4px 0 0;font-size:13px;opacity:0.8;">${enqNo}</p></div><div style="padding:24px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px;white-space:pre-line;">${body.replace(/\n/g,'<br>')}</div><p style="font-size:11px;color:#9ca3af;margin-top:12px;text-align:center;">ERHA Operations System</p></div>`,
+          attachments: uploaded.length > 0 ? uploaded : undefined,
         }),
       })
       if (!res.ok) { const err = await res.json(); throw new Error(err.error || err.message || 'Send failed') }
@@ -3360,6 +3396,32 @@ function EmailModal({ rfq, role, onClose }: { rfq: RFQ; role: string | null; onC
           <div><label className="text-xs font-medium text-gray-600 block mb-1">To <span className="text-gray-400 font-normal">(comma-separate multiple)</span></label><input value={to} onChange={e => setTo(e.target.value)} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400" placeholder="name@example.com, internal@erha.co.za" /></div>
           <div><label className="text-xs font-medium text-gray-600 block mb-1">Subject</label><input value={subject} onChange={e => setSubject(e.target.value)} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400" /></div>
           <div><label className="text-xs font-medium text-gray-600 block mb-1">Message</label><textarea value={body} onChange={e => setBody(e.target.value)} rows={7} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400 resize-none" /></div>
+          <div>
+            <label className="text-xs font-medium text-gray-600 block mb-1">
+              Attachments <span className="text-gray-400 font-normal">(optional · max 15 MB each, 30 MB total)</span>
+            </label>
+            <input
+              type="file"
+              multiple
+              onChange={e => { handleAddFiles(e.target.files); (e.target as HTMLInputElement).value = '' }}
+              className="w-full text-xs text-gray-600 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:bg-orange-50 file:text-orange-700 hover:file:bg-orange-100"
+            />
+            {attachments.length > 0 && (
+              <ul className="mt-2 space-y-1">
+                {attachments.map((f, i) => (
+                  <li key={i} className="flex items-center justify-between text-xs bg-gray-50 border border-gray-200 rounded px-2 py-1">
+                    <span className="truncate text-gray-700">
+                      {f.name} <span className="text-gray-400">({(f.size / 1024).toFixed(0)} KB)</span>
+                    </span>
+                    <button onClick={() => removeAttachment(i)} className="text-red-500 hover:text-red-700 ml-2 shrink-0">
+                      <X size={12} />
+                    </button>
+                  </li>
+                ))}
+              </ul>
+            )}
+            {attachError && <p className="mt-1 text-xs text-red-600">{attachError}</p>}
+          </div>
         </div>
         <div className="px-6 py-4 border-t border-gray-100 flex justify-end gap-3">
           <button onClick={onClose} className="px-4 py-2 text-sm text-gray-600 hover:bg-gray-100 rounded-lg">Cancel</button>
