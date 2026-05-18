@@ -238,7 +238,7 @@ const RFQ_COLUMNS = [
   { key: 'NEW',              label: 'New',              color: 'bg-blue-500',   hover: 'hover:border-blue-300'   },
   { key: 'PENDING',          label: 'Assigned',         color: 'bg-purple-500', hover: 'hover:border-purple-300' },
   { key: 'QUOTED',           label: 'Quoted',           color: 'bg-indigo-500', hover: 'hover:border-indigo-300' },
-  { key: 'SENT_TO_CUSTOMER', label: 'Sent to Customer', color: 'bg-cyan-500',   hover: 'hover:border-cyan-300'   },
+  { key: 'SENT_TO_CUSTOMER', label: 'Quote Approved',   color: 'bg-cyan-500',   hover: 'hover:border-cyan-300'   },
   { key: 'ACCEPTED',         label: 'Order Won',        color: 'bg-teal-500',   hover: 'hover:border-teal-300'   },
   { key: 'JOB_CREATED',      label: 'Complete',         color: 'bg-gray-500',   hover: 'hover:border-gray-300'   },
   { key: 'REJECTED',         label: 'Lost',             color: 'bg-red-400',    hover: 'hover:border-red-300'    },
@@ -261,7 +261,7 @@ const STATUS_COLORS: Record<string, string> = {
 
 const STATUS_LABELS: Record<string, string> = {
   NEW: 'New', PENDING: 'Assigned', QUOTED: 'Quoted',
-  SENT_TO_CUSTOMER: 'Sent to Customer', ACCEPTED: 'Order Won',
+  SENT_TO_CUSTOMER: 'Quote Approved', ACCEPTED: 'Order Won',
   JOB_CREATED: 'Complete', REJECTED: 'Lost',
 }
 
@@ -1205,7 +1205,7 @@ function RFQCard({ rfq, hoverColor, onClick, isSelected, tokens, currentRole, on
       )}
       {showStage2SignBadge && (
         <div className="mt-2 text-xs font-semibold text-cyan-800 bg-cyan-50 border border-cyan-200 rounded px-2 py-1 text-center">
-          Stage 2 — Awaiting Customer Signature
+          Approved
         </div>
       )}
     </div>

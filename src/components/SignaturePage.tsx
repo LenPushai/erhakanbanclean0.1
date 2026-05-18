@@ -233,7 +233,7 @@ function SuccessState({ stage }: { stage?: string }) {
   const title = stage === 'manager' ? 'Quote approved'
     : stage === 'client' ? 'Quote accepted - thank you'
     : 'Signature recorded'
-  const body = stage === 'manager' ? 'The RFQ has moved to "Sent to Customer" and is ready for PO capture and Order Won.'
+  const body = stage === 'manager' ? 'The RFQ has moved to "Quote Approved" and is ready for PO capture and Order Won.'
     : stage === 'client' ? 'ERHA will be in touch shortly to confirm next steps.'
     : 'Thank you.'
   return (<Centered>
