@@ -87,7 +87,7 @@ async function sendCustomerSignEmail({ rfq, token, pastelPdf }) {
     </div>
   </div>`;
   // TEMP override mirrored from api/send-email.js — REMOVE with US-014b before Monday.
-  const to = ['lenklopper03@gmail.com', 'pa@erha.co.za'];
+  const to = ['lenklopper03@gmail.com'];
   const resendBody = { from: FROM_EMAIL, to, subject, html, reply_to: 'pa@erha.co.za' };
   if (pastelPdf) {
     resendBody.attachments = [{ filename: pastelPdf.filename, path: pastelPdf.url }];
@@ -128,7 +128,7 @@ async function sendCustomerSignedNotification({ rfq, signerName }) {
     </div>
   </div>`;
   // TEMP override mirrored from api/send-email.js — REMOVE with US-014b before Monday.
-  const to = ['lenklopper03@gmail.com', 'pa@erha.co.za'];
+  const to = ['lenklopper03@gmail.com'];
   const response = await fetch('https://api.resend.com/emails', {
     method: 'POST',
     headers: { Authorization: `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },

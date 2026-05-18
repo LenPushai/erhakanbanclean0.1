@@ -40,12 +40,12 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   try {
     const { to: originalTo, template, data, subject: rawSubject, html: rawHtml, reply_to: rawReplyTo, attachments: rawAttachments } = req.body;
-    // TEMP catch-all redirect for go-live testing (US-014b). All outbound
-    // mail is redirected to BOTH Len (oversight) and Jeanic (business
-    // flow), overriding the caller-supplied `to`. Remove once US-022
-    // (erha.co.za DNS at Resend) clears. Mirrors at api/sign-submit.js
-    // :90 and :131 are dead post-Stage-2 — remove together.
-    const to = ["lenklopper03@gmail.com", "pa@erha.co.za"];
+    // TEMP override for build/test only — REMOVE before Monday user go-live; tracked as US-014b.
+    // All outbound mail is forced to Len's inbox while erha.co.za DNS verification is pending,
+    // so e-sign Stage 1/Stage 2 smoke tests land in one place without paging Hendrik or customers.
+    // The mirror of this override lives in api/sign-submit.js (sendCustomerSignEmail) — both
+    // must be removed together when DNS verification clears.
+    const to = ["lenklopper03@gmail.com"];
     if (!to) return res.status(400).json({ error: 'Missing to' });
     let subject, html;
     if (rawSubject && rawHtml) {
