@@ -2977,7 +2977,7 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, activeEntity, onJobCreat
               </div>
             )}
             <button onClick={() => setShowEmail(true)} className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-orange-500 hover:bg-orange-600 text-white text-sm font-semibold rounded-lg transition-colors">
-              <Mail size={15} /> Send Email to Client
+              <Mail size={15} /> Send Email
             </button>
           </div>
 
@@ -3329,14 +3329,15 @@ function EmailModal({ rfq, role, onClose }: { rfq: RFQ; role: string | null; onC
       alert('Permission denied: only the assigned quoter or a manager can email about this RFQ.')
       return
     }
-    if (!to) { alert('Please enter a recipient email address'); return }
+    const recipients = to.split(',').map(s => s.trim()).filter(Boolean)
+    if (recipients.length === 0) { alert('Please enter at least one recipient email address'); return }
     setSending(true)
     try {
       const res = await fetch('/api/send-email', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          to: [to],
+          to: recipients,
           subject: subject,
           html: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;"><div style="background:#1e3a5f;color:white;padding:20px 24px;border-radius:8px 8px 0 0;"><h2 style="margin:0;font-size:18px;">${brandName.replace(/&/g, '&amp;')}</h2><p style="margin:4px 0 0;font-size:13px;opacity:0.8;">${enqNo}</p></div><div style="padding:24px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px;white-space:pre-line;">${body.replace(/\n/g,'<br>')}</div><p style="font-size:11px;color:#9ca3af;margin-top:12px;text-align:center;">ERHA Operations System</p></div>`,
         }),
@@ -3356,7 +3357,7 @@ function EmailModal({ rfq, role, onClose }: { rfq: RFQ; role: string | null; onC
           <button onClick={onClose} className="p-1.5 text-gray-400 hover:text-gray-600 hover:bg-gray-100 rounded-lg"><X size={16} /></button>
         </div>
         <div className="px-6 py-4 space-y-4">
-          <div><label className="text-xs font-medium text-gray-600 block mb-1">To</label><input value={to} onChange={e => setTo(e.target.value)} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400" placeholder="client@email.com" /></div>
+          <div><label className="text-xs font-medium text-gray-600 block mb-1">To <span className="text-gray-400 font-normal">(comma-separate multiple)</span></label><input value={to} onChange={e => setTo(e.target.value)} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400" placeholder="name@example.com, internal@erha.co.za" /></div>
           <div><label className="text-xs font-medium text-gray-600 block mb-1">Subject</label><input value={subject} onChange={e => setSubject(e.target.value)} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400" /></div>
           <div><label className="text-xs font-medium text-gray-600 block mb-1">Message</label><textarea value={body} onChange={e => setBody(e.target.value)} rows={7} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400 resize-none" /></div>
         </div>
