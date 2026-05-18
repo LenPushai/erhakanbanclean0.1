@@ -266,6 +266,19 @@ const STATUS_LABELS: Record<string, string> = {
 }
 
 const QUOTERS = ['Hendrik', 'Dewald', 'Estimator', 'Jaco']
+
+// Internal recipient directory for the Communication panel. Names align
+// with QUOTERS where applicable; Jeanic is the PA (not a quoter); Len
+// is here for oversight. Names assigned on an RFQ but not present here
+// (e.g. 'Estimator') surface to the sender as "not a known recipient"
+// rather than silently dropping.
+const INTERNAL_DIRECTORY: Record<string, string> = {
+  Hendrik: 'hendrik@erha.co.za',
+  Jeanic:  'pa@erha.co.za',
+  Dewald:  'dewald@erha.co.za',
+  Jaco:    'jaco@erha.co.za',
+  Len:     'lenklopper03@gmail.com',
+}
 const DEPARTMENTS_CG_FALLBACK = ['MELTSHOP', 'MILLS', 'SHARON', 'OREN', 'STORES', 'GENERAL', 'MRSTO']
 const ACTIONS_LIST_FALLBACK = ['Manufacture', 'Sandblast', 'Service', 'Paint', 'Repair', 'Installation', 'Cutting', 'Modification', 'Machining', 'Supply']
 
@@ -2965,9 +2978,7 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, activeEntity, onJobCreat
                 </div>
               </div>
             )}
-            <button onClick={() => setShowEmail(true)} className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-orange-500 hover:bg-orange-600 text-white text-sm font-semibold rounded-lg transition-colors">
-              <Mail size={15} /> Send Email
-            </button>
+            <CommunicationPanel rfq={rfq} role={role} />
           </div>
 
           {(['PENDING', 'QUOTED', 'SENT_TO_CUSTOMER', 'ACCEPTED'].includes(status)) && (
@@ -3419,6 +3430,263 @@ function EmailModal({ rfq, role, onClose }: { rfq: RFQ; role: string | null; onC
           </button>}
         </div>
       </div>
+    </div>
+  )
+}
+
+// COMMUNICATION PANEL — internal-by-default RFQ messaging with external
+// opt-in + 5-second undo. Replaces the orange "Send Email" trigger
+// that formerly opened EmailModal. Recipients resolve against
+// INTERNAL_DIRECTORY (top of file). External (rfq.contact_email) is
+// opt-in only; sends including external enter a 5-second cancellable
+// pending state before firing. On 200, a structured email_sent row is
+// written to activity_log mirroring api/sign-submit.js:270-286.
+// EmailModal + showEmail are intentionally left in place (dormant) for
+// one cycle for safe revert; deletion is a tracked follow-up.
+//
+// Attachments code is an intentional duplicate of EmailModal's
+// rfq-attachments bucket pattern. Shared helper is a follow-up; tonight
+// favours blast-radius containment over premature extraction.
+function CommunicationPanel({ rfq, role }: { rfq: RFQ; role: string | null }) {
+  const quoterName = rfq.assigned_quoter_name || ''
+  const quoterEmail = quoterName ? INTERNAL_DIRECTORY[quoterName] : undefined
+  const quoterUnresolved = !!quoterName && !quoterEmail
+
+  const [internalChecked, setInternalChecked] = React.useState<Record<string, boolean>>(() => {
+    const seed: Record<string, boolean> = {}
+    for (const name of Object.keys(INTERNAL_DIRECTORY)) {
+      seed[name] = name === 'Jeanic' || (!!quoterEmail && name === quoterName)
+    }
+    return seed
+  })
+  const [includeExternal, setIncludeExternal] = React.useState(false)
+
+  const enqNo = rfq.client_rfq_number || rfq.enq_number || rfq.rfq_no || '-'
+  const contactName = rfq.contact_person || 'Sir/Madam'
+  const brandName = getBrandName(rfq.operating_entity)
+  const template = EMAIL_TEMPLATES[rfq.status] || EMAIL_TEMPLATES['NEW']
+  const [subject, setSubject] = React.useState(template.subject.replace('{enq}', enqNo))
+  const [body, setBody] = React.useState(
+    template.body.replace(/\{enq\}/g, enqNo).replace('{contact}', contactName).replace('{brand}', brandName)
+  )
+
+  const [attachments, setAttachments] = React.useState<File[]>([])
+  const [attachError, setAttachError] = React.useState<string | null>(null)
+  const MAX_FILE_BYTES = 15 * 1024 * 1024
+  const MAX_TOTAL_BYTES = 30 * 1024 * 1024
+  const handleAddFiles = (fileList: FileList | null) => {
+    if (!fileList || fileList.length === 0) return
+    const picked = Array.from(fileList)
+    const oversized = picked.filter(f => f.size > MAX_FILE_BYTES)
+    if (oversized.length > 0) {
+      setAttachError(`File too large (max 15 MB each): ${oversized.map(f => f.name).join(', ')}`)
+      return
+    }
+    setAttachError(null)
+    setAttachments(prev => [...prev, ...picked])
+  }
+  const removeAttachment = (idx: number) => setAttachments(prev => prev.filter((_, i) => i !== idx))
+
+  const [sending, setSending] = React.useState(false)
+  const [sent, setSent] = React.useState(false)
+
+  // 5-second undo: setTimeout fires doSend; setInterval ticks the visible countdown.
+  const [pendingCountdown, setPendingCountdown] = React.useState<number | null>(null)
+  const sendTimeoutRef = React.useRef<ReturnType<typeof setTimeout> | null>(null)
+  const tickIntervalRef = React.useRef<ReturnType<typeof setInterval> | null>(null)
+  const clearPending = () => {
+    if (sendTimeoutRef.current) { clearTimeout(sendTimeoutRef.current); sendTimeoutRef.current = null }
+    if (tickIntervalRef.current) { clearInterval(tickIntervalRef.current); tickIntervalRef.current = null }
+    setPendingCountdown(null)
+  }
+  React.useEffect(() => () => clearPending(), [])
+
+  const resolveRecipients = () => {
+    const internal: string[] = []
+    for (const [name, checked] of Object.entries(internalChecked)) {
+      if (checked && INTERNAL_DIRECTORY[name]) internal.push(INTERNAL_DIRECTORY[name])
+    }
+    const external: string[] = (includeExternal && rfq.contact_email) ? [rfq.contact_email] : []
+    return { internal, external }
+  }
+
+  const doSend = async () => {
+    const { internal, external } = resolveRecipients()
+    const allRecipients = [...internal, ...external]
+    if (allRecipients.length === 0) { alert('Please select at least one recipient.'); return }
+    setSending(true)
+    try {
+      const totalBytes = attachments.reduce((s, f) => s + f.size, 0)
+      if (totalBytes > MAX_TOTAL_BYTES) {
+        alert(`Total attachment size ${(totalBytes / 1024 / 1024).toFixed(1)} MB exceeds the 30 MB limit. Remove a file and try again.`)
+        setSending(false)
+        return
+      }
+      const uploaded: Array<{ filename: string; path: string }> = []
+      for (const file of attachments) {
+        const safeName = file.name.replace(/[^a-zA-Z0-9._-]/g, '_')
+        const filePath = `${rfq.id}/email-${Date.now()}-${safeName}`
+        const { error: upErr } = await supabase.storage.from('rfq-attachments').upload(filePath, file)
+        if (upErr) { alert(`Upload failed for "${file.name}": ${upErr.message}`); setSending(false); return }
+        const { data: urlData } = supabase.storage.from('rfq-attachments').getPublicUrl(filePath)
+        if (!urlData?.publicUrl) { alert(`Could not get public URL for "${file.name}".`); setSending(false); return }
+        uploaded.push({ filename: file.name, path: urlData.publicUrl })
+      }
+      const res = await fetch('/api/send-email', {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({
+          to: allRecipients,
+          subject,
+          html: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;"><div style="background:#1e3a5f;color:white;padding:20px 24px;border-radius:8px 8px 0 0;"><h2 style="margin:0;font-size:18px;">${brandName.replace(/&/g, '&amp;')}</h2><p style="margin:4px 0 0;font-size:13px;opacity:0.8;">${enqNo}</p></div><div style="padding:24px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px;white-space:pre-line;">${body.replace(/\n/g,'<br>')}</div><p style="font-size:11px;color:#9ca3af;margin-top:12px;text-align:center;">ERHA Operations System</p></div>`,
+          attachments: uploaded.length > 0 ? uploaded : undefined,
+        }),
+      })
+      if (!res.ok) { const err = await res.json(); throw new Error(err.error || err.message || 'Send failed') }
+      await supabase.from('activity_log').insert({
+        action_type: 'email_sent',
+        entity_type: 'rfq',
+        entity_id: rfq.id,
+        operating_entity: rfq.operating_entity || null,
+        metadata: {
+          recipients_internal: internal,
+          recipients_external: external,
+          subject,
+          attachment_count: uploaded.length,
+          sent_at: new Date().toISOString(),
+          sent_by_role: role,
+          external_added_by_exception: external.length > 0,
+          default_scope: 'internal_only',
+        },
+      }).then(({ error: aerr }) => { if (aerr) console.error('activity_log insert failed:', aerr.message) })
+      setSent(true)
+      setTimeout(() => { setSent(false); setAttachments([]) }, 3000)
+    } catch (err: any) { alert('Failed to send email: ' + err.message) }
+    finally { setSending(false) }
+  }
+
+  const handleSendClicked = () => {
+    if (!canWriteRFQ(role, rfq)) {
+      alert('Permission denied: only the assigned quoter or a manager can email about this RFQ.')
+      return
+    }
+    if (includeExternal) {
+      setPendingCountdown(5)
+      tickIntervalRef.current = setInterval(() => {
+        setPendingCountdown(c => (c === null ? null : c - 1))
+      }, 1000)
+      sendTimeoutRef.current = setTimeout(() => {
+        clearPending()
+        void doSend()
+      }, 5000)
+    } else {
+      void doSend()
+    }
+  }
+
+  return (
+    <div className="space-y-3">
+      <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest">Communication</p>
+
+      <div>
+        <p className="text-xs font-semibold text-gray-500 mb-1.5">Internal recipients</p>
+        <div className="space-y-1">
+          {Object.entries(INTERNAL_DIRECTORY).map(([name, email]) => (
+            <label key={name} className="flex items-center gap-2 text-sm cursor-pointer">
+              <input
+                type="checkbox"
+                checked={!!internalChecked[name]}
+                onChange={e => setInternalChecked(s => ({ ...s, [name]: e.target.checked }))}
+                className="w-3.5 h-3.5"
+              />
+              <span className="font-medium text-gray-700">{name}</span>
+              <span className="text-xs text-gray-400">{email}</span>
+            </label>
+          ))}
+        </div>
+        {quoterUnresolved && (
+          <p className="mt-1.5 text-xs text-amber-700 bg-amber-50 border border-amber-200 rounded px-2 py-1">
+            Assigned quoter "{quoterName}" is not a known recipient — can't include automatically.
+          </p>
+        )}
+      </div>
+
+      <div>
+        <label className="flex items-center gap-2 text-sm cursor-pointer">
+          <input
+            type="checkbox"
+            checked={includeExternal}
+            onChange={e => setIncludeExternal(e.target.checked)}
+            disabled={!rfq.contact_email}
+            className="w-3.5 h-3.5"
+          />
+          <span className="font-medium text-gray-700">Include external contact</span>
+          {!rfq.contact_email && <span className="text-xs text-gray-400">(no contact_email on RFQ)</span>}
+        </label>
+        {includeExternal && rfq.contact_email && (
+          <div className="mt-2 bg-amber-50 border border-amber-300 rounded-lg p-2 text-xs">
+            <p className="font-semibold text-amber-900">External: {rfq.contact_email}</p>
+            <p className="text-amber-800 mt-0.5">A 5-second Undo will appear after you click Send.</p>
+          </div>
+        )}
+      </div>
+
+      <div>
+        <label className="text-xs font-medium text-gray-600 block mb-1">Subject</label>
+        <input value={subject} onChange={e => setSubject(e.target.value)} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400" />
+      </div>
+      <div>
+        <label className="text-xs font-medium text-gray-600 block mb-1">Message</label>
+        <textarea value={body} onChange={e => setBody(e.target.value)} rows={5} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400 resize-none" />
+      </div>
+
+      <div>
+        <label className="text-xs font-medium text-gray-600 block mb-1">
+          Attachments <span className="text-gray-400 font-normal">(optional · max 15 MB each, 30 MB total)</span>
+        </label>
+        <input
+          type="file"
+          multiple
+          onChange={e => { handleAddFiles(e.target.files); (e.target as HTMLInputElement).value = '' }}
+          className="w-full text-xs text-gray-600 file:mr-3 file:py-1.5 file:px-3 file:rounded-lg file:border-0 file:bg-orange-50 file:text-orange-700 hover:file:bg-orange-100"
+        />
+        {attachments.length > 0 && (
+          <ul className="mt-2 space-y-1">
+            {attachments.map((f, i) => (
+              <li key={i} className="flex items-center justify-between text-xs bg-gray-50 border border-gray-200 rounded px-2 py-1">
+                <span className="truncate text-gray-700">
+                  {f.name} <span className="text-gray-400">({(f.size / 1024).toFixed(0)} KB)</span>
+                </span>
+                <button onClick={() => removeAttachment(i)} className="text-red-500 hover:text-red-700 ml-2 shrink-0">
+                  <X size={12} />
+                </button>
+              </li>
+            ))}
+          </ul>
+        )}
+        {attachError && <p className="mt-1 text-xs text-red-600">{attachError}</p>}
+      </div>
+
+      {pendingCountdown !== null ? (
+        <div className="bg-amber-50 border-2 border-amber-400 rounded-lg p-3 flex items-center justify-between">
+          <div className="text-xs text-amber-900">
+            Sending in <strong>{pendingCountdown}s</strong> — includes external <strong>{rfq.contact_email}</strong>
+          </div>
+          <button onClick={clearPending} className="px-3 py-1.5 text-xs font-semibold bg-amber-600 hover:bg-amber-700 text-white rounded-lg">
+            Undo
+          </button>
+        </div>
+      ) : (
+        canWriteRFQ(role, rfq) && (
+          <button
+            onClick={handleSendClicked}
+            disabled={sending || sent}
+            className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white text-sm font-semibold rounded-lg transition-colors"
+          >
+            <Mail size={15} /> {sent ? 'Sent!' : sending ? 'Sending...' : 'Send Email'}
+          </button>
+        )
+      )}
     </div>
   )
 }
