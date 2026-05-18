@@ -1928,21 +1928,10 @@ function JobDetailPanel({ job, parentJobNumber, activeEntity, role, onClose, onU
             </div>
           )}
         </>
-        {attachments.length > 0 && (
-          <div>
-            <label className="block text-xs font-medium text-gray-500 mb-2">Attachments</label>
-            <div className="space-y-1">
-              {attachments.map((att: any) => (
-                <a key={att.id} href={supabase.storage.from('rfq-attachments').getPublicUrl(att.file_path).data.publicUrl} target="_blank" rel="noopener noreferrer"
-                  className="flex items-center gap-2 px-3 py-2 bg-blue-50 hover:bg-blue-100 rounded-lg text-xs text-blue-700 transition-colors">
-                  <span>📎</span>
-                  <span className="flex-1 truncate">{att.file_name}</span>
-                  {att.file_size && <span className="text-gray-400">{(att.file_size/1024).toFixed(0)}KB</span>}
-                </a>
-              ))}
-            </div>
-          </div>
-        )}
+        <div>
+          <label className="block text-xs font-medium text-gray-500 mb-2">Documents</label>
+          <DocumentsPanel job={job} refreshKey={attachments.length} />
+        </div>
 
         {/* US-D1: Job-stage attachment upload (mirrors RFQ panel pattern) */}
         <div className="border-t border-gray-200 pt-4">
@@ -3434,6 +3423,96 @@ function EmailModal({ rfq, role, onClose }: { rfq: RFQ; role: string | null; onC
   )
 }
 
+// DOCUMENTS PANEL — read-only by-reference view (shared by Job + Workshop)
+// Phase 1: lists rfq_attachments (by resolved rfq_id, one-hop or
+// two-hop via parent_job_id) merged with job_attachments (by job_id),
+// de-duped on file_path, sourced "RFQ"/"Job" for provenance. Read-only.
+// Floor-upload, lineage events, and the email-prefixed bucket scan are
+// Phase 2 / deferred. The `refreshKey` prop lets a host re-trigger the
+// fetch after a job-time upload without modifying the host's upload
+// callback.
+function DocumentsPanel({ job, refreshKey = 0 }: { job: Job; refreshKey?: number }) {
+  type Doc = { id: string; source: 'RFQ' | 'Job'; file_name: string; file_path: string; file_size: number | null }
+  const [docs, setDocs] = React.useState<Doc[]>([])
+  const [loading, setLoading] = React.useState(true)
+  const [resolvedRfqId, setResolvedRfqId] = React.useState<string | null>(null)
+
+  React.useEffect(() => {
+    let cancelled = false
+    void (async () => {
+      setLoading(true)
+      let rfqId: string | null = job.rfq_id || null
+      if (!rfqId && job.parent_job_id) {
+        const { data: parent } = await supabase
+          .from('jobs').select('rfq_id').eq('id', job.parent_job_id).maybeSingle()
+        rfqId = (parent as any)?.rfq_id || null
+      }
+      if (cancelled) return
+      setResolvedRfqId(rfqId)
+
+      const [rfqRes, jobRes] = await Promise.all([
+        rfqId
+          ? supabase.from('rfq_attachments').select('id, file_name, file_path, file_size').eq('rfq_id', rfqId)
+          : Promise.resolve({ data: [] as any[] }),
+        supabase.from('job_attachments').select('id, file_name, file_path, file_size').eq('job_id', job.id),
+      ])
+      if (cancelled) return
+
+      const rfqRows = (rfqRes.data || []) as Array<Omit<Doc, 'source'>>
+      const jobRows = (jobRes.data || []) as Array<Omit<Doc, 'source'>>
+
+      const seen = new Set<string>()
+      const merged: Doc[] = []
+      for (const r of rfqRows) {
+        if (rfqId && r.file_path.startsWith(`${rfqId}/email-`)) continue
+        seen.add(r.file_path)
+        merged.push({ ...r, source: 'RFQ' })
+      }
+      for (const j of jobRows) {
+        if (seen.has(j.file_path)) continue
+        merged.push({ ...j, source: 'Job' })
+      }
+      setDocs(merged)
+      setLoading(false)
+    })()
+    return () => { cancelled = true }
+  }, [job.id, job.rfq_id, job.parent_job_id, refreshKey])
+
+  if (loading) {
+    return <p className="text-xs text-gray-400 text-center py-3">Loading documents...</p>
+  }
+  if (docs.length === 0) {
+    return (
+      <p className="text-xs text-gray-400 text-center py-3 border border-dashed border-gray-200 rounded-lg">
+        {resolvedRfqId
+          ? 'No documents on this job or its originating RFQ.'
+          : 'No inherited documents — this job has no linked RFQ.'}
+      </p>
+    )
+  }
+  return (
+    <div className="space-y-1.5">
+      {docs.map(doc => {
+        const url = supabase.storage.from('rfq-attachments').getPublicUrl(doc.file_path).data.publicUrl
+        return (
+          <div key={`${doc.source}:${doc.id}`} className="flex items-center justify-between px-3 py-2 bg-blue-50 rounded-lg border border-blue-100">
+            <a href={url} target="_blank" rel="noopener noreferrer" className="flex items-center gap-2 min-w-0 hover:underline">
+              <FileText size={13} className="text-blue-500 shrink-0" />
+              <span className="text-xs font-medium text-blue-700 truncate">{doc.file_name}</span>
+            </a>
+            <div className="flex items-center gap-2 shrink-0 ml-2">
+              <span className={`text-[10px] font-semibold px-1.5 py-0.5 rounded ${doc.source === 'RFQ' ? 'bg-indigo-100 text-indigo-700' : 'bg-emerald-100 text-emerald-700'}`}>
+                {doc.source}
+              </span>
+              {doc.file_size != null && <span className="text-[10px] text-gray-400">{(doc.file_size / 1024).toFixed(0)} KB</span>}
+            </div>
+          </div>
+        )
+      })}
+    </div>
+  )
+}
+
 // HELPERS
 
 function Section({ title, icon, children }: { title: string; icon: React.ReactNode; children: React.ReactNode }) {
@@ -3801,7 +3880,7 @@ function JobExecutionPanel({ job, onClose, onStatusChange, onRefresh, role }: {
   job: any; onClose: () => void; onStatusChange: (id: string, status: string) => void; onRefresh: () => void; role: string | null
 }) {
   const { activeEntity } = useEntity()
-  const [activeTab, setActiveTab] = React.useState<'workers'|'time'|'qc'|'materials'|'reconcile'|'line_items'>('line_items')
+  const [activeTab, setActiveTab] = React.useState<'workers'|'time'|'qc'|'materials'|'reconcile'|'line_items'|'documents'>('line_items')
   const [workshopStatus, setWorkshopStatus] = React.useState(job.workshop_status || 'NOT_STARTED')
   const [notes, setNotes] = React.useState(job.workshop_notes || '')
   const [savingNotes, setSavingNotes] = React.useState(false)
@@ -4125,6 +4204,7 @@ function JobExecutionPanel({ job, onClose, onStatusChange, onRefresh, role }: {
     { key: 'qc',         label: 'QC'         },
     { key: 'materials',  label: 'Materials'  },
     { key: 'reconcile',  label: 'Reconcile'  },
+    { key: 'documents',  label: 'Documents'  },
   ]
 
   return (
@@ -4646,6 +4726,17 @@ function JobExecutionPanel({ job, onClose, onStatusChange, onRefresh, role }: {
           </div>
         )}
 
+        {activeTab === 'documents' && (
+          <div>
+            <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between', marginBottom: '20px' }}>
+              <div>
+                <div style={{ fontSize: '16px', fontWeight: 700, color: '#1d3461' }}>Documents</div>
+                <div style={{ fontSize: '12px', color: '#8896a8', marginTop: '2px' }}>Drawings, quotes and other files attached to this job and its originating RFQ. Read-only.</div>
+              </div>
+            </div>
+            <DocumentsPanel job={job} />
+          </div>
+        )}
 
         {/* WORKSHOP NOTES â€” always visible at bottom */}
         <div style={{ marginTop: '32px', background: 'white', border: '1px solid #dde3ec', borderRadius: '8px', padding: '20px' }}>
