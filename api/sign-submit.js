@@ -219,53 +219,13 @@ export default async function handler(req, res) {
     if (tkUpErr) console.error('token update failed:', tkUpErr.message);
 
     if (stage === 'manager') {
-      // Stage 1 cascade: flip QUOTED -> SENT_TO_CUSTOMER, create Stage 2 token,
-      // dispatch Stage 2 email, log activity, respond.
+      // Stage 1 is the final internal sign-off (ERHA's approval is internal-only).
+      // Flip QUOTED -> SENT_TO_CUSTOMER, log activity, respond. The Stage 2
+      // customer cascade (token + customer email) was removed; the next
+      // operational step is "Save Order - Move to Order Won" on the RFQ panel.
       const { error: stErr } = await supabase
         .from('rfqs').update({ status: 'SENT_TO_CUSTOMER' }).eq('id', rfq.id);
       if (stErr) console.error('rfq status flip failed:', stErr.message);
-
-      const stage2Token = crypto.randomUUID();
-      const customerEmail = rfq.contact_email || null;
-      const stage2ExpiresAt = new Date(Date.now() + 7 * 24 * 60 * 60 * 1000).toISOString();
-
-      let stage2TokenId = null;
-      let stage2EmailDispatched = false;
-      let stage2DispatchError = null;
-      if (customerEmail) {
-        const { data: t2, error: t2Err } = await supabase
-          .from('signature_tokens').insert({
-            rfq_id: rfq.id,
-            token: stage2Token,
-            client_email: customerEmail,
-            client_name: rfq.contact_person || null,
-            expires_at: stage2ExpiresAt,
-            is_valid: true,
-            used_at: null,
-            signature_stage: 'client',
-          }).select('id').single();
-        if (t2Err) {
-          console.error('Stage 2 token insert failed:', t2Err.message);
-        } else {
-          stage2TokenId = t2.id;
-          try {
-            // Phase 1 — Pastel PDF attachment for Stage 2 customer email.
-            // If not found, send without attachment (warning logged); the
-            // digital signature flow is unchanged. See findPastelQuotePdf.
-            const pastelPdf = await findPastelQuotePdf(supabase, rfq.id, rfq.quote_number);
-            if (!pastelPdf) {
-              console.warn(`[sign-submit/stage2] No Pastel PDF matching 'Quote-${rfq.quote_number}*.pdf' found in rfq_attachments for RFQ ${rfq.id}; sending email without attachment.`);
-            }
-            await sendCustomerSignEmail({ rfq, token: stage2Token, pastelPdf });
-            stage2EmailDispatched = true;
-          } catch (e) {
-            stage2DispatchError = e.message;
-            console.error('Stage 2 email dispatch failed:', e.message);
-          }
-        }
-      } else {
-        console.warn('No contact_email on RFQ ' + rfq.id + '; Stage 2 token + email skipped.');
-      }
 
       await supabase.from('activity_log').insert({
         action_type: 'quote_signed_stage_1',
@@ -279,9 +239,6 @@ export default async function handler(req, res) {
           signer_name: String(signer_name).trim(),
           signer_email: tk.client_email,
           signature_type: signature_type === 'drawn' ? 'drawn' : 'click',
-          stage_2_token_id: stage2TokenId,
-          stage_2_email_dispatched: stage2EmailDispatched,
-          stage_2_dispatch_error: stage2DispatchError,
         },
       }).then(({ error: aerr }) => { if (aerr) console.error('activity_log insert failed:', aerr.message); });
 
@@ -289,9 +246,6 @@ export default async function handler(req, res) {
         success: true,
         stage: 'manager',
         signature_id: sig.id,
-        stage_2_token_created: !!stage2TokenId,
-        stage_2_email_dispatched: stage2EmailDispatched,
-        stage_2_dispatch_error: stage2DispatchError,
       });
     } else {
       // Stage 2 cascade: flip SENT_TO_CUSTOMER -> ACCEPTED, dispatch internal

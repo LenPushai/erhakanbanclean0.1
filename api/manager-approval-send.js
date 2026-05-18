@@ -110,7 +110,7 @@ export default async function handler(req, res) {
         <div style="margin-top:24px;text-align:center">
           <a href="${link}" style="display:inline-block;background:#1d4ed8;color:white;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:bold">Review &amp; Sign Quote</a>
         </div>
-        <p style="margin-top:20px;font-size:11px;color:#6b7280">Single-use link, expires in 7 days. Once signed, the quote is automatically emailed to the customer for their acceptance.</p>
+        <p style="margin-top:20px;font-size:11px;color:#6b7280">Single-use link, expires in 7 days. Your sign-off is the final approval — once signed, the RFQ advances to the Order Won stage where the PO is captured.</p>
         ${footer}
       </div>
     </div>`;
