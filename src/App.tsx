@@ -2677,7 +2677,7 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, activeEntity, onJobCreat
     setLoadingItems(true)
     supabase.from('rfq_line_items').select('id, line_number, item_type, description, quantity, unit_of_measure').eq('rfq_id', rfq.id).order('line_number')
       .then(({ data }) => { setLineItems(data || []); setPanelLineItems(data || []); setLoadingItems(false) })
-    supabase.from('rfq_attachments').select('id, file_name, file_path').eq('rfq_id', rfq.id)
+    supabase.from('rfq_attachments').select('id, file_name, file_path, file_size').eq('rfq_id', rfq.id)
       .then(({ data }) => setPanelAttachments(data || []))
   }, [rfq.id])
 
@@ -3006,7 +3006,7 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, activeEntity, onJobCreat
                 </div>
               </div>
             )}
-            <CommunicationPanel rfq={rfq} role={role} />
+            <CommunicationPanel rfq={rfq} role={role} panelAttachments={panelAttachments} />
           </div>
 
           {(['PENDING', 'QUOTED', 'SENT_TO_CUSTOMER', 'ACCEPTED'].includes(status)) && (
@@ -3294,7 +3294,7 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, activeEntity, onJobCreat
                     await supabase.from('rfq_attachments').insert({ rfq_id: rfq.id, file_name: file.name, file_path: filePath, file_size: file.size })
                   }
                 }
-                const { data } = await supabase.from('rfq_attachments').select('id, file_name, file_path').eq('rfq_id', rfq.id)
+                const { data } = await supabase.from('rfq_attachments').select('id, file_name, file_path, file_size').eq('rfq_id', rfq.id)
                 setPanelAttachments(data || [])
                 setUploadingPanelFiles(false)
                 e.target.value = ''
@@ -3482,7 +3482,7 @@ function isValidEmail(s: string): boolean {
 // Attachments code is an intentional duplicate of EmailModal's
 // rfq-attachments bucket pattern. Shared helper is a follow-up; tonight
 // favours blast-radius containment over premature extraction.
-function CommunicationPanel({ rfq, role }: { rfq: RFQ; role: string | null }) {
+function CommunicationPanel({ rfq, role, panelAttachments = [] }: { rfq: RFQ; role: string | null; panelAttachments?: any[] }) {
   const quoterName = rfq.assigned_quoter_name || ''
   const quoterEmail = quoterName ? INTERNAL_DIRECTORY[quoterName] : undefined
   const quoterUnresolved = !!quoterName && !quoterEmail
@@ -3500,6 +3500,23 @@ function CommunicationPanel({ rfq, role }: { rfq: RFQ; role: string | null }) {
   const [autoResolvedKept, setAutoResolvedKept] = React.useState<boolean>(true)
   const [externalDraft, setExternalDraft] = React.useState<string>('')
   const [externalDraftError, setExternalDraftError] = React.useState<string | null>(null)
+  // US-033 auto-attach: which of the RFQ's existing attachments to include.
+  // Defaults to all; smart-merges on panel-list change (keeps manual
+  // deselections for surviving ids, auto-includes newly-added ones).
+  const [includedRfqAttachmentIds, setIncludedRfqAttachmentIds] =
+    React.useState<Set<string>>(new Set(panelAttachments.map(a => a.id)))
+  React.useEffect(() => {
+    setIncludedRfqAttachmentIds(prev => {
+      const currentIds = new Set(panelAttachments.map(a => a.id))
+      const next = new Set<string>()
+      for (const id of prev) if (currentIds.has(id)) next.add(id)
+      for (const a of panelAttachments) if (!prev.has(a.id)) next.add(a.id)
+      return next
+    })
+  }, [panelAttachments])
+  const isQuoteStage = ['QUOTED', 'SENT_TO_CUSTOMER', 'ACCEPTED'].includes(rfq.status)
+  const hasQuotePdf = panelAttachments.some(a =>
+    /^quote-/i.test(a.file_name || '') && /\.pdf$/i.test(a.file_name || ''))
 
   const enqNo = rfq.client_rfq_number || rfq.enq_number || rfq.rfq_no || '-'
   const contactName = rfq.contact_person || 'Sir/Madam'
@@ -3567,9 +3584,13 @@ function CommunicationPanel({ rfq, role }: { rfq: RFQ; role: string | null }) {
     if (allRecipients.length === 0) { alert('Please select at least one recipient.'); return }
     setSending(true)
     try {
-      const totalBytes = attachments.reduce((s, f) => s + f.size, 0)
+      const inlineBytes = attachments.reduce((s, f) => s + f.size, 0)
+      const rfqAttachBytes = panelAttachments
+        .filter(a => includedRfqAttachmentIds.has(a.id))
+        .reduce((s, a) => s + (a.file_size || 0), 0)
+      const totalBytes = inlineBytes + rfqAttachBytes
       if (totalBytes > MAX_TOTAL_BYTES) {
-        alert(`Total attachment size ${(totalBytes / 1024 / 1024).toFixed(1)} MB exceeds the 30 MB limit. Remove a file and try again.`)
+        setAttachError(`Total attachment size ${(totalBytes / 1024 / 1024).toFixed(1)} MB exceeds 30 MB cap. Deselect some attachments.`)
         setSending(false)
         return
       }
@@ -3583,6 +3604,13 @@ function CommunicationPanel({ rfq, role }: { rfq: RFQ; role: string | null }) {
         if (!urlData?.publicUrl) { alert(`Could not get public URL for "${file.name}".`); setSending(false); return }
         uploaded.push({ filename: file.name, path: urlData.publicUrl })
       }
+      const autoAttached = panelAttachments
+        .filter(a => includedRfqAttachmentIds.has(a.id))
+        .map(a => ({
+          filename: a.file_name,
+          path: supabase.storage.from('rfq-attachments').getPublicUrl(a.file_path).data.publicUrl,
+        }))
+      const combinedAttachments = [...uploaded, ...autoAttached]
       const APP_BASE = (import.meta as any).env?.VITE_APP_URL ||
         (typeof window !== 'undefined' ? window.location.origin : '')
       const rfqLink = `${APP_BASE}/?rfq=${rfq.id}`
@@ -3593,7 +3621,7 @@ function CommunicationPanel({ rfq, role }: { rfq: RFQ; role: string | null }) {
           to: allRecipients,
           subject,
           html: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;"><div style="background:#1e3a5f;color:white;padding:20px 24px;border-radius:8px 8px 0 0;"><h2 style="margin:0;font-size:18px;">${brandName.replace(/&/g, '&amp;')}</h2><p style="margin:4px 0 0;font-size:13px;opacity:0.8;">${enqNo}</p></div><div style="text-align:center;margin:16px 0;"><a href="${rfqLink}" style="display:inline-block;background:#1d4ed8;color:white;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:bold">Open in ${getBrandName(rfq.operating_entity)} Operations System →</a></div><div style="padding:24px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px;white-space:pre-line;">${body.replace(/\n/g,'<br>')}</div><p style="font-size:11px;color:#9ca3af;margin-top:12px;text-align:center;">ERHA Operations System</p></div>`,
-          attachments: uploaded.length > 0 ? uploaded : undefined,
+          attachments: combinedAttachments.length > 0 ? combinedAttachments : undefined,
         }),
       })
       if (!res.ok) { const err = await res.json(); throw new Error(err.error || err.message || 'Send failed') }
@@ -3612,6 +3640,10 @@ function CommunicationPanel({ rfq, role }: { rfq: RFQ; role: string | null }) {
           external_added_by_exception: external.length > 0,
           default_scope: 'internal_only',
           email_includes_deeplink: true,
+          attachments_from_rfq: autoAttached.length,
+          attachments_added_inline: uploaded.length,
+          pastel_pdf_included: autoAttached.some(a => /^quote-/i.test(a.filename)),
+          total_attachment_count: combinedAttachments.length,
         },
       }).then(({ error: aerr }) => { if (aerr) console.error('activity_log insert failed:', aerr.message) })
       setSent(true)
@@ -3735,6 +3767,41 @@ function CommunicationPanel({ rfq, role }: { rfq: RFQ; role: string | null }) {
         <textarea value={body} onChange={e => setBody(e.target.value)} rows={5} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400 resize-none" />
       </div>
 
+      {(isQuoteStage && !hasQuotePdf) && (
+        <div className="bg-amber-50 border border-amber-300 rounded-lg p-2 text-xs text-amber-900 mt-2">
+          ⚠ No Quote PDF (Quote-XXXX.pdf) found on this RFQ. The email will send without it — confirm this is intentional.
+        </div>
+      )}
+      {panelAttachments.length > 0 && (
+        <div>
+          <p className="text-xs font-medium text-gray-600 block mb-1">Attachments on this RFQ</p>
+          <div className="space-y-1">
+            {panelAttachments.map(a => {
+              const included = includedRfqAttachmentIds.has(a.id)
+              const isQuote = /^quote-/i.test(a.file_name || '') && /\.pdf$/i.test(a.file_name || '')
+              return (
+                <div key={a.id} className="flex items-center gap-2 bg-blue-50 border border-blue-100 rounded-lg px-2 py-1.5 text-xs">
+                  <input
+                    type="checkbox"
+                    checked={included}
+                    onChange={e => setIncludedRfqAttachmentIds(prev => {
+                      const next = new Set(prev)
+                      if (e.target.checked) next.add(a.id); else next.delete(a.id)
+                      return next
+                    })}
+                    className="w-3.5 h-3.5"
+                  />
+                  <FileText size={13} className="text-blue-600" />
+                  <span className="truncate font-medium text-blue-900 flex-1">{a.file_name}</span>
+                  {isQuote && <span className="text-amber-700 text-[10px] font-semibold bg-amber-100 rounded px-1.5 py-0.5">QUOTE PDF</span>}
+                  <span className="text-blue-500 text-[10px]">{Math.round((a.file_size || 0) / 1024)} KB</span>
+                </div>
+              )
+            })}
+          </div>
+        </div>
+      )}
+
       <div>
         <label className="text-xs font-medium text-gray-600 block mb-1">
           Attachments <span className="text-gray-400 font-normal">(optional · max 15 MB each, 30 MB total)</span>
@@ -3775,7 +3842,7 @@ function CommunicationPanel({ rfq, role }: { rfq: RFQ; role: string | null }) {
         canWriteRFQ(role, rfq) && (
           <button
             onClick={handleSendClicked}
-            disabled={sending || sent}
+            disabled={sending || sent || !!attachError}
             className="w-full flex items-center justify-center gap-2 px-4 py-2.5 bg-orange-500 hover:bg-orange-600 disabled:opacity-50 text-white text-sm font-semibold rounded-lg transition-colors"
           >
             <Mail size={15} /> {sent ? 'Sent!' : sending ? 'Sending...' : 'Send Email'}
