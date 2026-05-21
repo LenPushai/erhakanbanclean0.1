@@ -3434,6 +3434,13 @@ function EmailModal({ rfq, role, onClose }: { rfq: RFQ; role: string | null; onC
   )
 }
 
+// Pragmatic email-format check for US-031 free-typed external recipients.
+// Not RFC-5322-complete by design — rejects whitespace and obviously
+// malformed addresses without false-negatives on normal business emails.
+function isValidEmail(s: string): boolean {
+  return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.trim())
+}
+
 // COMMUNICATION PANEL — internal-by-default RFQ messaging with external
 // opt-in + 5-second undo. Replaces the orange "Send Email" trigger
 // that formerly opened EmailModal. Recipients resolve against
@@ -3460,6 +3467,11 @@ function CommunicationPanel({ rfq, role }: { rfq: RFQ; role: string | null }) {
     return seed
   })
   const [includeExternal, setIncludeExternal] = React.useState(false)
+  // US-031 free-typed external recipients (chip-style + inline validation).
+  const [externalAddressesFreetyped, setExternalAddressesFreetyped] = React.useState<string[]>([])
+  const [autoResolvedKept, setAutoResolvedKept] = React.useState<boolean>(true)
+  const [externalDraft, setExternalDraft] = React.useState<string>('')
+  const [externalDraftError, setExternalDraftError] = React.useState<string | null>(null)
 
   const enqNo = rfq.client_rfq_number || rfq.enq_number || rfq.rfq_no || '-'
   const contactName = rfq.contact_person || 'Sir/Madam'
@@ -3506,8 +3518,19 @@ function CommunicationPanel({ rfq, role }: { rfq: RFQ; role: string | null }) {
     for (const [name, checked] of Object.entries(internalChecked)) {
       if (checked && INTERNAL_DIRECTORY[name]) internal.push(INTERNAL_DIRECTORY[name])
     }
-    const external: string[] = (includeExternal && rfq.contact_email) ? [rfq.contact_email] : []
+    const autoResolved = (includeExternal && rfq.contact_email && autoResolvedKept) ? [rfq.contact_email] : []
+    const external: string[] = includeExternal ? [...autoResolved, ...externalAddressesFreetyped] : []
     return { internal, external }
+  }
+
+  // Shared by the input's Enter key and the Add button. Trims, validates,
+  // pushes, clears. No-op on empty/invalid so both call sites stay identical.
+  const addExternalDraft = () => {
+    const t = externalDraft.trim()
+    if (t === '' || !isValidEmail(t)) return
+    setExternalAddressesFreetyped(prev => [...prev, t])
+    setExternalDraft('')
+    setExternalDraftError(null)
   }
 
   const doSend = async () => {
@@ -3617,16 +3640,56 @@ function CommunicationPanel({ rfq, role }: { rfq: RFQ; role: string | null }) {
             type="checkbox"
             checked={includeExternal}
             onChange={e => setIncludeExternal(e.target.checked)}
-            disabled={!rfq.contact_email}
+            disabled={false}
             className="w-3.5 h-3.5"
           />
           <span className="font-medium text-gray-700">Include external contact</span>
           {!rfq.contact_email && <span className="text-xs text-gray-400">(no contact_email on RFQ)</span>}
         </label>
-        {includeExternal && rfq.contact_email && (
-          <div className="mt-2 bg-amber-50 border border-amber-300 rounded-lg p-2 text-xs">
-            <p className="font-semibold text-amber-900">External: {rfq.contact_email}</p>
-            <p className="text-amber-800 mt-0.5">A 5-second Undo will appear after you click Send.</p>
+        {includeExternal && (
+          <div className="mt-2 space-y-2">
+            <div className="flex flex-wrap gap-1.5">
+              {autoResolvedKept && rfq.contact_email && (
+                <span className="inline-flex items-center gap-1 bg-amber-100 border border-amber-300 rounded-full px-2 py-0.5 text-xs text-amber-900">
+                  {rfq.contact_email}
+                  <span className="text-amber-600">· from RFQ</span>
+                  <button onClick={() => setAutoResolvedKept(false)} className="ml-0.5 text-amber-700 hover:text-amber-900" aria-label="Remove RFQ contact">
+                    <X size={11} />
+                  </button>
+                </span>
+              )}
+              {externalAddressesFreetyped.map((addr, i) => (
+                <span key={`${addr}:${i}`} className="inline-flex items-center gap-1 bg-amber-100 border border-amber-300 rounded-full px-2 py-0.5 text-xs text-amber-900">
+                  {addr}
+                  <button onClick={() => setExternalAddressesFreetyped(prev => prev.filter((_, idx) => idx !== i))} className="ml-0.5 text-amber-700 hover:text-amber-900" aria-label={`Remove ${addr}`}>
+                    <X size={11} />
+                  </button>
+                </span>
+              ))}
+            </div>
+            <div className="flex gap-2">
+              <input
+                value={externalDraft}
+                onChange={e => {
+                  const v = e.target.value
+                  setExternalDraft(v)
+                  const t = v.trim()
+                  setExternalDraftError(t === '' || isValidEmail(t) ? null : 'Not a valid email address')
+                }}
+                onKeyDown={e => { if (e.key === 'Enter') { e.preventDefault(); addExternalDraft() } }}
+                placeholder="add external email"
+                className="flex-1 border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400"
+              />
+              <button
+                onClick={addExternalDraft}
+                disabled={externalDraft.trim() === '' || externalDraftError !== null}
+                className="px-3 py-2 bg-amber-600 hover:bg-amber-700 disabled:opacity-50 text-white text-sm font-semibold rounded-lg"
+              >
+                Add
+              </button>
+            </div>
+            {externalDraftError && <p className="text-xs text-red-600">{externalDraftError}</p>}
+            <p className="text-amber-800 text-xs">A 5-second Undo will appear after you click Send.</p>
           </div>
         )}
       </div>
