@@ -2,7 +2,7 @@
 import { useState, useEffect } from 'react'
 import { ClipboardList, Briefcase, ChevronRight, ChevronDown, ChevronUp, Factory, Building2, Calendar, Hash, RefreshCw, ArrowDownToLine, ArrowUpFromLine, X, Mail, FileText, Paperclip, Send, Plus, Check, Printer, Upload, Package, Search, Filter, Edit3, XCircle, Trash2, Eye, CheckCircle, ShoppingCart, Download, Truck, DollarSign, AlertTriangle, Receipt, Users, Settings }  from 'lucide-react'
 import { supabase } from './lib/supabase'
-import { emailRFQCreated, emailQuoterAssigned, emailQuoteReady, emailOrderWon, emailJobInReview, emailJobReadyToPrint, emailJobPrinted, emailChildJobSpawned, emailJobStarted, emailJobQCCheck, emailJobComplete, emailJobDispatched } from './emailService'
+import { emailQuoterAssigned, emailQuoteReady, emailOrderWon, emailJobInReview, emailJobReadyToPrint, emailJobPrinted, emailChildJobSpawned, emailJobStarted, emailJobQCCheck, emailJobComplete, emailJobDispatched } from './emailService'
 import { format } from 'date-fns'
 import { useEntity, type OperatingEntity } from './contexts/EntityContext'
 import { EntitySwitcher, getBrandName, getHeaderLogo } from './components/EntitySwitcher'
@@ -2290,6 +2290,9 @@ function CreateDirectJobModal({ activeEntity, role, onClose, onCreated }: { acti
 
 function CreateRFQModal({ activeEntity, role, onClose, onCreated }: { activeEntity: OperatingEntity; role: string | null; onClose: () => void; onCreated: () => void }) {
   const [saving, setSaving] = React.useState(false)
+  const [step, setStep] = React.useState<'form' | 'notify'>('form')
+  const [createdRfq, setCreatedRfq] = React.useState<RFQ | null>(null)
+  const [createdAttachments, setCreatedAttachments] = React.useState<any[]>([])
   const [uploadingFiles, setUploadingFiles] = React.useState(false)
   const [clients, setClients] = React.useState<any[]>([])
   const [showNewClient, setShowNewClient] = React.useState(false)
@@ -2415,7 +2418,7 @@ function CreateRFQModal({ activeEntity, role, onClose, onCreated }: { activeEnti
         special_requirements: form.special_requirements || null,
         notes: form.notes || null,
         status: 'NEW',
-      }).select('id').single()
+      }).select('*, clients(company_name)').single()
 
       if (rfqError) throw rfqError
 
@@ -2450,9 +2453,11 @@ function CreateRFQModal({ activeEntity, role, onClose, onCreated }: { activeEnti
         }
       }
 
-      emailRFQCreated({ ...rfq, client_name: newClientName.trim() || form.client_id, description: form.description, priority: form.priority, request_date: form.request_date, required_date: form.required_date, rfq_no: enqNumber, client_rfq_number: form.client_rfq_number })
-      onCreated()
-      onClose()
+      const { data: createdAtt } = await supabase.from('rfq_attachments')
+        .select('id, file_name, file_path, file_size').eq('rfq_id', rfq.id)
+      setCreatedAttachments(createdAtt || [])
+      setCreatedRfq(rfq as RFQ)
+      setStep('notify')
     } catch (err: any) {
       alert('Error creating RFQ: ' + (err.message || String(err)))
     } finally {
@@ -2465,9 +2470,10 @@ function CreateRFQModal({ activeEntity, role, onClose, onCreated }: { activeEnti
       <div className="bg-white rounded-xl shadow-2xl w-full max-w-3xl mx-4">
         <div className="flex items-center justify-between px-6 py-4 border-b border-gray-200">
           <h2 className="text-lg font-bold text-gray-900">New RFQ</h2>
-          <button onClick={onClose} className="text-gray-400 hover:text-gray-600 text-xl font-bold leading-none"><X size={18} /></button>
+          <button onClick={step === 'notify' ? () => { onCreated(); onClose() } : onClose} className="text-gray-400 hover:text-gray-600 text-xl font-bold leading-none"><X size={18} /></button>
         </div>
 
+        {step === 'form' && (<>
         <div className="px-6 py-5 space-y-6 max-h-[75vh] overflow-y-auto">
           <div>
             <p className="text-xs font-semibold text-gray-500 uppercase tracking-wider mb-3">Direction & Reference</p>
@@ -2625,6 +2631,30 @@ function CreateRFQModal({ activeEntity, role, onClose, onCreated }: { activeEnti
             {saving ? 'Creating...' : 'Create RFQ'}
           </button>}
         </div>
+        </>)}
+        {step === 'notify' && createdRfq && (
+          <div className="px-6 py-4 space-y-3">
+            <p className="text-sm text-gray-600">
+              RFQ {createdRfq.client_rfq_number || createdRfq.rfq_no} created. Choose recipients and send a notification, or skip.
+            </p>
+            <CommunicationPanel
+              rfq={createdRfq}
+              role={role}
+              panelAttachments={createdAttachments}
+              defaultBody={createNotifyBody(createdRfq)}
+              sendContext="create_flow"
+              onSent={() => { onCreated(); onClose() }}
+            />
+            <div className="flex justify-end pt-2 border-t border-gray-200">
+              <button
+                onClick={() => { onCreated(); onClose() }}
+                className="px-4 py-2 text-sm text-gray-600 hover:text-gray-900"
+              >
+                Skip notification & close
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   )
@@ -3469,6 +3499,14 @@ function isValidEmail(s: string): boolean {
   return /^[^\s@]+@[^\s@]+\.[^\s@]+$/.test(s.trim())
 }
 
+// US-034 create-flow notification body — internal tone, fully substituted
+// (no {placeholders}); CommunicationPanel uses it verbatim via defaultBody.
+const createNotifyBody = (rfq: RFQ) => {
+  const enq = rfq.client_rfq_number || rfq.rfq_no || rfq.enq_number || '-'
+  const client = (rfq as any).clients?.company_name || rfq.contact_person || 'Client'
+  return `New RFQ ${enq} logged for ${client}.\n\nQuoter assignment pending. Please review and assign as needed.\n\nKind regards`
+}
+
 // COMMUNICATION PANEL — internal-by-default RFQ messaging with external
 // opt-in + 5-second undo. Replaces the orange "Send Email" trigger
 // that formerly opened EmailModal. Recipients resolve against
@@ -3482,7 +3520,7 @@ function isValidEmail(s: string): boolean {
 // Attachments code is an intentional duplicate of EmailModal's
 // rfq-attachments bucket pattern. Shared helper is a follow-up; tonight
 // favours blast-radius containment over premature extraction.
-function CommunicationPanel({ rfq, role, panelAttachments = [] }: { rfq: RFQ; role: string | null; panelAttachments?: any[] }) {
+function CommunicationPanel({ rfq, role, panelAttachments = [], defaultBody, sendContext = 'detail_panel', onSent }: { rfq: RFQ; role: string | null; panelAttachments?: any[]; defaultBody?: string; sendContext?: 'create_flow' | 'detail_panel'; onSent?: () => void }) {
   const quoterName = rfq.assigned_quoter_name || ''
   const quoterEmail = quoterName ? INTERNAL_DIRECTORY[quoterName] : undefined
   const quoterUnresolved = !!quoterName && !quoterEmail
@@ -3524,7 +3562,7 @@ function CommunicationPanel({ rfq, role, panelAttachments = [] }: { rfq: RFQ; ro
   const template = EMAIL_TEMPLATES[rfq.status] || EMAIL_TEMPLATES['NEW']
   const [subject, setSubject] = React.useState(template.subject.replace('{enq}', enqNo))
   const [body, setBody] = React.useState(
-    template.body.replace(/\{enq\}/g, enqNo).replace('{contact}', contactName).replace('{brand}', brandName)
+    defaultBody ?? template.body.replace(/\{enq\}/g, enqNo).replace('{contact}', contactName).replace('{brand}', brandName)
   )
 
   const [attachments, setAttachments] = React.useState<File[]>([])
@@ -3639,6 +3677,7 @@ function CommunicationPanel({ rfq, role, panelAttachments = [] }: { rfq: RFQ; ro
           sent_by_role: role,
           external_added_by_exception: external.length > 0,
           default_scope: 'internal_only',
+          send_context: sendContext,
           email_includes_deeplink: true,
           attachments_from_rfq: autoAttached.length,
           attachments_added_inline: uploaded.length,
@@ -3647,6 +3686,7 @@ function CommunicationPanel({ rfq, role, panelAttachments = [] }: { rfq: RFQ; ro
         },
       }).then(({ error: aerr }) => { if (aerr) console.error('activity_log insert failed:', aerr.message) })
       setSent(true)
+      onSent?.()
       setTimeout(() => { setSent(false); setAttachments([]) }, 3000)
     } catch (err: any) { alert('Failed to send email: ' + err.message) }
     finally { setSending(false) }
