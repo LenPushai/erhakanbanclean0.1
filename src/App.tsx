@@ -679,7 +679,7 @@ App() {
   const [clientsList, setClientsList] = useState<Client[]>([])
   const [clientsLoading, setClientsLoading] = useState(false)
 
-  const { activeEntity } = useEntity()
+  const { activeEntity, setActiveEntity } = useEntity()
 
   const fetchSuppliers = async () => {
     setSuppliersLoading(true)
@@ -972,6 +972,34 @@ table { border-collapse:collapse; width:100%; }
   }
 
   useEffect(() => { if (!isSignRoute) { fetchRFQs(); fetchJobs(); fetchSignatureTokens() } }, [activeEntity, isSignRoute])
+
+  // US-032 deep-link: open the RFQ named by ?rfq=<id> once the initial
+  // fetch settles. Local fast-path when same-entity; otherwise look the
+  // row up by id (no entity filter) and auto-switch entity if needed.
+  // Ref-guarded to fire once per page load. Bad/deleted id → silent no-op (v1).
+  const deepLinkHandledRef = React.useRef(false)
+  useEffect(() => {
+    if (isSignRoute || loading || deepLinkHandledRef.current) return
+    const linkedId = new URLSearchParams(window.location.search).get('rfq')
+    if (!linkedId) return
+    deepLinkHandledRef.current = true
+    const clearParam = () => window.history.replaceState(null, '', window.location.pathname)
+    void (async () => {
+      const local = rfqs.find(r => r.id === linkedId)
+      if (local && local.operating_entity === activeEntity) {
+        setSelectedRFQ(local); clearParam(); return
+      }
+      const { data: linkedRfq } = await supabase.from('rfqs').select('*').eq('id', linkedId).maybeSingle()
+      if (!linkedRfq) return // deleted / bad id — silent no-op (v1)
+      if (linkedRfq.operating_entity !== activeEntity) {
+        setActiveEntity(linkedRfq.operating_entity as OperatingEntity)
+        setTimeout(() => setSelectedRFQ(linkedRfq as RFQ), 0)
+      } else {
+        setSelectedRFQ(linkedRfq as RFQ)
+      }
+      clearParam()
+    })()
+  }, [loading, isSignRoute, rfqs, activeEntity])
 
   const handleRFQUpdate = (updated: RFQ) => {
     setRfqs(prev => prev.map(r => r.id === updated.id ? updated : r))
@@ -3555,13 +3583,16 @@ function CommunicationPanel({ rfq, role }: { rfq: RFQ; role: string | null }) {
         if (!urlData?.publicUrl) { alert(`Could not get public URL for "${file.name}".`); setSending(false); return }
         uploaded.push({ filename: file.name, path: urlData.publicUrl })
       }
+      const APP_BASE = (import.meta as any).env?.VITE_APP_URL ||
+        (typeof window !== 'undefined' ? window.location.origin : '')
+      const rfqLink = `${APP_BASE}/?rfq=${rfq.id}`
       const res = await fetch('/api/send-email', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
           to: allRecipients,
           subject,
-          html: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;"><div style="background:#1e3a5f;color:white;padding:20px 24px;border-radius:8px 8px 0 0;"><h2 style="margin:0;font-size:18px;">${brandName.replace(/&/g, '&amp;')}</h2><p style="margin:4px 0 0;font-size:13px;opacity:0.8;">${enqNo}</p></div><div style="padding:24px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px;white-space:pre-line;">${body.replace(/\n/g,'<br>')}</div><p style="font-size:11px;color:#9ca3af;margin-top:12px;text-align:center;">ERHA Operations System</p></div>`,
+          html: `<div style="font-family:Arial,sans-serif;max-width:600px;margin:0 auto;"><div style="background:#1e3a5f;color:white;padding:20px 24px;border-radius:8px 8px 0 0;"><h2 style="margin:0;font-size:18px;">${brandName.replace(/&/g, '&amp;')}</h2><p style="margin:4px 0 0;font-size:13px;opacity:0.8;">${enqNo}</p></div><div style="text-align:center;margin:16px 0;"><a href="${rfqLink}" style="display:inline-block;background:#1d4ed8;color:white;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:bold">Open in ${getBrandName(rfq.operating_entity)} Operations System →</a></div><div style="padding:24px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px;white-space:pre-line;">${body.replace(/\n/g,'<br>')}</div><p style="font-size:11px;color:#9ca3af;margin-top:12px;text-align:center;">ERHA Operations System</p></div>`,
           attachments: uploaded.length > 0 ? uploaded : undefined,
         }),
       })
@@ -3580,6 +3611,7 @@ function CommunicationPanel({ rfq, role }: { rfq: RFQ; role: string | null }) {
           sent_by_role: role,
           external_added_by_exception: external.length > 0,
           default_scope: 'internal_only',
+          email_includes_deeplink: true,
         },
       }).then(({ error: aerr }) => { if (aerr) console.error('activity_log insert failed:', aerr.message) })
       setSent(true)
