@@ -369,14 +369,16 @@ const ROLE_DISPLAY_NAMES: Record<string, string> = {
 // ───────────────────────────────────────────────────────────
 // Phase 1 RBAC (ADR-009)
 // Three-tier role model — single source of truth for write permissions.
-// FULL    : HENDRIK, JUANIC — all write actions
-// QUOTER  : DEWALD          — RFQ writes scoped to his assigned RFQs
-// READER  : CHERISE         — no writes anywhere
+// FULL    : HENDRIK, JUANIC                              — all write actions
+// QUOTER  : DEWALD                                       — RFQ writes scoped to his assigned RFQs
+// READER  : CHERISE, SONJA, CHARLES, JACO, ELSJE, ALWYN, ZACH
+//                                                        — no writes anywhere; surfaced in RoleSelector for shop-floor visibility
 //
-// Dormant roles (SONJA, CHARLES, JACO, ELSJE, ALWYN, ZACH) are
-// intentionally absent from TIER_BY_ROLE. getTier() returns null for
-// them, which denies all writes via the canWrite* helpers below. They
-// remain in VALID_ROLES for backward compatibility with legacy data.
+// All six previously-dormant roles (SONJA, CHARLES, JACO, ELSJE, ALWYN,
+// ZACH) are now explicitly mapped to READER tier. canWrite() and
+// canWriteRFQ() return false for any non-FULL/non-matching-QUOTER tier,
+// so every existing write gate continues to deny them. The header
+// renders a READ ONLY badge whenever getTier() is not 'FULL'.
 // ───────────────────────────────────────────────────────────
 
 type RoleTier = 'FULL' | 'QUOTER' | 'READER'
@@ -386,6 +388,12 @@ const TIER_BY_ROLE: Record<string, RoleTier> = {
   JUANIC:  'FULL',
   DEWALD:  'QUOTER',
   CHERISE: 'READER',
+  SONJA:   'READER',
+  CHARLES: 'READER',
+  JACO:    'READER',
+  ELSJE:   'READER',
+  ALWYN:   'READER',
+  ZACH:    'READER',
 }
 
 function getTier(role: string | null): RoleTier | null {
@@ -568,6 +576,12 @@ function RoleSelector({ onSelect }: any) {
             { key: 'JUANIC', label: 'Operations System Manager', initials: 'OS', color: 'blue' },
             { key: 'DEWALD', label: 'General Manager', initials: 'GM', color: 'purple' },
             { key: 'CHERISE', label: 'Administration', initials: 'AD', color: 'cyan' },
+            { key: 'SONJA',   label: 'Procurement & Accounts', initials: 'PA', color: 'green' },
+            { key: 'CHARLES', label: 'Store Manager',          initials: 'SM', color: 'amber' },
+            { key: 'JACO',    label: 'Site Manager',           initials: 'SI', color: 'teal' },
+            { key: 'ELSJE',   label: 'Site Admin',             initials: 'SA', color: 'rose' },
+            { key: 'ALWYN',   label: 'Site Foreman',           initials: 'SF', color: 'indigo' },
+            { key: 'ZACH',    label: 'Shop Foreman',           initials: 'SH', color: 'lime' },
           ] as const).map(role => (
             <button key={role.key} onClick={() => onSelect(role.key)}
               className={`w-full flex items-center gap-4 px-5 py-3 border-2 border-gray-200 rounded-xl hover:border-${role.color}-400 hover:bg-${role.color}-50 transition-all group`}>
@@ -1140,6 +1154,9 @@ table { border-collapse:collapse; width:100%; }
             </>)}
             <div className="flex items-center gap-1.5 text-xs text-gray-500 pr-1 border-r border-gray-200">
               <span className="pr-2">Role: <span className="font-semibold text-gray-700">{ROLE_DISPLAY_NAMES[currentRole] || currentRole}</span></span>
+              {getTier(currentRole) !== 'FULL' && (
+                <span className="ml-1 mr-2 px-1.5 py-0.5 rounded bg-amber-100 text-amber-800 text-[10px] font-bold uppercase tracking-wide border border-amber-200">Read Only</span>
+              )}
               <button onClick={() => setCurrentRole(null)} className="text-blue-600 hover:underline font-medium pr-1">Change</button>
             </div>
             <EntitySwitcher currentRole={currentRole} />
