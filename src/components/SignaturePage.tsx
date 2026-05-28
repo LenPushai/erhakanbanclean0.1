@@ -9,6 +9,7 @@ import { useState, useEffect, useRef } from 'react'
 import type React from 'react'
 import { supabase } from '../lib/supabase'
 import { EMAIL_TO_NAME } from '../emailRecipients'
+import { emailReadyToSend } from '../emailService'
 
 interface TokenRecord {
   rfq_id: string
@@ -133,6 +134,15 @@ export function SignaturePage() {
       })
       const data = await res.json()
       if (!res.ok) throw new Error(data.error || 'Submission failed')
+
+      // US-P3-012: Stage 1 success advances the RFQ to INTERNALLY_APPROVED.
+      // Notify Jeanic so she can send the quote to the customer. Email
+      // failure is non-fatal — the status flip is the source of truth.
+      if (tokenRecord?.signature_stage === 'manager' && rfq) {
+        try { await emailReadyToSend(rfq) }
+        catch (err) { console.error('emailReadyToSend failed:', err) }
+      }
+
       setDone(true)
     } catch (e: any) { alert('Could not submit signature: ' + e.message) }
     finally { setSubmitting(false) }
@@ -229,7 +239,9 @@ function SuccessState({ stage }: { stage?: string }) {
   const title = stage === 'manager' ? 'Quote approved'
     : stage === 'client' ? 'Quote accepted - thank you'
     : 'Signature recorded'
-  const body = stage === 'manager' ? 'The RFQ has moved to "Quote Approved" and is ready for PO capture and Order Won.'
+  // US-P3-012: Stage 1 now lands on INTERNALLY_APPROVED ("Ready to Send"),
+  // not directly on SENT_TO_CUSTOMER. Jeanic is notified by email.
+  const body = stage === 'manager' ? 'The RFQ has moved to "Ready to Send". Jeanic has been notified and will send the quote to the customer.'
     : stage === 'client' ? 'ERHA will be in touch shortly to confirm next steps.'
     : 'Thank you.'
   return (<Centered>

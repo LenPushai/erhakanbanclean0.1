@@ -219,13 +219,18 @@ export default async function handler(req, res) {
     if (tkUpErr) console.error('token update failed:', tkUpErr.message);
 
     if (stage === 'manager') {
-      // Stage 1 is the final internal sign-off (ERHA's approval is internal-only).
-      // Flip QUOTED -> SENT_TO_CUSTOMER, log activity, respond. The Stage 2
-      // customer cascade (token + customer email) was removed; the next
-      // operational step is "Save Order - Move to Order Won" on the RFQ panel.
+      // US-P3-012: Stage 1 (Hendrik internal sign-off) advances QUOTED -> INTERNALLY_APPROVED.
+      // No customer cascade fires here — sending to the customer is a separate,
+      // manual action gated behind Jeanic ("Send Quote to Customer" button on the
+      // RFQ detail panel, which POSTs api/quote-send-to-customer.js and flips
+      // INTERNALLY_APPROVED -> SENT_TO_CUSTOMER).
+      // The .eq('status', 'QUOTED') guard prevents a double-transition if this
+      // endpoint is hit twice (e.g. signer reloads + resubmits, or the
+      // 'client' stage cascades back to this handler for any reason).
       const { error: stErr } = await supabase
-        .from('rfqs').update({ status: 'SENT_TO_CUSTOMER' }).eq('id', rfq.id);
-      if (stErr) console.error('rfq status flip failed:', stErr.message);
+        .from('rfqs').update({ status: 'INTERNALLY_APPROVED' })
+        .eq('id', rfq.id).eq('status', 'QUOTED');
+      if (stErr) console.error('US-P3-012: failed to advance to INTERNALLY_APPROVED', stErr.message);
 
       await supabase.from('activity_log').insert({
         action_type: 'quote_signed_stage_1',
@@ -242,10 +247,24 @@ export default async function handler(req, res) {
         },
       }).then(({ error: aerr }) => { if (aerr) console.error('activity_log insert failed:', aerr.message); });
 
+      await supabase.from('activity_log').insert({
+        action_type: 'rfq_internally_approved',
+        entity_type: 'rfq',
+        entity_id: rfq.id,
+        operating_entity: rfq.operating_entity || null,
+        metadata: {
+          signature_id: sig.id,
+          signer_name: String(signer_name).trim(),
+          from_status: 'QUOTED',
+          to_status: 'INTERNALLY_APPROVED',
+        },
+      }).then(({ error: aerr }) => { if (aerr) console.error('activity_log insert failed:', aerr.message); });
+
       return res.status(200).json({
         success: true,
         stage: 'manager',
         signature_id: sig.id,
+        rfq_status: 'INTERNALLY_APPROVED',
       });
     } else {
       // Stage 2 cascade: flip SENT_TO_CUSTOMER -> ACCEPTED, dispatch internal

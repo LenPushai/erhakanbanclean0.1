@@ -29,3 +29,6 @@ dist-ssr
 
 # UAT regression probes (kept locally for re-verification, not committed)
 probe_j1.ps1
+
+.vercel
+.env*.local

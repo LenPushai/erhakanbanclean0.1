@@ -271,3 +271,55 @@ export async function emailJobDispatched(job: any) {
   </div>`
   await sendEmail(ALL, subject, html)
 }
+
+// US-P3-012: Hendrik has internally signed off the quote. Status is now
+// INTERNALLY_APPROVED — Jeanic is the gate-keeper for the customer send.
+export async function emailReadyToSend(rfq: any) {
+  const clientName = rfq.client_name || rfq.clients?.company_name || '—'
+  const subject = `Quote ready to send to ${clientName} — ${rfq.rfq_no || rfq.enq_number || 'RFQ'}`
+  const html = `<div style="max-width:600px;margin:0 auto">
+    <div style="${headerStyle}"><h2 style="margin:0">Quote Ready to Send</h2></div>
+    <div style="${bodyStyle}">
+      <p style="margin-bottom:16px">Hendrik has signed off the quote for <strong>${clientName}</strong>.
+      It is ready for you to send to the customer from the RFQ Board.</p>
+      <table style="width:100%;border-collapse:collapse;background:#f9fafb;border-radius:6px">
+        ${infoRow('RFQ Number', rfq.rfq_no)}
+        ${infoRow('Client', clientName)}
+        ${infoRow('Description', rfq.description)}
+        ${infoRow('Quote Number', rfq.quote_number)}
+        ${infoRow('Quote Value', rfq.quote_value_excl_vat ? 'R ' + Number(rfq.quote_value_excl_vat).toLocaleString('en-ZA') + ' excl VAT' : '—')}
+      </table>
+      <p style="margin-top:16px;color:#6b7280">Open the RFQ on the board and click <strong>Send Quote to Customer</strong>.</p>
+      ${footer}
+    </div>
+  </div>`
+  await sendEmail([PEOPLE.Jeanic], subject, html)
+}
+
+// US-P3-012: all linked jobs invoiced — DB trigger has flipped the RFQ to
+// COMPLETED. Operationally, this email fires from the cron handler at
+// api/cron/notify-completed-rfqs.js (which composes the template inline
+// and stamps rfqs.completion_email_sent_at for idempotency). This
+// frontend export is kept for symmetry with the other emailXxx exports
+// and as a future "Re-send completion email" button hook — it is not
+// currently wired to any caller.
+export async function emailRfqCompleted(rfq: any) {
+  const clientName = rfq.client_name || rfq.clients?.company_name || '—'
+  const subject = `RFQ ${rfq.rfq_no || 'RFQ'} completed — ${clientName}`
+  const html = `<div style="max-width:600px;margin:0 auto">
+    <div style="${headerStyle}"><h2 style="margin:0">RFQ Completed</h2></div>
+    <div style="${bodyStyle}">
+      <p style="margin-bottom:16px">Job for <strong>${clientName}</strong> has been fully invoiced.
+      The RFQ is now closed out on the board.</p>
+      <table style="width:100%;border-collapse:collapse;background:#f9fafb;border-radius:6px">
+        ${infoRow('RFQ Number', rfq.rfq_no)}
+        ${infoRow('Client', clientName)}
+        ${infoRow('Description', rfq.description)}
+        ${infoRow('Invoice Number', rfq.invoice_number)}
+        ${infoRow('Invoice Value', rfq.invoice_value ? 'R ' + Number(rfq.invoice_value).toLocaleString('en-ZA') : '—')}
+      </table>
+      ${footer}
+    </div>
+  </div>`
+  await sendEmail([PEOPLE.Hendrik, PEOPLE.Jeanic], subject, html)
+}

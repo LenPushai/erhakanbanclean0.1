@@ -235,14 +235,19 @@ interface LineItem {
   unit_of_measure: string | null
 }
 
+// US-P3-012: eight visible lanes. JOB_CREATED is intentionally absent —
+// cards in that status are folded into the ACCEPTED lane by the filter in
+// RFQBoard (rfq is "transit-through" between Order Won and Completed; the
+// jobs.workshop_status='INVOICED' trigger promotes it to COMPLETED).
 const RFQ_COLUMNS = [
-  { key: 'NEW',              label: 'New',              color: 'bg-blue-500',   hover: 'hover:border-blue-300'   },
-  { key: 'PENDING',          label: 'Assigned',         color: 'bg-purple-500', hover: 'hover:border-purple-300' },
-  { key: 'QUOTED',           label: 'Quoted',           color: 'bg-indigo-500', hover: 'hover:border-indigo-300' },
-  { key: 'SENT_TO_CUSTOMER', label: 'Quote Approved',   color: 'bg-cyan-500',   hover: 'hover:border-cyan-300'   },
-  { key: 'ACCEPTED',         label: 'Order Won',        color: 'bg-teal-500',   hover: 'hover:border-teal-300'   },
-  { key: 'JOB_CREATED',      label: 'Complete',         color: 'bg-gray-500',   hover: 'hover:border-gray-300'   },
-  { key: 'REJECTED',         label: 'Lost',             color: 'bg-red-400',    hover: 'hover:border-red-300'    },
+  { key: 'NEW',                 label: 'New',              color: 'bg-blue-500',    hover: 'hover:border-blue-300'    },
+  { key: 'PENDING',             label: 'With Quoter',      color: 'bg-purple-500',  hover: 'hover:border-purple-300'  },
+  { key: 'QUOTED',              label: 'Awaiting Approval', color: 'bg-indigo-500', hover: 'hover:border-indigo-300'  },
+  { key: 'INTERNALLY_APPROVED', label: 'Ready to Send',    color: 'bg-amber-500',   hover: 'hover:border-amber-300'   },
+  { key: 'SENT_TO_CUSTOMER',    label: 'Quote Sent',       color: 'bg-cyan-500',    hover: 'hover:border-cyan-300'    },
+  { key: 'ACCEPTED',            label: 'Order Won',        color: 'bg-teal-500',    hover: 'hover:border-teal-300'    },
+  { key: 'COMPLETED',           label: 'Completed',        color: 'bg-emerald-600', hover: 'hover:border-emerald-300' },
+  { key: 'REJECTED',            label: 'Lost',             color: 'bg-red-400',     hover: 'hover:border-red-300'     },
 ]
 
 const PRIORITY_BADGE: Record<string, string> = {
@@ -255,15 +260,19 @@ const PRIORITY_BADGE: Record<string, string> = {
 
 const STATUS_COLORS: Record<string, string> = {
   NEW: 'bg-blue-100 text-blue-700', PENDING: 'bg-purple-100 text-purple-700',
-  QUOTED: 'bg-indigo-100 text-indigo-700', SENT_TO_CUSTOMER: 'bg-cyan-100 text-cyan-700',
+  QUOTED: 'bg-indigo-100 text-indigo-700',
+  INTERNALLY_APPROVED: 'bg-amber-100 text-amber-700',
+  SENT_TO_CUSTOMER: 'bg-cyan-100 text-cyan-700',
   ACCEPTED: 'bg-teal-100 text-teal-700', JOB_CREATED: 'bg-gray-100 text-gray-700',
+  COMPLETED: 'bg-emerald-100 text-emerald-700',
   REJECTED: 'bg-red-100 text-red-700',
 }
 
 const STATUS_LABELS: Record<string, string> = {
-  NEW: 'New', PENDING: 'Assigned', QUOTED: 'Quoted',
-  SENT_TO_CUSTOMER: 'Quote Approved', ACCEPTED: 'Order Won',
-  JOB_CREATED: 'Complete', REJECTED: 'Lost',
+  NEW: 'New', PENDING: 'With Quoter', QUOTED: 'Awaiting Approval',
+  INTERNALLY_APPROVED: 'Ready to Send',
+  SENT_TO_CUSTOMER: 'Quote Sent', ACCEPTED: 'Order Won',
+  JOB_CREATED: 'Job Created', COMPLETED: 'Completed', REJECTED: 'Lost',
 }
 
 const QUOTERS = ['Hendrik', 'Dewald', 'Estimator', 'Jaco']
@@ -1174,7 +1183,10 @@ function RFQBoard({ rfqs, loading, error, onRefresh, onCardClick, selectedId, to
   return (
     <div className="flex gap-4 h-full" style={{ minWidth: 'max-content' }}>
       {RFQ_COLUMNS.map((col) => {
-        const cards = rfqs.filter(r => r.status === col.key)
+        const cards = rfqs.filter(r =>
+          r.status === col.key ||
+          (col.key === 'ACCEPTED' && r.status === 'JOB_CREATED')
+        )
         return (
           <div key={col.key} className="w-64 flex flex-col shrink-0">
             <div className={`flex items-center gap-2 px-3 py-2.5 rounded-t-lg ${col.color}`}>
@@ -3040,7 +3052,7 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, activeEntity, onJobCreat
             <CommunicationPanel rfq={rfq} role={role} panelAttachments={panelAttachments} />
           </div>
 
-          {(['PENDING', 'QUOTED', 'SENT_TO_CUSTOMER', 'ACCEPTED'].includes(status)) && (
+          {(['PENDING', 'QUOTED', 'INTERNALLY_APPROVED', 'SENT_TO_CUSTOMER', 'ACCEPTED'].includes(status)) && (
             <div className="px-5 py-4 border-b border-gray-100">
               <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-3">Quote Information (from Pastel)</p>
               <div className="grid grid-cols-3 gap-3 mb-3">
@@ -3053,15 +3065,15 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, activeEntity, onJobCreat
             </div>
           )}
 
-          {(['NEW','PENDING','QUOTED','SENT_TO_CUSTOMER','ACCEPTED'].includes(status)) && (
+          {(['NEW','PENDING','QUOTED','INTERNALLY_APPROVED','SENT_TO_CUSTOMER','ACCEPTED'].includes(status)) && (
             <div className="px-5 py-4 border-b border-gray-100">
-{(['QUOTED','SENT_TO_CUSTOMER','ACCEPTED'].includes(status)) && <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-3">Order Information (when won)</p>}
+{(['QUOTED','INTERNALLY_APPROVED','SENT_TO_CUSTOMER','ACCEPTED'].includes(status)) && <p className="text-xs font-semibold text-gray-400 uppercase tracking-widest mb-3">Order Information (when won)</p>}
               <div className="grid grid-cols-3 gap-3 mb-3">
                 <div><label className="text-xs font-medium text-gray-600 block mb-1">Client PO Number *</label><input value={poNumber} onChange={e => setPoNumber(e.target.value)} placeholder="Client PO" className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400" /></div>
 
                 <div><label className="text-xs font-medium text-gray-600 block mb-1">Order Date</label><input type="date" value={orderDate} onChange={e => setOrderDate(e.target.value)} className="w-full border border-gray-200 rounded-lg px-3 py-2 text-sm focus:outline-none focus:border-blue-400" /></div>
               </div>
-        {(['PENDING','QUOTED','SENT_TO_CUSTOMER'].includes(status)) && !rfq.job_number && canWrite(role) && (
+        {(['PENDING','QUOTED','INTERNALLY_APPROVED','SENT_TO_CUSTOMER'].includes(status)) && !rfq.job_number && canWrite(role) && (
           <button onClick={async () => {
             if (!confirm('FAST TRACK: This will create a Job Card immediately without waiting for a PO number. The RFQ will stay in its current status until the quote is sent and the PO is captured. Continue?')) return
             setSaving(true)
@@ -3170,6 +3182,37 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, activeEntity, onJobCreat
           <button onClick={() => onSendForApproval(rfq)}
             className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg">
             Send for Manager Approval
+          </button>
+        )}
+        {status === 'INTERNALLY_APPROVED' && canWrite(role) && (
+          <button onClick={async () => {
+            if (!rfq.contact_email) {
+              alert('No Contact Email on this RFQ. Add one before sending the quote to the customer.')
+              return
+            }
+            if (!confirm(`Send the quote to ${rfq.contact_email}?\n\nThe Pastel PDF (if present in this RFQ's attachments) will be attached automatically.`)) return
+            setSaving(true)
+            try {
+              const res = await fetch('/api/quote-send-to-customer', {
+                method: 'POST',
+                headers: { 'Content-Type': 'application/json' },
+                body: JSON.stringify({ rfq_id: rfq.id }),
+              })
+              const data = await res.json()
+              if (!res.ok) throw new Error(data.error || 'Send failed')
+              onUpdate({ ...rfq, status: 'SENT_TO_CUSTOMER' })
+              const pdfNote = data.pastel_pdf_attached
+                ? ` (Pastel PDF "${data.pastel_pdf_filename}" attached)`
+                : ' (no Pastel PDF auto-attached — send manually via the communication panel if needed)'
+              if (data.email_dispatched) {
+                showMsg(`Quote sent to ${(data.to || []).join(', ')}${pdfNote}`)
+              } else {
+                showMsg(`Status moved to Quote Sent but the email failed to dispatch: ${data.email_error}. Re-send manually via the communication panel.`)
+              }
+            } catch (e: any) { alert('Error: ' + e.message) }
+            finally { setSaving(false) }
+          }} disabled={saving} className="w-full py-2 bg-amber-600 hover:bg-amber-700 text-white text-sm font-semibold rounded-lg disabled:opacity-50">
+            {saving ? 'Sending...' : 'Send Quote to Customer'}
           </button>
         )}
         {status === 'SENT_TO_CUSTOMER' && canWrite(role) && (
@@ -3553,7 +3596,7 @@ function CommunicationPanel({ rfq, role, panelAttachments = [], defaultBody, sen
       return next
     })
   }, [panelAttachments])
-  const isQuoteStage = ['QUOTED', 'SENT_TO_CUSTOMER', 'ACCEPTED'].includes(rfq.status)
+  const isQuoteStage = ['QUOTED', 'INTERNALLY_APPROVED', 'SENT_TO_CUSTOMER', 'ACCEPTED'].includes(rfq.status)
   const hasQuotePdf = panelAttachments.some(a =>
     /^quote-/i.test(a.file_name || '') && /\.pdf$/i.test(a.file_name || ''))
 
