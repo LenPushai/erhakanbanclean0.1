@@ -3,6 +3,8 @@
 // PUSH AI Foundation — Proverbs 16:3
 // ============================================================================
 
+import { PEOPLE } from './emailRecipients'
+
 const FROM_EMAIL = 'ERHA Operations <onboarding@resend.dev>'
 
 // Resolved at module load. Browser-side fallback to current origin keeps dev
@@ -11,13 +13,7 @@ const FROM_EMAIL = 'ERHA Operations <onboarding@resend.dev>'
 // fails loudly if missing — see TODO_PRE_MONDAY.md.
 const APP_URL = (import.meta as any).env?.VITE_APP_URL || (typeof window !== 'undefined' ? window.location.origin : '')
 
-const RECIPIENTS = {
-  len: 'lenklopper03@gmail.com',
-  hendrik: 'hendrik@erha.co.za',
-  jeanic: 'pa@erha.co.za',
-}
-
-const ALL = [RECIPIENTS.len, RECIPIENTS.hendrik, RECIPIENTS.jeanic]
+const ALL = [PEOPLE.Len, PEOPLE.Hendrik, PEOPLE.Jeanic]
 
 async function sendEmail(to: string[], subject: string, html: string) {
   try {

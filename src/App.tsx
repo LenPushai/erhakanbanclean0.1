@@ -7,6 +7,7 @@ import { format } from 'date-fns'
 import { useEntity, type OperatingEntity } from './contexts/EntityContext'
 import { EntitySwitcher, getBrandName, getHeaderLogo } from './components/EntitySwitcher'
 import { SignaturePage } from './components/SignaturePage'
+import { PEOPLE } from './emailRecipients'
 
 type Board = 'rfq' | 'job' | 'workshop' | 'procurement' | 'clients' | 'settings'
 
@@ -273,11 +274,11 @@ const QUOTERS = ['Hendrik', 'Dewald', 'Estimator', 'Jaco']
 // (e.g. 'Estimator') surface to the sender as "not a known recipient"
 // rather than silently dropping.
 const INTERNAL_DIRECTORY: Record<string, string> = {
-  Hendrik: 'hendrik@erha.co.za',
-  Jeanic:  'pa@erha.co.za',
-  Dewald:  'dewald@erha.co.za',
-  Jaco:    'jaco@erha.co.za',
-  Len:     'lenklopper03@gmail.com',
+  Hendrik: PEOPLE.Hendrik,
+  Jeanic:  PEOPLE.Jeanic,
+  Dewald:  PEOPLE.Dewald,
+  Jaco:    PEOPLE.Jaco,
+  Len:     PEOPLE.Len,
 }
 const DEPARTMENTS_CG_FALLBACK = ['MELTSHOP', 'MILLS', 'SHARON', 'OREN', 'STORES', 'GENERAL', 'MRSTO']
 const ACTIONS_LIST_FALLBACK = ['Manufacture', 'Sandblast', 'Service', 'Paint', 'Repair', 'Installation', 'Cutting', 'Modification', 'Machining', 'Supply']

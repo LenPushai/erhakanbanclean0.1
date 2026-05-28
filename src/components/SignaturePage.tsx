@@ -8,6 +8,7 @@
 import { useState, useEffect, useRef } from 'react'
 import type React from 'react'
 import { supabase } from '../lib/supabase'
+import { EMAIL_TO_NAME } from '../emailRecipients'
 
 interface TokenRecord {
   rfq_id: string
@@ -25,11 +26,6 @@ interface RFQRecord {
   operating_entity: string | null
   contact_person: string | null
   clients?: { company_name: string } | null
-}
-
-const NAME_FROM_EMAIL: Record<string, string> = {
-  'hendrik@erha.co.za': 'Hendrik',
-  'pa@erha.co.za': 'Jeanic',
 }
 
 export function SignaturePage() {
@@ -76,7 +72,7 @@ export function SignaturePage() {
         // Hendrik doesn't have to retype his name. Stage 2 (customer) leaves
         // the field blank — the customer types their own name from scratch.
         if (tk.signature_stage === 'manager') {
-          setSignerName(NAME_FROM_EMAIL[tk.client_email] || tk.client_name || '')
+          setSignerName(EMAIL_TO_NAME[tk.client_email] || tk.client_name || '')
         } else {
           setSignerName('')
         }
