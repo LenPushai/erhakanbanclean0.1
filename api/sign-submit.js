@@ -224,13 +224,26 @@ export default async function handler(req, res) {
       // manual action gated behind Jeanic ("Send Quote to Customer" button on the
       // RFQ detail panel, which POSTs api/quote-send-to-customer.js and flips
       // INTERNALLY_APPROVED -> SENT_TO_CUSTOMER).
-      // The .eq('status', 'QUOTED') guard prevents a double-transition if this
-      // endpoint is hit twice (e.g. signer reloads + resubmits, or the
-      // 'client' stage cascades back to this handler for any reason).
-      const { error: stErr } = await supabase
-        .from('rfqs').update({ status: 'INTERNALLY_APPROVED' })
-        .eq('id', rfq.id).eq('status', 'QUOTED');
-      if (stErr) console.error('US-P3-012: failed to advance to INTERNALLY_APPROVED', stErr.message);
+      //
+      // Hardened 2026-05-29: rows-checked + return-on-error. The previous
+      // implementation logged stErr and returned 200 success anyway, so a
+      // CHECK-constraint rejection (INTERNALLY_APPROVED not yet allowed
+      // because the migration hadn't been applied) or a .eq guard miss
+      // (RFQ already past QUOTED) would still render the success card on
+      // /sign. .select() forces RETURNING so we can inspect rows-affected;
+      // the activity_log inserts and the 200 response only fire AFTER both
+      // the error and zero-rows guards pass.
+      const { data: updated, error: stErr } = await supabase
+        .from('rfqs')
+        .update({ status: 'INTERNALLY_APPROVED' })
+        .eq('id', rfq.id).eq('status', 'QUOTED')
+        .select();
+      if (stErr) {
+        return res.status(500).json({ success: false, error: stErr.message });
+      }
+      if (!updated?.length) {
+        return res.status(409).json({ success: false, error: 'RFQ was not in QUOTED state; status not advanced.' });
+      }
 
       await supabase.from('activity_log').insert({
         action_type: 'quote_signed_stage_1',
@@ -271,9 +284,23 @@ export default async function handler(req, res) {
       // "customer signed" notification, log activity, respond. No further token
       // — Stage 2 is terminal. emailOrderWon stays bound to handleSaveOrder
       // (PO + job creation), which is a separate downstream event.
-      const { error: stErr } = await supabase
-        .from('rfqs').update({ status: 'ACCEPTED' }).eq('id', rfq.id);
-      if (stErr) console.error('rfq status flip failed:', stErr.message);
+      //
+      // Hardened 2026-05-29 (twin of the manager-branch fix above): rows-
+      // checked + return-on-error + status guard. Adds .eq('status',
+      // 'SENT_TO_CUSTOMER') which the manager branch had implicitly but
+      // this branch did not — without it, any RFQ in any state would be
+      // flipped to ACCEPTED on a Stage 2 submit.
+      const { data: updated, error: stErr } = await supabase
+        .from('rfqs')
+        .update({ status: 'ACCEPTED' })
+        .eq('id', rfq.id).eq('status', 'SENT_TO_CUSTOMER')
+        .select();
+      if (stErr) {
+        return res.status(500).json({ success: false, error: stErr.message });
+      }
+      if (!updated?.length) {
+        return res.status(409).json({ success: false, error: 'RFQ was not in SENT_TO_CUSTOMER state; status not advanced.' });
+      }
 
       let internalEmailDispatched = false;
       let internalEmailError = null;
