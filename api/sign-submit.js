@@ -7,12 +7,15 @@
 // Lifecycle Integration Addendum).
 
 import { createClient } from '@supabase/supabase-js';
+import { sendMail } from './_lib/graphMailer.js';
 
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
+// APP_URL was used only by the deleted sendCustomerSignEmail orphan (Stage-2
+// customer cascade was removed 2026-05-18 with commit 8260780). Kept here
+// in case any future server-side handler needs to build a /sign link; safe
+// to remove in a follow-up if nothing else picks it up.
 const APP_URL = process.env.APP_URL || process.env.VITE_APP_URL;
-const RESEND_API_KEY = process.env.RESEND_API_KEY || process.env.VITE_RESEND_API_KEY;
-const FROM_EMAIL = 'ERHA Operations <onboarding@resend.dev>';
 
 const BRAND_FROM_ENTITY = {
   ERHA_FC: 'ERHA Fabrication & Construction',
@@ -60,50 +63,6 @@ async function findPastelQuotePdf(supabase, rfqId, quoteNumber) {
   return { filename: match.file_name, url: urlData.publicUrl };
 }
 
-async function sendCustomerSignEmail({ rfq, token, pastelPdf }) {
-  if (!APP_URL) throw new Error('VITE_APP_URL not configured server-side; cannot build sign link.');
-  const link = `${APP_URL}/sign/${token}`;
-  const enq = rfq.rfq_no || rfq.enq_number || 'RFQ';
-  const valueLine = rfq.quote_value_excl_vat
-    ? 'R ' + Number(rfq.quote_value_excl_vat).toLocaleString('en-ZA') + ' excl VAT'
-    : '-';
-  const subject = `Quote Ready for Your Signature - ${enq} (${rfq.quote_number || 'Quote'})`;
-  const html = `<div style="max-width:600px;margin:0 auto;font-family:Arial,sans-serif">
-    <div style="background:linear-gradient(135deg,#1e3a5f,#2d5a8e);color:white;padding:20px;border-radius:8px 8px 0 0">
-      <h2 style="margin:0">Quote Ready for Signature</h2>
-    </div>
-    <div style="padding:20px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px">
-      <p>Your quotation has been prepared and signed off internally. Please review and sign to accept.</p>
-      <table style="width:100%;border-collapse:collapse;background:#f9fafb;border-radius:6px;margin-top:12px">
-        <tr><td style="padding:4px 8px;font-weight:bold;color:#6b7280;width:140px">RFQ</td><td style="padding:4px 8px">${enq}</td></tr>
-        <tr><td style="padding:4px 8px;font-weight:bold;color:#6b7280">Quote</td><td style="padding:4px 8px">${rfq.quote_number || '-'}</td></tr>
-        <tr><td style="padding:4px 8px;font-weight:bold;color:#6b7280">Description</td><td style="padding:4px 8px">${rfq.description || '-'}</td></tr>
-        <tr><td style="padding:4px 8px;font-weight:bold;color:#6b7280">Quote value</td><td style="padding:4px 8px">${valueLine}</td></tr>
-      </table>
-      <div style="margin-top:24px;text-align:center">
-        <a href="${link}" style="display:inline-block;background:#1d4ed8;color:white;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:bold">Review &amp; Sign Quote</a>
-      </div>
-      <p style="margin-top:20px;font-size:11px;color:#6b7280">Single-use link, expires in 7 days.</p>
-    </div>
-  </div>`;
-  // TEMP override mirrored from api/send-email.js — REMOVE with US-014b before Monday.
-  const to = ['lenklopper03@gmail.com'];
-  const resendBody = { from: FROM_EMAIL, to, subject, html, reply_to: 'pa@erha.co.za' };
-  if (pastelPdf) {
-    resendBody.attachments = [{ filename: pastelPdf.filename, path: pastelPdf.url }];
-  }
-  const response = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(resendBody),
-  });
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({}));
-    throw new Error('Resend error: ' + (err.message || response.status));
-  }
-  return await response.json();
-}
-
 async function sendCustomerSignedNotification({ rfq, signerName }) {
   const enq = rfq.rfq_no || rfq.enq_number || 'RFQ';
   const valueLine = rfq.quote_value_excl_vat
@@ -127,18 +86,21 @@ async function sendCustomerSignedNotification({ rfq, signerName }) {
       <p style="margin-top:16px;color:#6b7280;font-size:13px"><strong>Next step:</strong> capture the customer PO in the RFQ detail panel and click "Save Order - Move to Order Won" to create the job.</p>
     </div>
   </div>`;
-  // TEMP override mirrored from api/send-email.js — REMOVE with US-014b before Monday.
-  const to = ['lenklopper03@gmail.com'];
-  const response = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ from: FROM_EMAIL, to, subject, html, reply_to: 'pa@erha.co.za' }),
+  // Real recipients: internal team (Hendrik + Jeanic). Recipient override
+  // moved to api/_lib/graphMailer.js (EMAIL_OVERRIDE_TO env). During cutover
+  // these addresses are recorded in the structured log but redirected to
+  // the override target; clearing EMAIL_OVERRIDE_TO in Vercel env turns
+  // this into the live notification.
+  const result = await sendMail({
+    to: ['hendrik@erha.co.za', 'pa@erha.co.za'],
+    subject,
+    html,
+    replyTo: 'pa@erha.co.za',
   });
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({}));
-    throw new Error('Resend error: ' + (err.message || response.status));
+  if (!result.ok) {
+    throw new Error('Graph sendMail error: ' + (result.error || result.status));
   }
-  return await response.json();
+  return result;
 }
 
 export default async function handler(req, res) {

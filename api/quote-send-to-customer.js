@@ -19,17 +19,10 @@
 // The legacy two-stage flow was removed 2026-05-18 (commit 8260780).
 
 import { createClient } from '@supabase/supabase-js';
+import { sendMail } from './_lib/graphMailer.js';
 
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
-const RESEND_API_KEY = process.env.RESEND_API_KEY || process.env.VITE_RESEND_API_KEY;
-const FROM_EMAIL = 'ERHA Operations <onboarding@resend.dev>';
-
-// TODO(US-014b): remove this TO_OVERRIDE once erha.co.za DNS verification
-// clears. Replace with `const to = customerEmails;` below. Mirrors the
-// same override in api/send-email.js, api/sign-submit.js, and
-// api/cron/notify-completed-rfqs.js — flip all four together.
-const TO_OVERRIDE = ['lenklopper03@gmail.com'];
 
 /**
  * Pastel PDF lookup by filename convention (Quote-<quote_number>.pdf,
@@ -87,23 +80,6 @@ function buildCustomerEmail({ rfq, pastelPdf }) {
   return { subject, html };
 }
 
-async function sendViaResend({ subject, html, to, pastelPdf }) {
-  const resendBody = { from: FROM_EMAIL, to, subject, html, reply_to: 'pa@erha.co.za' };
-  if (pastelPdf) {
-    resendBody.attachments = [{ filename: pastelPdf.filename, path: pastelPdf.url }];
-  }
-  const response = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify(resendBody),
-  });
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({}));
-    throw new Error('Resend error: ' + (err.message || response.status));
-  }
-  return await response.json();
-}
-
 export default async function handler(req, res) {
   res.setHeader('Access-Control-Allow-Origin', '*');
   res.setHeader('Access-Control-Allow-Methods', 'POST, OPTIONS');
@@ -112,9 +88,6 @@ export default async function handler(req, res) {
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
     return res.status(500).json({ error: 'Supabase env not configured server-side.' });
-  }
-  if (!RESEND_API_KEY) {
-    return res.status(500).json({ error: 'RESEND_API_KEY not configured server-side.' });
   }
 
   const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
@@ -165,14 +138,23 @@ export default async function handler(req, res) {
     // 4. Look up the Pastel quote PDF (best-effort attachment)
     const pastelPdf = await findPastelQuotePdf(supabase, rfq.id, rfq.quote_number);
 
-    // 5. Send the customer email
+    // 5. Send the customer email. Recipient override moved to
+    //    api/_lib/graphMailer.js (EMAIL_OVERRIDE_TO env) — during cutover
+    //    customerEmails is recorded in the mailer's structured log but
+    //    redirected to the override target. Clearing EMAIL_OVERRIDE_TO in
+    //    Vercel env turns this into the live customer send.
     const { subject, html } = buildCustomerEmail({ rfq, pastelPdf });
-    // TODO(US-014b): swap TO_OVERRIDE for customerEmails once DNS verification clears.
-    const to = TO_OVERRIDE;
     let emailDispatched = false;
     let emailError = null;
     try {
-      await sendViaResend({ subject, html, to, pastelPdf });
+      const result = await sendMail({
+        to: customerEmails,
+        subject,
+        html,
+        attachments: pastelPdf ? [{ filename: pastelPdf.filename, path: pastelPdf.url }] : undefined,
+        replyTo: 'pa@erha.co.za',
+      });
+      if (!result.ok) throw new Error('Graph sendMail error: ' + (result.error || result.status));
       emailDispatched = true;
     } catch (e) {
       emailError = e.message;

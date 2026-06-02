@@ -15,20 +15,17 @@
 // if the template wording changes.
 
 import { createClient } from '@supabase/supabase-js';
+import { sendMail } from '../_lib/graphMailer.js';
 
 const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
-const RESEND_API_KEY = process.env.RESEND_API_KEY || process.env.VITE_RESEND_API_KEY;
 const CRON_SECRET = process.env.CRON_SECRET;
-const FROM_EMAIL = 'ERHA Operations <onboarding@resend.dev>';
 
-// TODO(US-014b): remove this TO_OVERRIDE once erha.co.za DNS verification
-// clears. Replace with the real recipient set: Hendrik + Jeanic. The same
-// override exists in api/send-email.js and api/sign-submit.js — flip all
-// three together. Per US-P3-012 spec, the live recipients should be:
-//   ['hendrik@erha.co.za', 'pa@erha.co.za']
-// (server-side, so src/emailRecipients.ts PEOPLE cannot be imported here.)
-const TO_OVERRIDE = ['lenklopper03@gmail.com'];
+// Real completion-notification recipients per US-P3-012. The cutover-time
+// override (EMAIL_OVERRIDE_TO env) lives in api/_lib/graphMailer.js — these
+// addresses are recorded in the mailer's structured log but redirected to
+// the override target until EMAIL_OVERRIDE_TO is cleared in Vercel env.
+const COMPLETION_RECIPIENTS = ['hendrik@erha.co.za', 'pa@erha.co.za'];
 
 const BATCH_LIMIT = 20;
 
@@ -57,19 +54,6 @@ function buildCompletedEmail(rfq) {
   return { subject, html };
 }
 
-async function sendViaResend({ subject, html, to }) {
-  const response = await fetch('https://api.resend.com/emails', {
-    method: 'POST',
-    headers: { Authorization: `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
-    body: JSON.stringify({ from: FROM_EMAIL, to, subject, html, reply_to: 'pa@erha.co.za' }),
-  });
-  if (!response.ok) {
-    const err = await response.json().catch(() => ({}));
-    throw new Error('Resend error: ' + (err.message || response.status));
-  }
-  return await response.json();
-}
-
 export default async function handler(req, res) {
   if (!CRON_SECRET) {
     return res.status(500).json({ error: 'CRON_SECRET not configured server-side' });
@@ -77,7 +61,7 @@ export default async function handler(req, res) {
   if ((req.headers.authorization || '') !== `Bearer ${CRON_SECRET}`) {
     return res.status(401).json({ error: 'Unauthorized' });
   }
-  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY || !RESEND_API_KEY) {
+  if (!SUPABASE_URL || !SUPABASE_SERVICE_ROLE_KEY) {
     return res.status(500).json({ error: 'Required env vars not configured server-side' });
   }
 
@@ -104,7 +88,15 @@ export default async function handler(req, res) {
     for (const rfq of rfqs) {
       try {
         const { subject, html } = buildCompletedEmail(rfq);
-        await sendViaResend({ subject, html, to: TO_OVERRIDE });
+        const sendResult = await sendMail({
+          to: COMPLETION_RECIPIENTS,
+          subject,
+          html,
+          replyTo: 'pa@erha.co.za',
+        });
+        if (!sendResult.ok) {
+          throw new Error('Graph sendMail error: ' + (sendResult.error || sendResult.status));
+        }
 
         const { data: stamped, error: stampErr } = await supabase
           .from('rfqs')

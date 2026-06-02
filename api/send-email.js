@@ -1,6 +1,9 @@
-const RESEND_API_KEY = process.env.RESEND_API_KEY || process.env.VITE_RESEND_API_KEY;
-const FROM_EMAIL = 'ERHA Operations <onboarding@resend.dev>';
+import { sendMail } from './_lib/graphMailer.js';
 
+// Template dict kept for callers that POST {template, data}. None of the
+// current frontend or server-side callers use it (they all send raw
+// {subject, html}); left in place for a later cleanup so this rewire
+// stays purely an integration change.
 const templates = {
   rfq_received: (d) => ({
     subject: `New RFQ Received - ${d.rfq_number || 'ENQ'}`,
@@ -39,13 +42,11 @@ export default async function handler(req, res) {
   if (req.method === 'OPTIONS') return res.status(200).end();
   if (req.method !== 'POST') return res.status(405).json({ error: 'Method not allowed' });
   try {
-    const { to: originalTo, template, data, subject: rawSubject, html: rawHtml, reply_to: rawReplyTo, attachments: rawAttachments } = req.body;
-    // TEMP override for build/test only — REMOVE before Monday user go-live; tracked as US-014b.
-    // All outbound mail is forced to Len's inbox while erha.co.za DNS verification is pending,
-    // so e-sign Stage 1/Stage 2 smoke tests land in one place without paging Hendrik or customers.
-    // The mirror of this override lives in api/sign-submit.js (sendCustomerSignEmail) — both
-    // must be removed together when DNS verification clears.
-    const to = ["lenklopper03@gmail.com"];
+    const { to, template, data, subject: rawSubject, html: rawHtml, reply_to: rawReplyTo, attachments: rawAttachments } = req.body || {};
+    // Recipient override moved into api/_lib/graphMailer.js (EMAIL_OVERRIDE_TO
+    // env, with lenklopper03@gmail.com safety fallback). The caller's real
+    // `to` is passed through here unchanged — the mailer is the single point
+    // of truth for cutover-time redirection.
     if (!to) return res.status(400).json({ error: 'Missing to' });
     let subject, html;
     if (rawSubject && rawHtml) {
@@ -57,20 +58,17 @@ export default async function handler(req, res) {
       if (!templateFn) return res.status(400).json({ error: 'Unknown template: ' + template });
       ({ subject, html } = templateFn(data || {}));
     }
-    const resendBody = { from: FROM_EMAIL, to: Array.isArray(to) ? to : [to], subject, html, reply_to: rawReplyTo || 'pa@erha.co.za' };
-    if (Array.isArray(rawAttachments) && rawAttachments.length > 0) {
-      resendBody.attachments = rawAttachments;
-    }
-    const response = await fetch('https://api.resend.com/emails', {
-      method: 'POST',
-      headers: { 'Authorization': `Bearer ${RESEND_API_KEY}`, 'Content-Type': 'application/json' },
-      body: JSON.stringify(resendBody),
+    const result = await sendMail({
+      to: Array.isArray(to) ? to : [to],
+      subject,
+      html,
+      attachments: Array.isArray(rawAttachments) && rawAttachments.length > 0 ? rawAttachments : undefined,
+      replyTo: rawReplyTo || 'pa@erha.co.za',
     });
-    const result = await response.json();
-    if (response.ok) {
-      res.status(200).json({ success: true, id: result.id });
+    if (result.ok) {
+      res.status(200).json({ success: true });
     } else {
-      res.status(500).json({ success: false, error: result.message });
+      res.status(500).json({ success: false, error: result.error });
     }
   } catch (err) {
     res.status(500).json({ success: false, error: err.message });
