@@ -138,8 +138,10 @@ export function SignaturePage() {
       // US-P3-012: Stage 1 success advances the RFQ to INTERNALLY_APPROVED.
       // Notify Jeanic so she can send the quote to the customer. Email
       // failure is non-fatal — the status flip is the source of truth.
+      // E4 — pass the trimmed signer name as approverName so the email
+      // body can name the actual approver instead of hardcoded "Hendrik".
       if (tokenRecord?.signature_stage === 'manager' && rfq) {
-        try { await emailReadyToSend(rfq) }
+        try { await emailReadyToSend(rfq, signerName.trim()) }
         catch (err) { console.error('emailReadyToSend failed:', err) }
       }
 

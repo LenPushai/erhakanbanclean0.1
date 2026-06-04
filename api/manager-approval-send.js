@@ -20,30 +20,30 @@ const footer = `<div style="${footerStyle}">ERHA · PUSH AI © 2026</div>`;
 const infoRow = (label, value) => `<tr><td style="padding:4px 8px;font-weight:bold;color:#6b7280;width:140px">${label}</td><td style="padding:4px 8px;color:#1f2937">${value || '—'}</td></tr>`;
 
 /**
- * Phase 1 — Pastel PDF lookup by filename convention.
- * Convention: file_name in rfq_attachments starts with 'Quote-<quote_number>'
- * (case-insensitive) and ends with '.pdf'. Returns the first match (or null
- * if none found). If multiple files match, the choice is undefined — the
- * operational expectation is one Pastel PDF per quote.
- *
- * If the convention changes, update BOTH api/manager-approval-send.js AND
- * api/sign-submit.js (sendCustomerSignEmail) — this helper is duplicated
- * across both routes to keep each handler self-contained.
+ * Pastel PDF lookup. E5 (Batch 2) — loosened from strict
+ * startsWith('quote-<num>') to "any PDF whose filename CONTAINS the
+ * quote_number (case-insensitive)"; most-recently-uploaded wins via
+ * order('created_at', DESC). Mirrors the same change in
+ * api/quote-send-to-customer.js so the manager-approval email and the
+ * customer-send email pick the same PDF for a given RFQ + quote_number.
+ * The orphan helper in api/sign-submit.js intentionally kept strict
+ * (dead code path).
  */
 async function findPastelQuotePdf(supabase, rfqId, quoteNumber) {
   if (!quoteNumber) return null;
   const { data: rows, error } = await supabase
     .from('rfq_attachments')
-    .select('file_name, file_path')
+    .select('file_name, file_path, created_at')
     .eq('rfq_id', rfqId)
-    .ilike('file_name', '%.pdf');
+    .ilike('file_name', '%.pdf')
+    .order('created_at', { ascending: false });
   if (error) {
     console.warn('[pastel-pdf] rfq_attachments lookup failed:', error.message);
     return null;
   }
   if (!rows || rows.length === 0) return null;
-  const expectedPrefix = `quote-${String(quoteNumber).toLowerCase()}`;
-  const match = rows.find(r => String(r.file_name || '').toLowerCase().startsWith(expectedPrefix));
+  const needle = String(quoteNumber).toLowerCase();
+  const match = rows.find(r => String(r.file_name || '').toLowerCase().includes(needle));
   if (!match) return null;
   const { data: urlData } = supabase.storage.from('rfq-attachments').getPublicUrl(match.file_path);
   if (!urlData?.publicUrl) {
@@ -91,11 +91,13 @@ export default async function handler(req, res) {
     if (insertErr) return res.status(500).json({ error: 'Token insert failed: ' + insertErr.message });
 
     const link = `${APP_URL}/sign/${token}`;
-    const enq = rfq.rfq_no || rfq.enq_number || 'RFQ';
+    const sysNo = rfq.rfq_no || rfq.enq_number || 'RFQ';
+    // E6 — surface both numbers when the customer has their own reference.
+    const enq = rfq.client_rfq_number ? `${sysNo} (your ref: ${rfq.client_rfq_number})` : sysNo;
     const valueLine = rfq.quote_value_excl_vat
       ? 'R ' + Number(rfq.quote_value_excl_vat).toLocaleString('en-ZA') + ' excl VAT'
       : '-';
-    const subject = `Quote Awaiting Your Sign-off - ${enq} (${rfq.quote_number || 'Quote'})`;
+    const subject = `Quote Awaiting Your Sign-off - ${sysNo} (${rfq.quote_number || 'Quote'})`;
     const html = `<div style="max-width:600px;margin:0 auto">
       <div style="${headerStyle}"><h2 style="margin:0">Internal Quote Sign-off</h2></div>
       <div style="${bodyStyle}">

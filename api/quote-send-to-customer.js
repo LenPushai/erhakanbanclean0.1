@@ -25,24 +25,27 @@ const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 
 /**
- * Pastel PDF lookup by filename convention (Quote-<quote_number>.pdf,
- * case-insensitive). Mirrors api/sign-submit.js:findPastelQuotePdf —
- * if the convention changes, update BOTH handlers together.
+ * Pastel PDF lookup. E5 — loosened from startsWith('quote-<num>') to
+ * "any PDF whose filename CONTAINS the quote_number (case-insensitive)";
+ * most-recently-uploaded wins on tie via order('created_at', DESC).
+ * Real-world filenames vary (Pastel-Quote-NE1000.pdf, NE1000_quotation.pdf,
+ * etc.) and the strict prefix match was silently dropping them.
  */
 async function findPastelQuotePdf(supabase, rfqId, quoteNumber) {
   if (!quoteNumber) return null;
   const { data: rows, error } = await supabase
     .from('rfq_attachments')
-    .select('file_name, file_path')
+    .select('file_name, file_path, created_at')
     .eq('rfq_id', rfqId)
-    .ilike('file_name', '%.pdf');
+    .ilike('file_name', '%.pdf')
+    .order('created_at', { ascending: false });
   if (error) {
     console.warn('[pastel-pdf] rfq_attachments lookup failed:', error.message);
     return null;
   }
   if (!rows || rows.length === 0) return null;
-  const expectedPrefix = `quote-${String(quoteNumber).toLowerCase()}`;
-  const match = rows.find(r => String(r.file_name || '').toLowerCase().startsWith(expectedPrefix));
+  const needle = String(quoteNumber).toLowerCase();
+  const match = rows.find(r => String(r.file_name || '').toLowerCase().includes(needle));
   if (!match) return null;
   const { data: urlData } = supabase.storage.from('rfq-attachments').getPublicUrl(match.file_path);
   if (!urlData?.publicUrl) {
@@ -53,11 +56,13 @@ async function findPastelQuotePdf(supabase, rfqId, quoteNumber) {
 }
 
 function buildCustomerEmail({ rfq, pastelPdf }) {
-  const enq = rfq.rfq_no || rfq.enq_number || 'RFQ';
+  const sysNo = rfq.rfq_no || rfq.enq_number || 'RFQ';
+  // E6 — surface both numbers when the customer has their own reference.
+  const enq = rfq.client_rfq_number ? `${sysNo} (your ref: ${rfq.client_rfq_number})` : sysNo;
   const valueLine = rfq.quote_value_excl_vat
     ? 'R ' + Number(rfq.quote_value_excl_vat).toLocaleString('en-ZA') + ' excl VAT'
     : '—';
-  const subject = `Your Quote - ${enq}${rfq.quote_number ? ` (${rfq.quote_number})` : ''}`;
+  const subject = `Your Quote - ${sysNo}${rfq.quote_number ? ` (${rfq.quote_number})` : ''}`;
   const attachmentLine = pastelPdf
     ? `<p style="margin-top:16px">Your quote is attached as a PDF.</p>`
     : `<p style="margin-top:16px;color:#b45309"><strong>Note:</strong> the quote PDF could not be attached automatically — it will follow in a separate email shortly.</p>`;
@@ -96,10 +101,11 @@ export default async function handler(req, res) {
     const { rfq_id, to: overrideTo } = req.body || {};
     if (!rfq_id) return res.status(400).json({ error: 'rfq_id required' });
 
-    // 1. Load RFQ with client join for the email body
+    // 1. Load RFQ with client join for the email body. E6 — include
+    //    client_rfq_number so the customer-facing body can show their own ref.
     const { data: rfq, error: rfqErr } = await supabase
       .from('rfqs')
-      .select('id, rfq_no, enq_number, quote_number, description, quote_value_excl_vat, contact_person, contact_email, operating_entity, status, clients(company_name)')
+      .select('id, rfq_no, enq_number, client_rfq_number, quote_number, description, quote_value_excl_vat, contact_person, contact_email, operating_entity, status, clients(company_name)')
       .eq('id', rfq_id)
       .maybeSingle();
     if (rfqErr) return res.status(500).json({ error: 'RFQ lookup failed: ' + rfqErr.message });

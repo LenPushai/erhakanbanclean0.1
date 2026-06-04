@@ -31,7 +31,9 @@ const BATCH_LIMIT = 20;
 
 function buildCompletedEmail(rfq) {
   const clientName = rfq.clients?.company_name || rfq.client_name || '—';
-  const enq = rfq.rfq_no || rfq.enq_number || 'RFQ';
+  const sysNo = rfq.rfq_no || rfq.enq_number || 'RFQ';
+  // E6 — surface both numbers when the customer has their own reference.
+  const enq = rfq.client_rfq_number ? `${sysNo} (your ref: ${rfq.client_rfq_number})` : sysNo;
   const invoiceLine = rfq.invoice_value
     ? 'R ' + Number(rfq.invoice_value).toLocaleString('en-ZA')
     : '—';
@@ -43,7 +45,7 @@ function buildCompletedEmail(rfq) {
     <div style="padding:20px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px">
       <p style="margin-bottom:16px">Job for <strong>${clientName}</strong> has been fully invoiced. The RFQ is now closed out on the board.</p>
       <table style="width:100%;border-collapse:collapse;background:#f9fafb;border-radius:6px">
-        <tr><td style="padding:4px 8px;font-weight:bold;color:#6b7280;width:140px">RFQ Number</td><td style="padding:4px 8px">${rfq.rfq_no || '—'}</td></tr>
+        <tr><td style="padding:4px 8px;font-weight:bold;color:#6b7280;width:140px">RFQ Number</td><td style="padding:4px 8px">${enq}</td></tr>
         <tr><td style="padding:4px 8px;font-weight:bold;color:#6b7280">Client</td><td style="padding:4px 8px">${clientName}</td></tr>
         <tr><td style="padding:4px 8px;font-weight:bold;color:#6b7280">Description</td><td style="padding:4px 8px">${rfq.description || '—'}</td></tr>
         <tr><td style="padding:4px 8px;font-weight:bold;color:#6b7280">Invoice Number</td><td style="padding:4px 8px">${rfq.invoice_number || '—'}</td></tr>
@@ -70,7 +72,7 @@ export default async function handler(req, res) {
   try {
     const { data: rfqs, error: queryErr } = await supabase
       .from('rfqs')
-      .select('id, rfq_no, enq_number, description, invoice_number, invoice_value, operating_entity, client_name, clients(company_name)')
+      .select('id, rfq_no, enq_number, client_rfq_number, description, invoice_number, invoice_value, operating_entity, client_name, clients(company_name)')
       .eq('status', 'COMPLETED')
       .is('completion_email_sent_at', null)
       .limit(BATCH_LIMIT);

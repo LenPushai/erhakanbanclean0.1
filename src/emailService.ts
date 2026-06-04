@@ -4,6 +4,7 @@
 // ============================================================================
 
 import { PEOPLE } from './emailRecipients'
+import { supabase } from './lib/supabase'
 
 const FROM_EMAIL = 'ERHA Operations <onboarding@resend.dev>'
 
@@ -15,14 +16,43 @@ const APP_URL = (import.meta as any).env?.VITE_APP_URL || (typeof window !== 'un
 
 const ALL = [PEOPLE.Len, PEOPLE.Hendrik, PEOPLE.Jeanic]
 
-async function sendEmail(to: string[], subject: string, html: string) {
+// E6 — surface both the system number and the customer's own reference
+// where one exists. Templates that currently show `rfq.rfq_no` are migrated
+// to this helper.
+const formatRfqNumber = (rfq: any) => {
+  const sysNo = rfq?.rfq_no || rfq?.enq_number || 'RFQ'
+  return rfq?.client_rfq_number ? `${sysNo} (your ref: ${rfq.client_rfq_number})` : sysNo
+}
+
+// E3 — locate a quote PDF among the rfq's attachments. Loosened match: any
+// PDF whose filename contains the quote_number (case-insensitive),
+// most-recently-uploaded wins. Mirrors the loosening in
+// api/quote-send-to-customer.js so the two callers see the same result.
+async function findQuotePdfAttachment(rfqId: string, quoteNumber: string | null | undefined) {
+  if (!quoteNumber) return null
+  const { data: rows, error } = await supabase
+    .from('rfq_attachments')
+    .select('file_name, file_path, created_at')
+    .eq('rfq_id', rfqId)
+    .ilike('file_name', '%.pdf')
+    .order('created_at', { ascending: false })
+  if (error || !rows || rows.length === 0) return null
+  const needle = String(quoteNumber).toLowerCase()
+  const match = rows.find((r: any) => String(r.file_name || '').toLowerCase().includes(needle))
+  if (!match) return null
+  const { data: urlData } = supabase.storage.from('rfq-attachments').getPublicUrl(match.file_path)
+  if (!urlData?.publicUrl) return null
+  return { filename: match.file_name as string, path: urlData.publicUrl as string }
+}
+
+async function sendEmail(to: string[], subject: string, html: string, attachments?: Array<{ filename: string; path: string }>) {
   try {
     const res = await fetch('/api/send-email', {
       method: 'POST',
       headers: {
         'Content-Type': 'application/json',
       },
-      body: JSON.stringify({ to, subject, html }),
+      body: JSON.stringify({ to, subject, html, ...(attachments && attachments.length > 0 ? { attachments } : {}) }),
     })
     const data = await res.json()
     if (!res.ok) console.error('Email error:', data)
@@ -59,13 +89,13 @@ export async function emailRFQCreated(rfq: any) {
 }
 
 export async function emailQuoterAssigned(rfq: any, quoterName: string) {
-  const subject = `📐 RFQ Assigned to You — ${rfq.rfq_no}`
+  const subject = `📐 RFQ Assigned to You — ${formatRfqNumber(rfq)}`
   const html = `<div style="max-width:600px;margin:0 auto">
     <div style="${headerStyle}"><h2 style="margin:0">📐 RFQ Assigned to You</h2></div>
     <div style="${bodyStyle}">
       <p style="margin-bottom:16px">Hi <strong>${quoterName}</strong>, the following RFQ has been assigned to you.</p>
       <table style="width:100%;border-collapse:collapse;background:#f9fafb;border-radius:6px">
-        ${infoRow('RFQ Number', rfq.rfq_no)}
+        ${infoRow('RFQ Number', formatRfqNumber(rfq))}
         ${infoRow('Description', rfq.description)}
         ${infoRow('Client', rfq.client_name || rfq.clients?.company_name)}
         ${infoRow('Priority', rfq.priority)}
@@ -78,13 +108,13 @@ export async function emailQuoterAssigned(rfq: any, quoterName: string) {
 }
 
 export async function emailQuoteReady(rfq: any) {
-  const subject = `✅ Quote Ready for Approval — ${rfq.rfq_no}`
+  const subject = `✅ Quote Ready for Approval — ${formatRfqNumber(rfq)}`
   const html = `<div style="max-width:600px;margin:0 auto">
     <div style="${headerStyle}"><h2 style="margin:0">✅ Quote Ready for Approval</h2></div>
     <div style="${bodyStyle}">
       <p style="margin-bottom:16px">A quotation is ready and requires manager approval.</p>
       <table style="width:100%;border-collapse:collapse;background:#f9fafb;border-radius:6px">
-        ${infoRow('RFQ Number', rfq.rfq_no)}
+        ${infoRow('RFQ Number', formatRfqNumber(rfq))}
         ${infoRow('Description', rfq.description)}
         ${infoRow('Client', rfq.client_name || rfq.clients?.company_name)}
         ${infoRow('Quote Number', rfq.quote_number)}
@@ -93,17 +123,20 @@ export async function emailQuoteReady(rfq: any) {
       ${footer}
     </div>
   </div>`
-  await sendEmail(ALL, subject, html)
+  // E3 — attach the quote PDF if one is uploaded against this RFQ. Best-
+  // effort: a miss means no attachment, never a hard failure.
+  const pdf = await findQuotePdfAttachment(rfq.id, rfq.quote_number)
+  await sendEmail(ALL, subject, html, pdf ? [pdf] : undefined)
 }
 
 export async function emailOrderWon(rfq: any, jobNumber: string) {
-  const subject = `🏆 Order Won — ${rfq.rfq_no} — Job ${jobNumber} Created`
+  const subject = `🏆 Order Won — ${formatRfqNumber(rfq)} — Job ${jobNumber} Created`
   const html = `<div style="max-width:600px;margin:0 auto">
     <div style="${headerStyle}"><h2 style="margin:0">🏆 Order Won!</h2></div>
     <div style="${bodyStyle}">
       <p style="margin-bottom:16px">An order has been confirmed and a job has been created on the Job Board.</p>
       <table style="width:100%;border-collapse:collapse;background:#f9fafb;border-radius:6px">
-        ${infoRow('RFQ Number', rfq.rfq_no)}
+        ${infoRow('RFQ Number', formatRfqNumber(rfq))}
         ${infoRow('Job Number', jobNumber)}
         ${infoRow('Client', rfq.client_name || rfq.clients?.company_name)}
         ${infoRow('Description', rfq.description)}
@@ -272,18 +305,23 @@ export async function emailJobDispatched(job: any) {
   await sendEmail(ALL, subject, html)
 }
 
-// US-P3-012: Hendrik has internally signed off the quote. Status is now
+// US-P3-012: Quote has been internally signed off. Status is now
 // INTERNALLY_APPROVED — Jeanic is the gate-keeper for the customer send.
-export async function emailReadyToSend(rfq: any) {
+// E4 — body identifies the quoter and the actual approver by name (was
+// hardcoded "Hendrik" regardless of who quoted or who signed).
+export async function emailReadyToSend(rfq: any, approverName?: string) {
   const clientName = rfq.client_name || rfq.clients?.company_name || '—'
-  const subject = `Quote ready to send to ${clientName} — ${rfq.rfq_no || rfq.enq_number || 'RFQ'}`
+  const quoterName = rfq.assigned_quoter_name || 'the quoter'
+  const approver = approverName || 'a manager'
+  const rfqNumberPlain = rfq.rfq_no || rfq.enq_number || 'this RFQ'
+  const subject = `Quote ready to send to ${clientName} — ${formatRfqNumber(rfq)}`
   const html = `<div style="max-width:600px;margin:0 auto">
     <div style="${headerStyle}"><h2 style="margin:0">Quote Ready to Send</h2></div>
     <div style="${bodyStyle}">
-      <p style="margin-bottom:16px">Hendrik has signed off the quote for <strong>${clientName}</strong>.
-      It is ready for you to send to the customer from the RFQ Board.</p>
+      <p style="margin-bottom:16px">Quote by <strong>${quoterName}</strong> approved by <strong>${approver}</strong> for RFQ <strong>${rfqNumberPlain}</strong>.
+      The quote is ready for you to send to the customer from the RFQ Board.</p>
       <table style="width:100%;border-collapse:collapse;background:#f9fafb;border-radius:6px">
-        ${infoRow('RFQ Number', rfq.rfq_no)}
+        ${infoRow('RFQ Number', formatRfqNumber(rfq))}
         ${infoRow('Client', clientName)}
         ${infoRow('Description', rfq.description)}
         ${infoRow('Quote Number', rfq.quote_number)}
@@ -305,14 +343,14 @@ export async function emailReadyToSend(rfq: any) {
 // currently wired to any caller.
 export async function emailRfqCompleted(rfq: any) {
   const clientName = rfq.client_name || rfq.clients?.company_name || '—'
-  const subject = `RFQ ${rfq.rfq_no || 'RFQ'} completed — ${clientName}`
+  const subject = `RFQ ${formatRfqNumber(rfq)} completed — ${clientName}`
   const html = `<div style="max-width:600px;margin:0 auto">
     <div style="${headerStyle}"><h2 style="margin:0">RFQ Completed</h2></div>
     <div style="${bodyStyle}">
       <p style="margin-bottom:16px">Job for <strong>${clientName}</strong> has been fully invoiced.
       The RFQ is now closed out on the board.</p>
       <table style="width:100%;border-collapse:collapse;background:#f9fafb;border-radius:6px">
-        ${infoRow('RFQ Number', rfq.rfq_no)}
+        ${infoRow('RFQ Number', formatRfqNumber(rfq))}
         ${infoRow('Client', clientName)}
         ${infoRow('Description', rfq.description)}
         ${infoRow('Invoice Number', rfq.invoice_number)}

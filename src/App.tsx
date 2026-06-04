@@ -3232,13 +3232,18 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, activeEntity, onJobCreat
               const data = await res.json()
               if (!res.ok) throw new Error(data.error || 'Send failed')
               onUpdate({ ...rfq, status: 'SENT_TO_CUSTOMER' })
-              const pdfNote = data.pastel_pdf_attached
-                ? ` (Pastel PDF "${data.pastel_pdf_filename}" attached)`
-                : ' (no Pastel PDF auto-attached — send manually via the communication panel if needed)'
-              if (data.email_dispatched) {
-                showMsg(`Quote sent to ${(data.to || []).join(', ')}${pdfNote}`)
+              const recipients = (data.to || []).join(', ')
+              if (!data.email_dispatched) {
+                // Send itself failed (Graph/Resend error). Status was already
+                // flipped — caller must re-send via the comm panel.
+                alert(`Status moved to Quote Sent BUT the email failed to dispatch:\n\n${data.email_error}\n\nRe-send manually via the communication panel.`)
+              } else if (!data.pastel_pdf_attached) {
+                // E5 — email landed, but the customer received NO quote PDF.
+                // Loud alert so the sender knows to follow up immediately.
+                alert(`⚠ Quote email sent to ${recipients} but NO PDF was attached.\n\nThe customer has received an email without the quote PDF. Upload the Pastel quote PDF to this RFQ's attachments (filename must contain the quote number) and re-send via the Communication panel.`)
+                showMsg(`Quote sent to ${recipients} — PDF NOT attached (see warning)`)
               } else {
-                showMsg(`Status moved to Quote Sent but the email failed to dispatch: ${data.email_error}. Re-send manually via the communication panel.`)
+                showMsg(`Quote sent to ${recipients} (Pastel PDF "${data.pastel_pdf_filename}" attached)`)
               }
             } catch (e: any) { alert('Error: ' + e.message) }
             finally { setSaving(false) }
@@ -3577,9 +3582,12 @@ function isValidEmail(s: string): boolean {
 // US-034 create-flow notification body — internal tone, fully substituted
 // (no {placeholders}); CommunicationPanel uses it verbatim via defaultBody.
 const createNotifyBody = (rfq: RFQ) => {
-  const enq = rfq.client_rfq_number || rfq.rfq_no || rfq.enq_number || '-'
+  const sysNo = rfq.rfq_no || rfq.enq_number || '-'
+  const ref = rfq.client_rfq_number ? ` (your ref: ${rfq.client_rfq_number})` : ''
+  const enq = `${sysNo}${ref}`
   const client = (rfq as any).clients?.company_name || rfq.contact_person || 'Client'
-  return `New RFQ ${enq} logged for ${client}.\n\nQuoter assignment pending. Please review and assign as needed.\n\nKind regards`
+  const description = rfq.description ? `\n\nDescription:\n${rfq.description}` : ''
+  return `New RFQ ${enq} logged for ${client}.${description}\n\nQuoter assignment pending. Please review and assign as needed.\n\nKind regards`
 }
 
 // COMMUNICATION PANEL — internal-by-default RFQ messaging with external
