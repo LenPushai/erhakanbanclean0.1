@@ -104,7 +104,12 @@ export async function emailQuoterAssigned(rfq: any, quoterName: string) {
       ${footer}
     </div>
   </div>`
-  await sendEmail(ALL, subject, html)
+  // UAT-03: send TO the quoter, with Jeanic retaining oversight.
+  // Every assignable QUOTERS value now has a PEOPLE entry (Estimator
+  // was dropped from the dropdown in src/App.tsx). Len still receives
+  // copies via EMAIL_OVERRIDE_TO in api/_lib/graphMailer.js.
+  const quoterEmail = (PEOPLE as Record<string, string>)[quoterName]
+  await sendEmail([quoterEmail, PEOPLE.Jeanic], subject, html)
 }
 
 export async function emailQuoteReady(rfq: any) {
@@ -118,7 +123,7 @@ export async function emailQuoteReady(rfq: any) {
         ${infoRow('Description', rfq.description)}
         ${infoRow('Client', rfq.client_name || rfq.clients?.company_name)}
         ${infoRow('Quote Number', rfq.quote_number)}
-        ${infoRow('Quote Value', rfq.quote_value_excl ? 'R ' + Number(rfq.quote_value_excl).toLocaleString('en-ZA') + ' excl VAT' : '—')}
+        ${infoRow('Quote Value', rfq.quote_value_excl_vat ? 'R ' + Number(rfq.quote_value_excl_vat).toLocaleString('en-ZA') + ' excl VAT' : '—')}
       </table>
       ${footer}
     </div>

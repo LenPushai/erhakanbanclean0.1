@@ -275,7 +275,12 @@ const STATUS_LABELS: Record<string, string> = {
   JOB_CREATED: 'Job Created', COMPLETED: 'Completed', REJECTED: 'Lost',
 }
 
-const QUOTERS = ['Hendrik', 'Dewald', 'Estimator', 'Jaco']
+// UAT-03: 'Estimator' dropped from the assignable list because it had no
+// corresponding PEOPLE entry and the assignment email now targets the
+// quoter's address directly. Existing RFQs whose assigned_quoter_name
+// is still 'Estimator' are unaffected — emailQuoterAssigned only fires
+// on a NEW assignment, and 'Estimator' is no longer selectable.
+const QUOTERS = ['Hendrik', 'Dewald', 'Jaco']
 
 // Internal recipient directory for the Communication panel. Names align
 // with QUOTERS where applicable; Jeanic is the PA (not a quoter); Len
