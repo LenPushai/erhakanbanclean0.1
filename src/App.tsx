@@ -995,7 +995,21 @@ table { border-collapse:collapse; width:100%; }
     } catch (e: any) { alert('Send for manager approval failed: ' + e.message) }
   }
 
-  useEffect(() => { if (!isSignRoute) { fetchRFQs(); fetchJobs(); fetchSignatureTokens() } }, [activeEntity, isSignRoute])
+  useEffect(() => {
+    if (isSignRoute) return
+    fetchRFQs(); fetchJobs(); fetchSignatureTokens()
+    // RC2 — 30s polling so a board catches up when /api/sign-submit (running
+    // in a separate signer session) flips rfqs.status, or when any other
+    // actor mutates a row out-of-band. fetchRFQs / fetchJobs only call
+    // setRfqs / setJobs — verified no setSelectedRFQ side effect, so the
+    // open detail panel's local state is untouched. Skips when the tab is
+    // hidden to avoid wasted requests in the background.
+    const interval = setInterval(() => {
+      if (document.hidden) return
+      fetchRFQs(); fetchJobs()
+    }, 30000)
+    return () => clearInterval(interval)
+  }, [activeEntity, isSignRoute])
 
   // US-032 deep-link: open the RFQ named by ?rfq=<id> once the initial
   // fetch settles. Local fast-path when same-entity; otherwise look the
@@ -1180,7 +1194,7 @@ table { border-collapse:collapse; width:100%; }
               ? <SettingsPage />
               : <WorkshopBoard jobs={workshopJobs} loading={workshopLoading} onRefresh={fetchWorkshopJobs} onStatusChange={handleWorkshopStatusChange} role={currentRole} />}
           </div>
-          {selectedRFQ && <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4"><RFQDetailPanel rfq={selectedRFQ} onClose={() => setSelectedRFQ(null)} onUpdate={handleRFQUpdate} role={currentRole} activeEntity={activeEntity} onJobCreated={fetchJobs} onNavigateToJob={(jobNumber) => { setSelectedRFQ(null); setActiveBoard('job'); const job = jobs.find(j => j.job_number === jobNumber); if (job) setSelectedJob(job); }} onSendForApproval={handleSendForManagerApproval} /></div>}
+          {selectedRFQ && <div className="fixed inset-0 bg-black/40 z-50 flex items-center justify-center p-4"><RFQDetailPanel key={selectedRFQ.id} rfq={selectedRFQ} onClose={() => setSelectedRFQ(null)} onUpdate={handleRFQUpdate} role={currentRole} activeEntity={activeEntity} onJobCreated={fetchJobs} onNavigateToJob={(jobNumber) => { setSelectedRFQ(null); setActiveBoard('job'); const job = jobs.find(j => j.job_number === jobNumber); if (job) setSelectedJob(job); }} onSendForApproval={handleSendForManagerApproval} /></div>}
         </div>
       </main>
 
