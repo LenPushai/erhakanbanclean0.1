@@ -92,12 +92,13 @@ export default async function handler(req, res) {
 
     const link = `${APP_URL}/sign/${token}`;
     const sysNo = rfq.rfq_no || rfq.enq_number || 'RFQ';
-    // E6 — surface both numbers when the customer has their own reference.
-    const enq = rfq.client_rfq_number ? `${sysNo} (your ref: ${rfq.client_rfq_number})` : sysNo;
+    // R3-05 — show the customer's own reference alone when present; the
+    // system number is a fallback only when no client ref exists.
+    const enq = rfq.client_rfq_number || sysNo;
     const valueLine = rfq.quote_value_excl_vat
       ? 'R ' + Number(rfq.quote_value_excl_vat).toLocaleString('en-ZA') + ' excl VAT'
       : '-';
-    const subject = `Quote Awaiting Your Sign-off - ${sysNo} (${rfq.quote_number || 'Quote'})`;
+    const subject = `Quote Awaiting Your Sign-off - ${enq} (${rfq.quote_number || 'Quote'})`;
     const html = `<div style="max-width:600px;margin:0 auto">
       <div style="${headerStyle}"><h2 style="margin:0">Internal Quote Sign-off</h2></div>
       <div style="${bodyStyle}">

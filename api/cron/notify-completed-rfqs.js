@@ -32,8 +32,9 @@ const BATCH_LIMIT = 20;
 function buildCompletedEmail(rfq) {
   const clientName = rfq.clients?.company_name || rfq.client_name || '—';
   const sysNo = rfq.rfq_no || rfq.enq_number || 'RFQ';
-  // E6 — surface both numbers when the customer has their own reference.
-  const enq = rfq.client_rfq_number ? `${sysNo} (your ref: ${rfq.client_rfq_number})` : sysNo;
+  // R3-05 — show the customer's own reference alone when present; the
+  // system number is a fallback only when no client ref exists.
+  const enq = rfq.client_rfq_number || sysNo;
   const invoiceLine = rfq.invoice_value
     ? 'R ' + Number(rfq.invoice_value).toLocaleString('en-ZA')
     : '—';

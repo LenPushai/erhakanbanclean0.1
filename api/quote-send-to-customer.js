@@ -57,12 +57,13 @@ async function findPastelQuotePdf(supabase, rfqId, quoteNumber) {
 
 function buildCustomerEmail({ rfq, pastelPdf }) {
   const sysNo = rfq.rfq_no || rfq.enq_number || 'RFQ';
-  // E6 — surface both numbers when the customer has their own reference.
-  const enq = rfq.client_rfq_number ? `${sysNo} (your ref: ${rfq.client_rfq_number})` : sysNo;
+  // R3-05 — show the customer's own reference alone when present; the
+  // system number is a fallback only when no client ref exists.
+  const enq = rfq.client_rfq_number || sysNo;
   const valueLine = rfq.quote_value_excl_vat
     ? 'R ' + Number(rfq.quote_value_excl_vat).toLocaleString('en-ZA') + ' excl VAT'
     : '—';
-  const subject = `Your Quote - ${sysNo}${rfq.quote_number ? ` (${rfq.quote_number})` : ''}`;
+  const subject = `Your Quote - ${enq}${rfq.quote_number ? ` (${rfq.quote_number})` : ''}`;
   const attachmentLine = pastelPdf
     ? `<p style="margin-top:16px">Your quote is attached as a PDF.</p>`
     : `<p style="margin-top:16px;color:#b45309"><strong>Note:</strong> the quote PDF could not be attached automatically — it will follow in a separate email shortly.</p>`;

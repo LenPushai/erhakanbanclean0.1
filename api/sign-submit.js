@@ -64,7 +64,9 @@ async function findPastelQuotePdf(supabase, rfqId, quoteNumber) {
 }
 
 async function sendCustomerSignedNotification({ rfq, signerName }) {
-  const enq = rfq.rfq_no || rfq.enq_number || 'RFQ';
+  // R3-05 — show the customer's own reference alone when present; the
+  // system number is a fallback only when no client ref exists.
+  const enq = rfq.client_rfq_number || rfq.rfq_no || rfq.enq_number || 'RFQ';
   const valueLine = rfq.quote_value_excl_vat
     ? 'R ' + Number(rfq.quote_value_excl_vat).toLocaleString('en-ZA') + ' excl VAT'
     : '-';

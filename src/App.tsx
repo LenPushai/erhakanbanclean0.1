@@ -3597,9 +3597,11 @@ function isValidEmail(s: string): boolean {
 // US-034 create-flow notification body — internal tone, fully substituted
 // (no {placeholders}); CommunicationPanel uses it verbatim via defaultBody.
 const createNotifyBody = (rfq: RFQ) => {
+  // R3-05 — show the customer's own reference alone when present; the
+  // system number is a fallback only when no client ref exists. (Email
+  // body only — the board/panel keep the system number as operator key.)
   const sysNo = rfq.rfq_no || rfq.enq_number || '-'
-  const ref = rfq.client_rfq_number ? ` (your ref: ${rfq.client_rfq_number})` : ''
-  const enq = `${sysNo}${ref}`
+  const enq = rfq.client_rfq_number || sysNo
   const client = (rfq as any).clients?.company_name || rfq.contact_person || 'Client'
   const description = rfq.description ? `\n\nDescription:\n${rfq.description}` : ''
   return `New RFQ ${enq} logged for ${client}.${description}\n\nQuoter assignment pending. Please review and assign as needed.\n\nKind regards`

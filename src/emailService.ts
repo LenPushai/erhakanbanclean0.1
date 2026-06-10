@@ -17,12 +17,13 @@ const APP_URL = (import.meta as any).env?.VITE_APP_URL || (typeof window !== 'un
 
 const ALL = [PEOPLE.Len, PEOPLE.Hendrik, PEOPLE.Jeanic]
 
-// E6 — surface both the system number and the customer's own reference
-// where one exists. Templates that currently show `rfq.rfq_no` are migrated
-// to this helper.
+// R3-05 — emails show the customer's own reference alone when one exists;
+// the system number is a fallback only when there is no client ref. The
+// system number stays the operator key in-app (board/panel) — this helper
+// governs email-facing strings only.
 const formatRfqNumber = (rfq: any) => {
   const sysNo = rfq?.rfq_no || rfq?.enq_number || 'RFQ'
-  return rfq?.client_rfq_number ? `${sysNo} (your ref: ${rfq.client_rfq_number})` : sysNo
+  return rfq?.client_rfq_number || sysNo
 }
 
 // E3 — locate a quote PDF among the rfq's attachments. Loosened match: any
