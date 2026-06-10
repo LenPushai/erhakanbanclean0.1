@@ -978,17 +978,19 @@ table { border-collapse:collapse; width:100%; }
   }
 
   // E-sign Stage 1 trigger: create a 'manager' signature_token for the RFQ
-  // and dispatch the manager review-and-sign email. Stage 1 approver
-  // routing is server-side per ADR-006 Stage 1 Signing Authority &
-  // Gatekeeper Amendment (2026-05-16); see api/manager-approval-send.js
-  // STAGE_1_APPROVER for the current target.
-  const handleSendForManagerApproval = async (rfq: RFQ) => {
-    if (!confirm(`Send "${rfq.rfq_no || rfq.enq_number || 'this quote'}" for manager sign-off?`)) return
+  // and dispatch the review-and-sign email. The approver is a per-quote
+  // choice (R3-06); the server resolves the address from its own allow-list
+  // (see api/manager-approval-send.js APPROVER_DIRECTORY) and logs the
+  // choice — the system encodes no rule about who should approve.
+  const handleSendForManagerApproval = async (rfq: RFQ, approverName?: string) => {
+    if (!confirm(`Send "${rfq.rfq_no || rfq.enq_number || 'this quote'}" for sign-off${approverName ? ` to ${approverName}` : ''}?`)) return
     try {
+      // R3-06 — approver is the user's per-quote choice; selected_by records
+      // who made it. The server resolves the email and logs both.
       const res = await fetch('/api/manager-approval-send', {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ rfq_id: rfq.id }),
+        body: JSON.stringify({ rfq_id: rfq.id, approver: approverName, selected_by: currentRole || 'user' }),
       })
       const body = await res.json().catch(() => ({}))
       if (!res.ok || !body.success) {
@@ -1214,7 +1216,7 @@ table { border-collapse:collapse; width:100%; }
 
 // RFQ BOARD
 
-function RFQBoard({ rfqs, loading, error, onRefresh, onCardClick, selectedId, tokensByRfq, currentRole, onSendForApproval }: { rfqs: RFQ[]; loading: boolean; error: string | null; onRefresh: () => void; onCardClick: (rfq: RFQ) => void; selectedId?: string; tokensByRfq: Record<string, any[]>; currentRole: string | null; onSendForApproval: (rfq: RFQ) => void }) {
+function RFQBoard({ rfqs, loading, error, onRefresh, onCardClick, selectedId, tokensByRfq, currentRole, onSendForApproval }: { rfqs: RFQ[]; loading: boolean; error: string | null; onRefresh: () => void; onCardClick: (rfq: RFQ) => void; selectedId?: string; tokensByRfq: Record<string, any[]>; currentRole: string | null; onSendForApproval: (rfq: RFQ, approverName?: string) => void }) {
   if (loading) return <div className="flex items-center justify-center h-64 gap-3 text-gray-400"><div className="w-5 h-5 border-2 border-gray-300 border-t-blue-500 rounded-full animate-spin" /><span>Loading RFQs...</span></div>
   if (error) return <div className="flex items-center justify-center h-64"><div className="bg-red-50 border border-red-200 rounded-xl p-6 text-center"><p className="text-red-700 font-semibold mb-2">Failed to load</p><p className="text-red-500 text-sm mb-4">{error}</p><button onClick={onRefresh} className="px-4 py-2 bg-red-600 text-white rounded-lg text-sm">Try Again</button></div></div>
   return (
@@ -1243,7 +1245,7 @@ function RFQBoard({ rfqs, loading, error, onRefresh, onCardClick, selectedId, to
 
 // RFQ CARD
 
-function RFQCard({ rfq, hoverColor, onClick, isSelected, tokens, currentRole, onSendForApproval }: { rfq: RFQ; hoverColor: string; onClick: () => void; isSelected: boolean; tokens: any[]; currentRole: string | null; onSendForApproval: (rfq: RFQ) => void }) {
+function RFQCard({ rfq, hoverColor, onClick, isSelected, tokens, currentRole, onSendForApproval }: { rfq: RFQ; hoverColor: string; onClick: () => void; isSelected: boolean; tokens: any[]; currentRole: string | null; onSendForApproval: (rfq: RFQ, approverName?: string) => void }) {
   const priority = rfq.priority?.toUpperCase() || 'NORMAL'
   const direction = rfq.rfq_direction?.toUpperCase()
   const enqNo = rfq.client_rfq_number || rfq.enq_number || rfq.rfq_no || '-'
@@ -2712,7 +2714,7 @@ function CreateRFQModal({ activeEntity, role, onClose, onCreated }: { activeEnti
 
 // RFQ DETAIL PANEL
 
-function RFQDetailPanel({ rfq, onClose, onUpdate, role, activeEntity, onJobCreated, onNavigateToJob, onSendForApproval }: { rfq: RFQ; onClose: () => void; onUpdate: (rfq: RFQ) => void; role: string | null; activeEntity: OperatingEntity; onJobCreated?: () => void; onNavigateToJob?: (jobNumber: string) => void; onSendForApproval: (rfq: RFQ) => void }) {
+function RFQDetailPanel({ rfq, onClose, onUpdate, role, activeEntity, onJobCreated, onNavigateToJob, onSendForApproval }: { rfq: RFQ; onClose: () => void; onUpdate: (rfq: RFQ) => void; role: string | null; activeEntity: OperatingEntity; onJobCreated?: () => void; onNavigateToJob?: (jobNumber: string) => void; onSendForApproval: (rfq: RFQ, approverName?: string) => void }) {
   const mediaOptions = useDropdownOptions('media_received', MEDIA_OPTIONS_FALLBACK)
   const actionTypeOptions = useDropdownOptions('action_types', ACTIONS_LIST_FALLBACK)
   const [lineItems, setLineItems] = React.useState<LineItem[]>([])
@@ -2744,6 +2746,9 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, activeEntity, onJobCreat
 
   const [quoteNumber, setQuoteNumber] = React.useState(rfq.quote_number || '')
   const [quoteValue, setQuoteValue] = React.useState(rfq.quote_value_excl_vat ? String(rfq.quote_value_excl_vat) : '')
+  // R3-06 — per-quote sign-off approver choice. Default = Dewald (current
+  // behaviour); the system encodes no rule about who should approve.
+  const [approverChoice, setApproverChoice] = React.useState('Dewald')
   const [validUntil, setValidUntil] = React.useState(rfq.valid_until || '')
   const [poNumber, setPoNumber] = React.useState(rfq.po_number || '')
 
@@ -3225,10 +3230,19 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, activeEntity, onJobCreat
         )}
 
         {status === 'QUOTED' && canWrite(role) && (
-          <button onClick={() => onSendForApproval(rfq)}
-            className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg">
-            Send for Manager Approval
-          </button>
+          <div className="space-y-1.5">
+            <label className="block text-xs font-semibold text-gray-500 uppercase tracking-wide">
+              Approver (sign-off)
+              <select value={approverChoice} onChange={e => setApproverChoice(e.target.value)}
+                className="mt-1 w-full border border-gray-300 rounded-lg px-2 py-1.5 text-sm font-normal normal-case text-gray-800 focus:outline-none focus:border-blue-400">
+                {['Hendrik', 'Dewald', 'Jaco'].map(n => <option key={n} value={n}>{n}</option>)}
+              </select>
+            </label>
+            <button onClick={() => onSendForApproval(rfq, approverChoice)}
+              className="w-full py-2 bg-blue-600 hover:bg-blue-700 text-white text-sm font-semibold rounded-lg">
+              Send for Manager Approval
+            </button>
+          </div>
         )}
         {status === 'INTERNALLY_APPROVED' && canWrite(role) && (
           <button onClick={async () => {

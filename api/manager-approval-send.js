@@ -4,14 +4,18 @@ const SUPABASE_URL = process.env.SUPABASE_URL || process.env.VITE_SUPABASE_URL;
 const SUPABASE_SERVICE_ROLE_KEY = process.env.SUPABASE_SERVICE_ROLE_KEY;
 const APP_URL = process.env.APP_URL || process.env.VITE_APP_URL;
 
-// Stage 1 approver — see ADR-006 Stage 1 Signing Authority & Gatekeeper
-// Amendment (2026-05-16). Sole approver = Dewald; no assignment-field
-// routing, no automatic fallback. The Jeanic-authorised Hendrik fallback
-// path is US-024c and not implemented here.
-const STAGE_1_APPROVER = {
-  email: 'dewald@erha.co.za',
-  name: 'Dewald',
+// R3-06 — the sign-off approver is a per-quote CHOICE made by the user.
+// The system encodes NO rule about who should approve; the caller sends a
+// NAME, the server resolves the address from this allow-list (it never
+// trusts a client-supplied email), and the choice is logged per quote.
+// Default stays Dewald for backwards compatibility when no choice is sent
+// (e.g. the quick action on the board card).
+const APPROVER_DIRECTORY = {
+  Hendrik: 'hendrik@erha.co.za',
+  Dewald: 'dewald@erha.co.za',
+  Jaco: 'jaco@erha.co.za',
 };
+const DEFAULT_APPROVER_NAME = 'Dewald';
 
 const headerStyle = 'background:linear-gradient(135deg,#1e3a5f,#2d5a8e);color:white;padding:20px;border-radius:8px 8px 0 0';
 const bodyStyle = 'padding:20px;border:1px solid #e5e7eb;border-top:none;border-radius:0 0 8px 8px;font-family:Arial,sans-serif';
@@ -64,8 +68,15 @@ export default async function handler(req, res) {
   }
 
   try {
-    const { rfq_id } = req.body || {};
+    const { rfq_id, approver, selected_by } = req.body || {};
     if (!rfq_id) return res.status(400).json({ error: 'rfq_id required' });
+
+    // Resolve the approver server-side from the allow-list. An unknown or
+    // missing name falls back to the default — we never accept a raw email
+    // from the client.
+    const approverName = (approver && APPROVER_DIRECTORY[approver]) ? approver : DEFAULT_APPROVER_NAME;
+    const approverEmail = APPROVER_DIRECTORY[approverName];
+    const approverDefaulted = !approver || !APPROVER_DIRECTORY[approver];
 
     const supabase = createClient(SUPABASE_URL, SUPABASE_SERVICE_ROLE_KEY);
 
@@ -81,8 +92,8 @@ export default async function handler(req, res) {
     const { error: insertErr } = await supabase.from('signature_tokens').insert({
       rfq_id: rfq.id,
       token,
-      client_email: STAGE_1_APPROVER.email,
-      client_name: STAGE_1_APPROVER.name,
+      client_email: approverEmail,
+      client_name: approverName,
       expires_at: expiresAt,
       is_valid: true,
       used_at: null,
@@ -102,6 +113,7 @@ export default async function handler(req, res) {
     const html = `<div style="max-width:600px;margin:0 auto">
       <div style="${headerStyle}"><h2 style="margin:0">Internal Quote Sign-off</h2></div>
       <div style="${bodyStyle}">
+        <p style="margin-bottom:8px">Hi <strong>${approverName}</strong>,</p>
         <p style="margin-bottom:16px">A quote is ready for your internal sign-off before being sent to the customer.</p>
         <table style="width:100%;border-collapse:collapse;background:#f9fafb;border-radius:6px">
           ${infoRow('RFQ Number', enq)}
@@ -133,7 +145,7 @@ export default async function handler(req, res) {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
         body: JSON.stringify({
-          to: [STAGE_1_APPROVER.email],
+          to: [approverEmail],
           subject,
           html,
           attachments: pastelPdf ? [{ filename: pastelPdf.filename, path: pastelPdf.url }] : undefined,
@@ -146,9 +158,28 @@ export default async function handler(req, res) {
       emailError = e.message;
     }
 
+    // R3-06 — audit who chose which approver for this quote's sign-off.
+    await supabase.from('activity_log').insert({
+      action_type: 'quote_sent_for_signoff',
+      entity_type: 'rfq',
+      entity_id: rfq.id,
+      operating_entity: rfq.operating_entity || null,
+      metadata: {
+        approver_selected: approverName,
+        approver_email: approverEmail,
+        approver_requested: approver || null,
+        approver_defaulted: approverDefaulted,
+        selected_by: selected_by || 'unknown',
+        signature_stage: 'manager',
+        email_dispatched: emailDispatched,
+        email_error: emailError,
+      },
+    }).then(({ error: aerr }) => { if (aerr) console.error('activity_log insert failed:', aerr.message); });
+
     return res.status(200).json({
       success: true,
       token,
+      approver_selected: approverName,
       email_dispatched: emailDispatched,
       email_error: emailError,
     });
