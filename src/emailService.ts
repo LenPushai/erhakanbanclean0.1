@@ -88,11 +88,63 @@ export async function emailRFQCreated(rfq: any) {
   await sendEmail(ALL, subject, html)
 }
 
+// 30 MB total attachment cap — mirrors the create-flow CommunicationPanel
+// (MAX_TOTAL_BYTES) so the assignment email can't blow past the same limit.
+const ASSIGN_MAX_TOTAL_BYTES = 30 * 1024 * 1024
+
+// R3-04 — collect the RFQ's uploaded files as {filename, path} attachments
+// (path = public URL; graphMailer fetches + base64-encodes server-side).
+// Newest-first, greedily included up to the total-size cap; anything that
+// would exceed the cap is skipped with a warning rather than failing.
+async function collectRfqAttachments(rfqId: string) {
+  const { data: rows, error } = await supabase
+    .from('rfq_attachments')
+    .select('file_name, file_path, file_size, created_at')
+    .eq('rfq_id', rfqId)
+    .order('created_at', { ascending: false })
+  if (error || !rows || rows.length === 0) return []
+  const out: Array<{ filename: string; path: string }> = []
+  let total = 0
+  for (const r of rows as any[]) {
+    const size = Number(r.file_size) || 0
+    if (total + size > ASSIGN_MAX_TOTAL_BYTES) {
+      console.warn(`[emailQuoterAssigned] skipping attachment "${r.file_name}" — would exceed ${ASSIGN_MAX_TOTAL_BYTES} byte cap`)
+      continue
+    }
+    const { data: urlData } = supabase.storage.from('rfq-attachments').getPublicUrl(r.file_path)
+    if (!urlData?.publicUrl) continue
+    out.push({ filename: r.file_name, path: urlData.publicUrl })
+    total += size
+  }
+  return out
+}
+
 export async function emailQuoterAssigned(rfq: any, quoterName: string) {
   const subject = `📐 RFQ Assigned to You — ${formatRfqNumber(rfq)}`
+
+  // R3-04 — deep-link into the RFQ, mirroring the create-flow email.
+  const rfqLink = `${APP_URL}/?rfq=${rfq.id}`
+
+  // Recipient guard: an unmapped quoter name would otherwise put `undefined`
+  // in the `to` array. Fall back to Jeanic alone and flag it in the body.
+  const quoterEmail = (PEOPLE as Record<string, string>)[quoterName]
+  let recipients: string[]
+  let missingAddressNote = ''
+  if (!quoterEmail) {
+    console.error(`[emailQuoterAssigned] no email mapping for quoter "${quoterName}" — sending to Jeanic only.`)
+    recipients = [PEOPLE.Jeanic]
+    missingAddressNote = `<p style="margin-bottom:16px;color:#b45309"><strong>Note:</strong> no email address is on file for "${quoterName}", so this notification could not be delivered to them directly — please forward it manually.</p>`
+  } else {
+    // UAT-03: send TO the quoter, with Jeanic retaining oversight.
+    recipients = [quoterEmail, PEOPLE.Jeanic]
+  }
+
+  const attachments = await collectRfqAttachments(rfq.id)
+
   const html = `<div style="max-width:600px;margin:0 auto">
     <div style="${headerStyle}"><h2 style="margin:0">📐 RFQ Assigned to You</h2></div>
     <div style="${bodyStyle}">
+      ${missingAddressNote}
       <p style="margin-bottom:16px">Hi <strong>${quoterName}</strong>, the following RFQ has been assigned to you.</p>
       <table style="width:100%;border-collapse:collapse;background:#f9fafb;border-radius:6px">
         ${infoRow('RFQ Number', formatRfqNumber(rfq))}
@@ -101,15 +153,18 @@ export async function emailQuoterAssigned(rfq: any, quoterName: string) {
         ${infoRow('Priority', rfq.priority)}
         ${infoRow('Required By', rfq.required_date)}
       </table>
+      <div style="margin-top:24px;text-align:center">
+        <a href="${rfqLink}" style="display:inline-block;background:#1d4ed8;color:white;padding:12px 28px;border-radius:8px;text-decoration:none;font-weight:bold">Open RFQ →</a>
+      </div>
+      <p style="margin-top:20px;font-size:11px;color:#9ca3af;text-align:center">Intended recipients: ${recipients.join(', ')}</p>
       ${footer}
     </div>
   </div>`
-  // UAT-03: send TO the quoter, with Jeanic retaining oversight.
-  // Every assignable QUOTERS value now has a PEOPLE entry (Estimator
-  // was dropped from the dropdown in src/App.tsx). Len still receives
-  // copies via EMAIL_OVERRIDE_TO in api/_lib/graphMailer.js.
-  const quoterEmail = (PEOPLE as Record<string, string>)[quoterName]
-  await sendEmail([quoterEmail, PEOPLE.Jeanic], subject, html)
+
+  // Len still receives copies via EMAIL_OVERRIDE_TO in
+  // api/_lib/graphMailer.js during the cutover; the intended-recipients
+  // line above records who the message was actually meant for.
+  await sendEmail(recipients, subject, html, attachments.length > 0 ? attachments : undefined)
 }
 
 export async function emailQuoteReady(rfq: any) {
