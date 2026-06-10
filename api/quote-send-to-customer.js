@@ -44,8 +44,8 @@ async function findPastelQuotePdf(supabase, rfqId, quoteNumber) {
     return null;
   }
   if (!rows || rows.length === 0) return null;
-  const needle = String(quoteNumber).toLowerCase();
-  const match = rows.find(r => String(r.file_name || '').toLowerCase().includes(needle));
+  const needle = String(quoteNumber).trim().toLowerCase();
+  const match = rows.find(r => String(r.file_name || '').trim().toLowerCase().includes(needle));
   if (!match) return null;
   const { data: urlData } = supabase.storage.from('rfq-attachments').getPublicUrl(match.file_path);
   if (!urlData?.publicUrl) {

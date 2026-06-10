@@ -8,6 +8,7 @@ import { useEntity, type OperatingEntity } from './contexts/EntityContext'
 import { EntitySwitcher, getBrandName, getHeaderLogo } from './components/EntitySwitcher'
 import { SignaturePage } from './components/SignaturePage'
 import { PEOPLE } from './emailRecipients'
+import { quotePdfMatches } from './quotePdf'
 
 type Board = 'rfq' | 'job' | 'workshop' | 'procurement' | 'clients' | 'settings'
 
@@ -2875,6 +2876,15 @@ function RFQDetailPanel({ rfq, onClose, onUpdate, role, activeEntity, onJobCreat
       onUpdate(data)
       emailQuoteReady(data)
       showMsg('Quote saved - card moved to Quoted')
+      // R3-03 — proactive (non-blocking) check: warn if no uploaded PDF
+      // matches the just-saved quote number, so the user knows the quote
+      // PDF will not attach to the approval/customer emails until they
+      // upload one whose filename contains the quote number.
+      const savedQuoteNumber = data.quote_number || quoteNumber.trim()
+      const quotePdfPresent = panelAttachments.some(a => quotePdfMatches(a.file_name, savedQuoteNumber))
+      if (!quotePdfPresent) {
+        alert(`Quote saved.\n\nHeads-up: no uploaded PDF on this RFQ has a filename containing the quote number "${savedQuoteNumber}". The quote PDF will NOT attach to the approval or customer emails until you upload a PDF whose filename contains "${savedQuoteNumber}".`)
+      }
     } catch (e: any) { alert('Error: ' + e.message) }
     finally { setSaving(false) }
   }
@@ -3641,8 +3651,11 @@ function CommunicationPanel({ rfq, role, panelAttachments = [], defaultBody, sen
     })
   }, [panelAttachments])
   const isQuoteStage = ['QUOTED', 'INTERNALLY_APPROVED', 'SENT_TO_CUSTOMER', 'ACCEPTED'].includes(rfq.status)
-  const hasQuotePdf = panelAttachments.some(a =>
-    /^quote-/i.test(a.file_name || '') && /\.pdf$/i.test(a.file_name || ''))
+  // R3-03 — single filename rule: a PDF whose name CONTAINS the saved
+  // quote number (case-insensitive, trimmed). Matches the server-side
+  // attach logic exactly, so the banner can no longer disagree with what
+  // actually gets attached to the emails.
+  const hasQuotePdf = panelAttachments.some(a => quotePdfMatches(a.file_name, rfq.quote_number))
 
   const enqNo = rfq.client_rfq_number || rfq.enq_number || rfq.rfq_no || '-'
   const contactName = rfq.contact_person || 'Sir/Madam'
@@ -3769,7 +3782,7 @@ function CommunicationPanel({ rfq, role, panelAttachments = [], defaultBody, sen
           email_includes_deeplink: true,
           attachments_from_rfq: autoAttached.length,
           attachments_added_inline: uploaded.length,
-          pastel_pdf_included: autoAttached.some(a => /^quote-/i.test(a.filename)),
+          pastel_pdf_included: autoAttached.some(a => quotePdfMatches(a.filename, rfq.quote_number)),
           total_attachment_count: combinedAttachments.length,
         },
       }).then(({ error: aerr }) => { if (aerr) console.error('activity_log insert failed:', aerr.message) })
@@ -3897,7 +3910,9 @@ function CommunicationPanel({ rfq, role, panelAttachments = [], defaultBody, sen
 
       {(isQuoteStage && !hasQuotePdf) && (
         <div className="bg-amber-50 border border-amber-300 rounded-lg p-2 text-xs text-amber-900 mt-2">
-          ⚠ No Quote PDF (Quote-XXXX.pdf) found on this RFQ. The email will send without it — confirm this is intentional.
+          {rfq.quote_number
+            ? `⚠ No PDF containing quote number ${rfq.quote_number} found on this RFQ. The email will send without the quote attached — confirm this is intentional.`
+            : '⚠ No quote number saved yet — save the quote first so the PDF can be matched.'}
         </div>
       )}
       {panelAttachments.length > 0 && (

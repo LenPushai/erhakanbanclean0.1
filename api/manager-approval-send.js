@@ -42,8 +42,8 @@ async function findPastelQuotePdf(supabase, rfqId, quoteNumber) {
     return null;
   }
   if (!rows || rows.length === 0) return null;
-  const needle = String(quoteNumber).toLowerCase();
-  const match = rows.find(r => String(r.file_name || '').toLowerCase().includes(needle));
+  const needle = String(quoteNumber).trim().toLowerCase();
+  const match = rows.find(r => String(r.file_name || '').trim().toLowerCase().includes(needle));
   if (!match) return null;
   const { data: urlData } = supabase.storage.from('rfq-attachments').getPublicUrl(match.file_path);
   if (!urlData?.publicUrl) {
@@ -122,7 +122,7 @@ export default async function handler(req, res) {
     // digital signature flow is unchanged. See findPastelQuotePdf.
     const pastelPdf = await findPastelQuotePdf(supabase, rfq.id, rfq.quote_number);
     if (!pastelPdf) {
-      console.warn(`[manager-approval-send] No Pastel PDF matching 'Quote-${rfq.quote_number}*.pdf' found in rfq_attachments for RFQ ${rfq.id}; sending email without attachment.`);
+      console.warn(`[manager-approval-send] No PDF whose filename contains quote number '${rfq.quote_number}' found in rfq_attachments for RFQ ${rfq.id}; sending email without attachment.`);
     }
 
     let emailDispatched = false;

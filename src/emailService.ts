@@ -5,6 +5,7 @@
 
 import { PEOPLE } from './emailRecipients'
 import { supabase } from './lib/supabase'
+import { quotePdfMatches } from './quotePdf'
 
 const FROM_EMAIL = 'ERHA Operations <onboarding@resend.dev>'
 
@@ -37,8 +38,7 @@ async function findQuotePdfAttachment(rfqId: string, quoteNumber: string | null 
     .ilike('file_name', '%.pdf')
     .order('created_at', { ascending: false })
   if (error || !rows || rows.length === 0) return null
-  const needle = String(quoteNumber).toLowerCase()
-  const match = rows.find((r: any) => String(r.file_name || '').toLowerCase().includes(needle))
+  const match = rows.find((r: any) => quotePdfMatches(r.file_name, quoteNumber))
   if (!match) return null
   const { data: urlData } = supabase.storage.from('rfq-attachments').getPublicUrl(match.file_path)
   if (!urlData?.publicUrl) return null
