@@ -13,7 +13,40 @@ import { quotePdfMatches } from './quotePdf'
 // fails loudly if missing — see TODO_PRE_MONDAY.md.
 const APP_URL = (import.meta as any).env?.VITE_APP_URL || (typeof window !== 'undefined' ? window.location.origin : '')
 
-const ALL = [PEOPLE.Len, PEOPLE.Hendrik, PEOPLE.Jeanic]
+// Internal notification distribution. Consumed by every sendEmail call
+// site in this file, so this one line governs who receives all internal
+// notifications.
+//
+// 3 Aug 2026: PEOPLE.Len removed - a consultant's personal address had
+// been receiving every notification since development, including quote
+// values and customer details. PEOPLE.Cherise added so she and Jeanic
+// both receive everything straight through, giving continuous cover when
+// Jeanic is out of office.
+//
+// Note: this is a single flat list, not per-notification routing. Quoter
+// assignment and workshop notifications arguably belong to different
+// people. Per-notification routing is a separate story.
+// Internal notification routing. Two lists, applied per notification
+// type - restores the email workflow specification rather than
+// broadcasting everything to everyone.
+//
+// 3 Aug 2026: a consultant's personal address was removed from this
+// routing. It had been receiving every notification since development,
+// including quote values and customer details.
+//
+// ALL_MGMT - commercial and RFQ lifecycle. Hendrik is the Managing
+// Director: he allocates quoters and approves quotes, so he receives
+// the events he acts on, not shop-floor progress.
+const ALL_MGMT = [PEOPLE.Hendrik, PEOPLE.Jeanic, PEOPLE.Cherise]
+
+// ALL_OPS - job and workshop progress. Jeanic and Cherise receive every
+// notification straight through, so cover is continuous when Jeanic is
+// out of office.
+//
+// TODO: no addresses on file for Zach (Shop Foreman) or Charles (Shop
+// Store Manager), so workshop notifications currently reach nobody on
+// the floor. Add them when their addresses are supplied.
+const ALL_OPS = [PEOPLE.Jeanic, PEOPLE.Cherise]
 
 // R3-05 — emails show the customer's own reference alone when one exists;
 // the system number is a fallback only when there is no client ref. The
@@ -84,7 +117,7 @@ export async function emailRFQCreated(rfq: any) {
       ${footer}
     </div>
   </div>`
-  await sendEmail(ALL, subject, html)
+  await sendEmail(ALL_MGMT, subject, html)
 }
 
 // 30 MB total attachment cap — mirrors the create-flow CommunicationPanel
@@ -131,11 +164,11 @@ export async function emailQuoterAssigned(rfq: any, quoterName: string) {
   let missingAddressNote = ''
   if (!quoterEmail) {
     console.error(`[emailQuoterAssigned] no email mapping for quoter "${quoterName}" — sending to Jeanic only.`)
-    recipients = [PEOPLE.Jeanic]
+    recipients = [PEOPLE.Jeanic, PEOPLE.Cherise, PEOPLE.Hendrik]
     missingAddressNote = `<p style="margin-bottom:16px;color:#b45309"><strong>Note:</strong> no email address is on file for "${quoterName}", so this notification could not be delivered to them directly — please forward it manually.</p>`
   } else {
     // UAT-03: send TO the quoter, with Jeanic retaining oversight.
-    recipients = [quoterEmail, PEOPLE.Jeanic]
+    recipients = [quoterEmail, PEOPLE.Jeanic, PEOPLE.Cherise, PEOPLE.Hendrik]
   }
 
   const attachments = await collectRfqAttachments(rfq.id)
@@ -185,7 +218,7 @@ export async function emailQuoteReady(rfq: any) {
   // E3 — attach the quote PDF if one is uploaded against this RFQ. Best-
   // effort: a miss means no attachment, never a hard failure.
   const pdf = await findQuotePdfAttachment(rfq.id, rfq.quote_number)
-  await sendEmail(ALL, subject, html, pdf ? [pdf] : undefined)
+  await sendEmail(ALL_MGMT, subject, html, pdf ? [pdf] : undefined)
 }
 
 export async function emailOrderWon(rfq: any, jobNumber: string) {
@@ -206,7 +239,7 @@ export async function emailOrderWon(rfq: any, jobNumber: string) {
       ${footer}
     </div>
   </div>`
-  await sendEmail(ALL, subject, html)
+  await sendEmail(ALL_MGMT, subject, html)
 }
 
 export async function emailJobInReview(job: any) {
@@ -226,7 +259,7 @@ export async function emailJobInReview(job: any) {
       ${footer}
     </div>
   </div>`
-  await sendEmail(ALL, subject, html)
+  await sendEmail(ALL_OPS, subject, html)
 }
 
 export async function emailJobReadyToPrint(job: any) {
@@ -247,7 +280,7 @@ export async function emailJobReadyToPrint(job: any) {
       ${footer}
     </div>
   </div>`
-  await sendEmail(ALL, subject, html)
+  await sendEmail(ALL_OPS, subject, html)
 }
 
 export async function emailJobPrinted(job: any) {
@@ -268,7 +301,7 @@ export async function emailJobPrinted(job: any) {
       ${footer}
     </div>
   </div>`
-  await sendEmail(ALL, subject, html)
+  await sendEmail(ALL_MGMT, subject, html)
 }
 
 export async function emailChildJobSpawned(parentJob: any, childJob: any) {
@@ -287,7 +320,7 @@ export async function emailChildJobSpawned(parentJob: any, childJob: any) {
       ${footer}
     </div>
   </div>`
-  await sendEmail(ALL, subject, html)
+  await sendEmail(ALL_OPS, subject, html)
 }
 
 export async function emailJobStarted(job: any) {
@@ -306,7 +339,7 @@ export async function emailJobStarted(job: any) {
       ${footer}
     </div>
   </div>`
-  await sendEmail(ALL, subject, html)
+  await sendEmail(ALL_OPS, subject, html)
 }
 
 export async function emailJobQCCheck(job: any) {
@@ -325,7 +358,7 @@ export async function emailJobQCCheck(job: any) {
       ${footer}
     </div>
   </div>`
-  await sendEmail(ALL, subject, html)
+  await sendEmail(ALL_OPS, subject, html)
 }
 
 export async function emailJobComplete(job: any) {
@@ -344,7 +377,7 @@ export async function emailJobComplete(job: any) {
       ${footer}
     </div>
   </div>`
-  await sendEmail(ALL, subject, html)
+  await sendEmail(ALL_OPS, subject, html)
 }
 
 export async function emailJobDispatched(job: any) {
@@ -361,7 +394,7 @@ export async function emailJobDispatched(job: any) {
       ${footer}
     </div>
   </div>`
-  await sendEmail(ALL, subject, html)
+  await sendEmail(ALL_OPS, subject, html)
 }
 
 // US-P3-012: Quote has been internally signed off. Status is now
@@ -390,7 +423,7 @@ export async function emailReadyToSend(rfq: any, approverName?: string) {
       ${footer}
     </div>
   </div>`
-  await sendEmail([PEOPLE.Jeanic], subject, html)
+  await sendEmail([PEOPLE.Jeanic, PEOPLE.Cherise, PEOPLE.Hendrik], subject, html)
 }
 
 // US-P3-012: all linked jobs invoiced — DB trigger has flipped the RFQ to
