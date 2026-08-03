@@ -1,4 +1,4 @@
-﻿import React from 'react';
+import React from 'react';
 import { useState, useEffect } from 'react'
 import { ClipboardList, Briefcase, ChevronRight, ChevronDown, ChevronUp, Factory, Building2, Calendar, Hash, RefreshCw, ArrowDownToLine, ArrowUpFromLine, X, Mail, FileText, Paperclip, Send, Plus, Check, Printer, Upload, Package, Search, Filter, Edit3, XCircle, Trash2, Eye, CheckCircle, ShoppingCart, Download, Truck, DollarSign, AlertTriangle, Receipt, Users, Settings }  from 'lucide-react'
 import { supabase } from './lib/supabase'
@@ -380,8 +380,9 @@ const ROLE_DISPLAY_NAMES: Record<string, string> = {
 // READER  : CHERISE, SONJA, CHARLES, JACO, ELSJE, ALWYN, ZACH
 //                                                        — no writes anywhere; surfaced in RoleSelector for shop-floor visibility
 //
-// All six previously-dormant roles (SONJA, CHARLES, JACO, ELSJE, ALWYN,
-// ZACH) are now explicitly mapped to READER tier. canWrite() and
+// US-RBAC-010/011 (3 Aug 2026): CHERISE promoted to FULL; JACO promoted to
+// QUOTER so he can sign quotations. The remaining five previously-dormant
+// roles (SONJA, CHARLES, ELSJE, ALWYN, ZACH) stay READER. canWrite() and
 // canWriteRFQ() return false for any non-FULL/non-matching-QUOTER tier,
 // so every existing write gate continues to deny them. The header
 // renders a READ ONLY badge whenever getTier() is not 'FULL'.
@@ -393,10 +394,10 @@ const TIER_BY_ROLE: Record<string, RoleTier> = {
   HENDRIK: 'FULL',
   JUANIC:  'FULL',
   DEWALD:  'QUOTER',
-  CHERISE: 'READER',
+  CHERISE: 'FULL',
   SONJA:   'READER',
   CHARLES: 'READER',
-  JACO:    'READER',
+  JACO:    'QUOTER',
   ELSJE:   'READER',
   ALWYN:   'READER',
   ZACH:    'READER',
@@ -413,13 +414,23 @@ function canWrite(role: string | null): boolean {
   return getTier(role) === 'FULL'
 }
 
-// RFQ-specific write gate. FULL tier always, plus QUOTER (DEWALD) when the
-// RFQ is assigned to him. The match is case-sensitive against the
-// proper-case string ('Dewald'), NOT the uppercase role key ('DEWALD').
+// RFQ-specific write gate. FULL tier always, plus any QUOTER-tier role when
+// the RFQ is assigned to them.
+//
+// US-RBAC-011: this previously hardcoded DEWALD and the literal 'Dewald'.
+// It now resolves the role's proper-case display name from
+// ROLE_DISPLAY_NAMES and compares that against assigned_quoter_name, so
+// adding a quoter needs only a TIER_BY_ROLE entry. The comparison is still
+// case-sensitive against the proper-case name ('Dewald', 'Jaco') and NOT
+// the uppercase role key ('DEWALD', 'JACO') - that mismatch has caused
+// defects before.
 function canWriteRFQ(role: string | null, rfq: { assigned_quoter_name?: string | null }): boolean {
   const tier = getTier(role)
   if (tier === 'FULL') return true
-  if (tier === 'QUOTER' && role === 'DEWALD' && rfq.assigned_quoter_name === 'Dewald') return true
+  if (tier === 'QUOTER') {
+    const displayName = role ? ROLE_DISPLAY_NAMES[role] : null
+    return !!displayName && rfq.assigned_quoter_name === displayName
+  }
   return false
 }
 
