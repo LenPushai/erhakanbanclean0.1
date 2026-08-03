@@ -4,9 +4,12 @@
 -- Fires AFTER UPDATE OF workshop_status on jobs. When a linked job
 -- transitions to 'INVOICED', count how many sibling jobs share the same
 -- rfq_id and check whether all are in a terminal-invoiced state
--- ('INVOICED' or 'COMPLETED'). If yes, flip the parent RFQ from
--- 'JOB_CREATED' to 'COMPLETED' (the .eq-style guard on the WHERE clause
--- prevents accidental overwrites of intermediate states).
+-- ('INVOICED' or 'COMPLETED'). If yes, flip the parent RFQ to 'COMPLETED'
+-- from either of its real pre-completion statuses -- 'ACCEPTED' (Order Won,
+-- the common case) or 'JOB_CREATED' (a transient the app sets on invoice-save
+-- or on the Workshop Board reaching DISPATCHED). The IN(...) guard on the
+-- WHERE clause prevents accidental overwrites of any other state (a Lost/
+-- REJECTED or already-COMPLETED RFQ is never touched -> preserves idempotency).
 --
 -- jobs.workshop_status has NO 'CANCELLED' value (see workshop_new_columns.sql),
 -- so "active" simply means "every linked job". If a CANCELLED value is added
@@ -46,12 +49,16 @@ BEGIN
       SELECT operating_entity INTO rfq_entity
         FROM public.rfqs WHERE id = rfq_uuid;
 
-      -- Only promote if currently in JOB_CREATED. Prevents races with any
-      -- earlier promotion or with the manual JOB_CREATED setter.
+      -- Promote only from a real pre-completion status. 'ACCEPTED' is where
+      -- an Order-Won RFQ sits once its job exists; 'JOB_CREATED' is the
+      -- transient the app may have already advanced it to. Matching either
+      -- makes the promotion robust regardless of which path invoiced the job,
+      -- while the IN(...) guard still blocks re-promoting a COMPLETED RFQ or
+      -- resurrecting a REJECTED (Lost) one.
       UPDATE public.rfqs
         SET status = 'COMPLETED'
         WHERE id = rfq_uuid
-          AND status = 'JOB_CREATED';
+          AND status IN ('ACCEPTED', 'JOB_CREATED');
 
       GET DIAGNOSTICS rows_updated = ROW_COUNT;
 
