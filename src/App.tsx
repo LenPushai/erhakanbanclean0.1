@@ -2,7 +2,7 @@ import React from 'react';
 import { useState, useEffect } from 'react'
 import { ClipboardList, Briefcase, ChevronRight, ChevronDown, ChevronUp, Factory, Building2, Calendar, Hash, RefreshCw, ArrowDownToLine, ArrowUpFromLine, X, Mail, FileText, Paperclip, Send, Plus, Check, Printer, Upload, Package, Search, Filter, Edit3, XCircle, Trash2, Eye, CheckCircle, ShoppingCart, Download, Truck, DollarSign, AlertTriangle, Receipt, Users, Settings }  from 'lucide-react'
 import { supabase } from './lib/supabase'
-import { emailQuoterAssigned, emailQuoteReady, emailOrderWon, emailJobInReview, emailJobReadyToPrint, emailJobPrinted, emailChildJobSpawned, emailJobStarted, emailJobQCCheck, emailJobComplete, emailJobDispatched } from './emailService'
+import { emailRFQCreated, emailQuoterAssigned, emailQuoteReady, emailOrderWon, emailJobInReview, emailJobReadyToPrint, emailJobPrinted, emailChildJobSpawned, emailJobStarted, emailJobQCCheck, emailJobComplete, emailJobDispatched } from './emailService'
 import { format } from 'date-fns'
 import { useEntity, type OperatingEntity } from './contexts/EntityContext'
 import { EntitySwitcher, getBrandName, getHeaderLogo } from './components/EntitySwitcher'
@@ -2523,6 +2523,22 @@ function CreateRFQModal({ activeEntity, role, onClose, onCreated }: { activeEnti
         .select('id, file_name, file_path, file_size').eq('rfq_id', rfq.id)
       setCreatedAttachments(createdAtt || [])
       setCreatedRfq(rfq as RFQ)
+
+      // Automatic notification to management (ALL_MGMT: Hendrik, Jeanic,
+      // Cherise). Separate from the composer on the notify step below -
+      // that one is Jeanic's correspondence, this one is the record.
+      // Hendrik allocates the quoter, so he must learn an RFQ exists
+      // without depending on her remembering to include him.
+      //
+      // Deliberately not awaited and never allowed to throw: the RFQ row
+      // is already committed. A failed notification is recoverable; a
+      // failed RFQ creation is not.
+      try {
+        emailRFQCreated(rfq).catch(e => console.error('emailRFQCreated failed:', e))
+      } catch (e) {
+        console.error('emailRFQCreated threw synchronously:', e)
+      }
+
       setStep('notify')
     } catch (err: any) {
       alert('Error creating RFQ: ' + (err.message || String(err)))
