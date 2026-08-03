@@ -8,8 +8,8 @@
 // prevents double-sends if two cron invocations race.
 //
 // Auth: Vercel Cron sends Authorization: Bearer <CRON_SECRET>. Without auth,
-// the endpoint would be publicly triggerable — a spam vector with our
-// Resend key. CRON_SECRET must be set in Vercel env.
+// the endpoint would be publicly triggerable — a spam vector through the
+// shared Graph mailer. CRON_SECRET must be set in Vercel env.
 //
 // HTML template mirrors src/emailService.ts:emailRfqCompleted — keep in sync
 // if the template wording changes.

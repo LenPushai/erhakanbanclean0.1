@@ -1,13 +1,11 @@
 // ============================================================================
 // ERHA Email Notification Service
-// PUSH AI Foundation — Proverbs 16:3
+// PUSH AI — Proverbs 16:3
 // ============================================================================
 
 import { PEOPLE } from './emailRecipients'
 import { supabase } from './lib/supabase'
 import { quotePdfMatches } from './quotePdf'
-
-const FROM_EMAIL = 'ERHA Operations <onboarding@resend.dev>'
 
 // Resolved at module load. Browser-side fallback to current origin keeps dev
 // links working without forcing a .env.local entry on every workstation; the
