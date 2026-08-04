@@ -10,7 +10,6 @@
 export const PEOPLE = {
   Hendrik: 'hendrik@erha.co.za',
   Jeanic:  'pa@erha.co.za',
-  Cherise: 'cherise@erha.co.za',
   Dewald:  'dewald@erha.co.za',
   Jaco:    'jaco@erha.co.za',
   Len:     'lenklopper03@gmail.com',

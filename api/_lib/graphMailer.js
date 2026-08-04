@@ -11,14 +11,13 @@
 // expiry — Vercel warm invocations share the cache, cold starts mint anew.
 //
 // Override: EMAIL_OVERRIDE_TO env (comma-separated list). When set, EVERY
-// outbound send is rerouted there regardless of the caller's `to` field
-// (testing only). When unset/empty, the caller's real `to` is honored — there
-// is no silent fallback; an empty resolved recipient list fails loudly with
-// {ok:false, error:'no recipients resolved'}. This is the single source of
-// truth for the override — the per-handler TO_OVERRIDE constants in
-// send-email.js, sign-submit.js, quote-send-to-customer.js, and
-// cron/notify-completed-rfqs.js will be removed when those handlers are
-// rewired through this module.
+// outbound send is rerouted there regardless of the caller's `to` field.
+// When unset (or empty after trim), falls back to lenklopper03@gmail.com so
+// a misconfigured prod can never accidentally email real recipients during
+// the cutover. This is the single source of truth for the override — the
+// per-handler TO_OVERRIDE constants in send-email.js, sign-submit.js,
+// quote-send-to-customer.js, and cron/notify-completed-rfqs.js will be
+// removed when those handlers are rewired through this module.
 //
 // Attachments: accepts the existing {filename, path} shape (path = URL).
 // Each URL is fetched server-side, base64-encoded, and wrapped as a
@@ -32,22 +31,20 @@
 
 const GRAPH_API_BASE = 'https://graph.microsoft.com/v1.0';
 const TOKEN_RENEW_BUFFER_MS = 5 * 60 * 1000; // refresh 5 minutes before expiry
+const SAFETY_OVERRIDE_FALLBACK = ['lenklopper03@gmail.com'];
 
 // Module-scoped cache: { accessToken: string, expiresAt: ms-epoch }.
 // Survives across warm Vercel invocations of the same function instance.
 let cachedToken = null;
 
-// EMAIL_OVERRIDE_TO, when set, reroutes ALL mail to that list (testing only).
-// When unset/empty, the caller's real `to` is used. No silent fallback — an
-// empty resolved recipient list fails loudly.
-function readOverrideList() {
+function readOverrideTo() {
   const raw = process.env.EMAIL_OVERRIDE_TO;
-  if (!raw) return [];
-  return String(raw).split(',').map((s) => s.trim()).filter(Boolean);
-}
-
-function normalizeTo(to) {
-  return (Array.isArray(to) ? to : [to]).map((s) => String(s || '').trim()).filter(Boolean);
+  if (!raw) return SAFETY_OVERRIDE_FALLBACK;
+  const list = String(raw)
+    .split(',')
+    .map((s) => s.trim())
+    .filter(Boolean);
+  return list.length > 0 ? list : SAFETY_OVERRIDE_FALLBACK;
 }
 
 function toGraphRecipients(addresses) {
@@ -120,12 +117,10 @@ async function buildGraphAttachment(att) {
   }
 }
 
-function logAttempt({ to, intendedTo, overridden, subject, status, error }) {
+function logAttempt({ to, subject, status, error }) {
   const record = {
     provider: 'graph',
     to,
-    intendedTo,
-    overridden: !!overridden,
     subject,
     status,
     timestamp: new Date().toISOString(),
@@ -138,14 +133,7 @@ function logAttempt({ to, intendedTo, overridden, subject, status, error }) {
 
 export async function sendMail({ to, subject, html, attachments, replyTo }) {
   const senderId = process.env.GRAPH_SENDER_USER_ID || 'noreply@erha.co.za';
-  const intendedTo = normalizeTo(to);
-  const override = readOverrideList();
-  const finalTo = override.length > 0 ? override : intendedTo;
-
-  if (finalTo.length === 0) {
-    logAttempt({ to: [], intendedTo, subject, status: 'failed', error: 'no recipients resolved' });
-    return { ok: false, status: 0, error: 'no recipients resolved' };
-  }
+  const overriddenTo = readOverrideTo();
 
   // Auth — the only hard-throw path per the spec.
   let token;
@@ -153,9 +141,7 @@ export async function sendMail({ to, subject, html, attachments, replyTo }) {
     token = await getAccessToken();
   } catch (e) {
     logAttempt({
-      to: finalTo,
-      intendedTo,
-      overridden: override.length > 0,
+      to: overriddenTo,
       subject,
       status: 'failed',
       error: e.message,
@@ -174,7 +160,7 @@ export async function sendMail({ to, subject, html, attachments, replyTo }) {
   const message = {
     subject,
     body: { contentType: 'HTML', content: html },
-    toRecipients: toGraphRecipients(finalTo),
+    toRecipients: toGraphRecipients(overriddenTo),
   };
   if (replyTo) {
     const replyList = Array.isArray(replyTo) ? replyTo : [replyTo];
@@ -198,9 +184,7 @@ export async function sendMail({ to, subject, html, attachments, replyTo }) {
     });
   } catch (e) {
     logAttempt({
-      to: finalTo,
-      intendedTo,
-      overridden: override.length > 0,
+      to: overriddenTo,
       subject,
       status: 'failed',
       error: `fetch threw: ${e.message}`,
@@ -211,9 +195,7 @@ export async function sendMail({ to, subject, html, attachments, replyTo }) {
   if (!res.ok) {
     const errText = await res.text().catch(() => '');
     logAttempt({
-      to: finalTo,
-      intendedTo,
-      overridden: override.length > 0,
+      to: overriddenTo,
       subject,
       status: 'failed',
       error: `Graph sendMail ${res.status}: ${errText}`,
@@ -221,6 +203,6 @@ export async function sendMail({ to, subject, html, attachments, replyTo }) {
     return { ok: false, status: res.status, error: errText };
   }
 
-  logAttempt({ to: finalTo, intendedTo, overridden: override.length > 0, subject, status: 'sent' });
+  logAttempt({ to: overriddenTo, subject, status: 'sent' });
   return { ok: true, status: res.status };
 }

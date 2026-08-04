@@ -1,8 +1,8 @@
-import React from 'react';
+﻿import React from 'react';
 import { useState, useEffect } from 'react'
 import { ClipboardList, Briefcase, ChevronRight, ChevronDown, ChevronUp, Factory, Building2, Calendar, Hash, RefreshCw, ArrowDownToLine, ArrowUpFromLine, X, Mail, FileText, Paperclip, Send, Plus, Check, Printer, Upload, Package, Search, Filter, Edit3, XCircle, Trash2, Eye, CheckCircle, ShoppingCart, Download, Truck, DollarSign, AlertTriangle, Receipt, Users, Settings }  from 'lucide-react'
 import { supabase } from './lib/supabase'
-import { emailRFQCreated, emailQuoterAssigned, emailQuoteReady, emailOrderWon, emailJobInReview, emailJobReadyToPrint, emailJobPrinted, emailChildJobSpawned, emailJobStarted, emailJobQCCheck, emailJobComplete, emailJobDispatched } from './emailService'
+import { emailQuoterAssigned, emailQuoteReady, emailOrderWon, emailJobInReview, emailJobReadyToPrint, emailJobPrinted, emailChildJobSpawned, emailJobStarted, emailJobQCCheck, emailJobComplete, emailJobDispatched } from './emailService'
 import { format } from 'date-fns'
 import { useEntity, type OperatingEntity } from './contexts/EntityContext'
 import { EntitySwitcher, getBrandName, getHeaderLogo } from './components/EntitySwitcher'
@@ -353,7 +353,7 @@ const UOM_OPTIONS = ['EA', 'M', 'KG', 'L', 'HR', 'TRIP', 'SET', 'M2', 'M3', 'TON
 const ITEM_TYPES = ['MATERIAL', 'LABOUR', 'TRANSPORT', 'EQUIPMENT', 'SUBCONTRACT', 'OTHER']
 
 const ROLE_STORAGE_KEY = 'erha_current_role'
-const VALID_ROLES = ['HENDRIK', 'JUANIC', 'SONJA', 'CHARLES', 'DEWALD', 'JACO', 'ELSJE', 'ALWYN', 'CHERISE', 'ZACH', 'GIDEON'] as const
+const VALID_ROLES = ['HENDRIK', 'JUANIC', 'SONJA', 'CHARLES', 'DEWALD', 'JACO', 'ELSJE', 'ALWYN', 'CHERISE', 'ZACH'] as const
 
 // Display-only name lookup. The uppercase VALID_ROLES keys remain the source
 // of truth for role gates, localStorage, and activity_log writes — this map is
@@ -370,7 +370,6 @@ const ROLE_DISPLAY_NAMES: Record<string, string> = {
   ALWYN: 'Alwyn',
   CHERISE: 'Cherise',
   ZACH: 'Zach',
-  GIDEON: 'Gideon',
 }
 
 // ───────────────────────────────────────────────────────────
@@ -381,9 +380,8 @@ const ROLE_DISPLAY_NAMES: Record<string, string> = {
 // READER  : CHERISE, SONJA, CHARLES, JACO, ELSJE, ALWYN, ZACH
 //                                                        — no writes anywhere; surfaced in RoleSelector for shop-floor visibility
 //
-// US-RBAC-010/011 (3 Aug 2026): CHERISE promoted to FULL; JACO promoted to
-// QUOTER so he can sign quotations. The remaining five previously-dormant
-// roles (SONJA, CHARLES, ELSJE, ALWYN, ZACH) stay READER. canWrite() and
+// All six previously-dormant roles (SONJA, CHARLES, JACO, ELSJE, ALWYN,
+// ZACH) are now explicitly mapped to READER tier. canWrite() and
 // canWriteRFQ() return false for any non-FULL/non-matching-QUOTER tier,
 // so every existing write gate continues to deny them. The header
 // renders a READ ONLY badge whenever getTier() is not 'FULL'.
@@ -395,14 +393,13 @@ const TIER_BY_ROLE: Record<string, RoleTier> = {
   HENDRIK: 'FULL',
   JUANIC:  'FULL',
   DEWALD:  'QUOTER',
-  CHERISE: 'FULL',
+  CHERISE: 'READER',
   SONJA:   'READER',
   CHARLES: 'READER',
-  JACO:    'QUOTER',
+  JACO:    'READER',
   ELSJE:   'READER',
   ALWYN:   'READER',
   ZACH:    'READER',
-  GIDEON:  'READER',
 }
 
 function getTier(role: string | null): RoleTier | null {
@@ -416,23 +413,13 @@ function canWrite(role: string | null): boolean {
   return getTier(role) === 'FULL'
 }
 
-// RFQ-specific write gate. FULL tier always, plus any QUOTER-tier role when
-// the RFQ is assigned to them.
-//
-// US-RBAC-011: this previously hardcoded DEWALD and the literal 'Dewald'.
-// It now resolves the role's proper-case display name from
-// ROLE_DISPLAY_NAMES and compares that against assigned_quoter_name, so
-// adding a quoter needs only a TIER_BY_ROLE entry. The comparison is still
-// case-sensitive against the proper-case name ('Dewald', 'Jaco') and NOT
-// the uppercase role key ('DEWALD', 'JACO') - that mismatch has caused
-// defects before.
+// RFQ-specific write gate. FULL tier always, plus QUOTER (DEWALD) when the
+// RFQ is assigned to him. The match is case-sensitive against the
+// proper-case string ('Dewald'), NOT the uppercase role key ('DEWALD').
 function canWriteRFQ(role: string | null, rfq: { assigned_quoter_name?: string | null }): boolean {
   const tier = getTier(role)
   if (tier === 'FULL') return true
-  if (tier === 'QUOTER') {
-    const displayName = role ? ROLE_DISPLAY_NAMES[role] : null
-    return !!displayName && rfq.assigned_quoter_name === displayName
-  }
+  if (tier === 'QUOTER' && role === 'DEWALD' && rfq.assigned_quoter_name === 'Dewald') return true
   return false
 }
 
@@ -594,14 +581,13 @@ function RoleSelector({ onSelect }: any) {
             { key: 'HENDRIK', label: 'Managing Director', initials: 'MD', color: 'orange' },
             { key: 'JUANIC', label: 'Operations System Manager', initials: 'OS', color: 'blue' },
             { key: 'DEWALD', label: 'General Manager', initials: 'GM', color: 'purple' },
-            { key: 'CHERISE', label: 'Administration (Backup)', initials: 'AD', color: 'cyan' },
-            { key: 'SONJA',   label: 'Procurement',            initials: 'PA', color: 'green' },
-            { key: 'CHARLES', label: 'Shop Store Manager',     initials: 'SM', color: 'amber' },
+            { key: 'CHERISE', label: 'Administration', initials: 'AD', color: 'cyan' },
+            { key: 'SONJA',   label: 'Procurement & Accounts', initials: 'PA', color: 'green' },
+            { key: 'CHARLES', label: 'Store Manager',          initials: 'SM', color: 'amber' },
             { key: 'JACO',    label: 'Site Manager',           initials: 'SI', color: 'teal' },
             { key: 'ELSJE',   label: 'Site Admin',             initials: 'SA', color: 'rose' },
             { key: 'ALWYN',   label: 'Site Foreman',           initials: 'SF', color: 'indigo' },
             { key: 'ZACH',    label: 'Shop Foreman',           initials: 'SH', color: 'lime' },
-            { key: 'GIDEON',  label: 'Site Stores',             initials: 'SS', color: 'sky' },
           ] as const).map(role => (
             <button key={role.key} onClick={() => onSelect(role.key)}
               className={`w-full flex items-center gap-4 px-5 py-3 border-2 border-gray-200 rounded-xl hover:border-${role.color}-400 hover:bg-${role.color}-50 transition-all group`}>
@@ -2523,22 +2509,6 @@ function CreateRFQModal({ activeEntity, role, onClose, onCreated }: { activeEnti
         .select('id, file_name, file_path, file_size').eq('rfq_id', rfq.id)
       setCreatedAttachments(createdAtt || [])
       setCreatedRfq(rfq as RFQ)
-
-      // Automatic notification to management (ALL_MGMT: Hendrik, Jeanic,
-      // Cherise). Separate from the composer on the notify step below -
-      // that one is Jeanic's correspondence, this one is the record.
-      // Hendrik allocates the quoter, so he must learn an RFQ exists
-      // without depending on her remembering to include him.
-      //
-      // Deliberately not awaited and never allowed to throw: the RFQ row
-      // is already committed. A failed notification is recoverable; a
-      // failed RFQ creation is not.
-      try {
-        emailRFQCreated(rfq).catch(e => console.error('emailRFQCreated failed:', e))
-      } catch (e) {
-        console.error('emailRFQCreated threw synchronously:', e)
-      }
-
       setStep('notify')
     } catch (err: any) {
       alert('Error creating RFQ: ' + (err.message || String(err)))
