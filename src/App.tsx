@@ -353,7 +353,7 @@ const UOM_OPTIONS = ['EA', 'M', 'KG', 'L', 'HR', 'TRIP', 'SET', 'M2', 'M3', 'TON
 const ITEM_TYPES = ['MATERIAL', 'LABOUR', 'TRANSPORT', 'EQUIPMENT', 'SUBCONTRACT', 'OTHER']
 
 const ROLE_STORAGE_KEY = 'erha_current_role'
-const VALID_ROLES = ['HENDRIK', 'JUANIC', 'SONJA', 'CHARLES', 'DEWALD', 'JACO', 'ELSJE', 'ALWYN', 'CHERISE', 'ZACH'] as const
+const VALID_ROLES = ['HENDRIK', 'JUANIC', 'SONJA', 'CHARLES', 'DEWALD', 'JACO', 'ELSJE', 'ALWYN', 'CHERISE', 'ZACH', 'GIDEON'] as const
 
 // Display-only name lookup. The uppercase VALID_ROLES keys remain the source
 // of truth for role gates, localStorage, and activity_log writes — this map is
@@ -370,6 +370,7 @@ const ROLE_DISPLAY_NAMES: Record<string, string> = {
   ALWYN: 'Alwyn',
   CHERISE: 'Cherise',
   ZACH: 'Zach',
+  GIDEON: 'Gideon',
 }
 
 // ───────────────────────────────────────────────────────────
@@ -380,8 +381,10 @@ const ROLE_DISPLAY_NAMES: Record<string, string> = {
 // READER  : CHERISE, SONJA, CHARLES, JACO, ELSJE, ALWYN, ZACH
 //                                                        — no writes anywhere; surfaced in RoleSelector for shop-floor visibility
 //
-// All six previously-dormant roles (SONJA, CHARLES, JACO, ELSJE, ALWYN,
-// ZACH) are now explicitly mapped to READER tier. canWrite() and
+// CHERISE holds FULL (backup for the Operations System Manager); JACO
+// holds QUOTER so he can sign quotations. The remaining five
+// previously-dormant roles (SONJA, CHARLES, ELSJE, ALWYN, ZACH) stay
+// READER, as does GIDEON (Site Stores). canWrite() and
 // canWriteRFQ() return false for any non-FULL/non-matching-QUOTER tier,
 // so every existing write gate continues to deny them. The header
 // renders a READ ONLY badge whenever getTier() is not 'FULL'.
@@ -393,13 +396,14 @@ const TIER_BY_ROLE: Record<string, RoleTier> = {
   HENDRIK: 'FULL',
   JUANIC:  'FULL',
   DEWALD:  'QUOTER',
-  CHERISE: 'READER',
+  CHERISE: 'FULL',
   SONJA:   'READER',
   CHARLES: 'READER',
-  JACO:    'READER',
+  JACO:    'QUOTER',
   ELSJE:   'READER',
   ALWYN:   'READER',
   ZACH:    'READER',
+  GIDEON:  'READER',
 }
 
 function getTier(role: string | null): RoleTier | null {
@@ -413,13 +417,22 @@ function canWrite(role: string | null): boolean {
   return getTier(role) === 'FULL'
 }
 
-// RFQ-specific write gate. FULL tier always, plus QUOTER (DEWALD) when the
-// RFQ is assigned to him. The match is case-sensitive against the
-// proper-case string ('Dewald'), NOT the uppercase role key ('DEWALD').
+// RFQ-specific write gate. FULL tier always, plus any QUOTER-tier role when
+// the RFQ is assigned to them.
+//
+// This previously hardcoded DEWALD and the literal 'Dewald'. It now
+// resolves the role's proper-case display name from ROLE_DISPLAY_NAMES and
+// compares that against assigned_quoter_name, so adding a quoter needs only
+// a TIER_BY_ROLE entry. The comparison is still case-sensitive against the
+// proper-case name ('Dewald', 'Jaco') and NOT the uppercase role key -
+// that mismatch has caused defects before.
 function canWriteRFQ(role: string | null, rfq: { assigned_quoter_name?: string | null }): boolean {
   const tier = getTier(role)
   if (tier === 'FULL') return true
-  if (tier === 'QUOTER' && role === 'DEWALD' && rfq.assigned_quoter_name === 'Dewald') return true
+  if (tier === 'QUOTER') {
+    const displayName = role ? ROLE_DISPLAY_NAMES[role] : null
+    return !!displayName && rfq.assigned_quoter_name === displayName
+  }
   return false
 }
 
@@ -581,13 +594,14 @@ function RoleSelector({ onSelect }: any) {
             { key: 'HENDRIK', label: 'Managing Director', initials: 'MD', color: 'orange' },
             { key: 'JUANIC', label: 'Operations System Manager', initials: 'OS', color: 'blue' },
             { key: 'DEWALD', label: 'General Manager', initials: 'GM', color: 'purple' },
-            { key: 'CHERISE', label: 'Administration', initials: 'AD', color: 'cyan' },
-            { key: 'SONJA',   label: 'Procurement & Accounts', initials: 'PA', color: 'green' },
-            { key: 'CHARLES', label: 'Store Manager',          initials: 'SM', color: 'amber' },
+            { key: 'CHERISE', label: 'Administration (Backup)', initials: 'AD', color: 'cyan' },
+            { key: 'SONJA',   label: 'Procurement',            initials: 'PA', color: 'green' },
+            { key: 'CHARLES', label: 'Shop Store Manager',     initials: 'SM', color: 'amber' },
             { key: 'JACO',    label: 'Site Manager',           initials: 'SI', color: 'teal' },
             { key: 'ELSJE',   label: 'Site Admin',             initials: 'SA', color: 'rose' },
             { key: 'ALWYN',   label: 'Site Foreman',           initials: 'SF', color: 'indigo' },
             { key: 'ZACH',    label: 'Shop Foreman',           initials: 'SH', color: 'lime' },
+            { key: 'GIDEON',  label: 'Site Stores',            initials: 'SS', color: 'sky' },
           ] as const).map(role => (
             <button key={role.key} onClick={() => onSelect(role.key)}
               className={`w-full flex items-center gap-4 px-5 py-3 border-2 border-gray-200 rounded-xl hover:border-${role.color}-400 hover:bg-${role.color}-50 transition-all group`}>
