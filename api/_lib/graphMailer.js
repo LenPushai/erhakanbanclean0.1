@@ -31,20 +31,26 @@
 
 const GRAPH_API_BASE = 'https://graph.microsoft.com/v1.0';
 const TOKEN_RENEW_BUFFER_MS = 5 * 60 * 1000; // refresh 5 minutes before expiry
-const SAFETY_OVERRIDE_FALLBACK = ['lenklopper03@gmail.com'];
 
 // Module-scoped cache: { accessToken: string, expiresAt: ms-epoch }.
 // Survives across warm Vercel invocations of the same function instance.
 let cachedToken = null;
 
+// EMAIL_OVERRIDE_TO is a testing switch. When it holds one or more
+// addresses, every message reroutes there. When it is unset or blank this
+// returns an empty list and the caller's real 	o is honoured.
+//
+// It previously fell back to a personal Gmail, which meant an unset
+// variable silently swallowed all production mail. That is gone: there is
+// no hidden destination, and an unresolvable recipient list fails loudly
+// rather than going somewhere unexpected.
 function readOverrideTo() {
   const raw = process.env.EMAIL_OVERRIDE_TO;
-  if (!raw) return SAFETY_OVERRIDE_FALLBACK;
-  const list = String(raw)
+  if (!raw) return [];
+  return String(raw)
     .split(',')
     .map((s) => s.trim())
     .filter(Boolean);
-  return list.length > 0 ? list : SAFETY_OVERRIDE_FALLBACK;
 }
 
 function toGraphRecipients(addresses) {
@@ -133,7 +139,18 @@ function logAttempt({ to, subject, status, error }) {
 
 export async function sendMail({ to, subject, html, attachments, replyTo }) {
   const senderId = process.env.GRAPH_SENDER_USER_ID || 'noreply@erha.co.za';
-  const overriddenTo = readOverrideTo();
+  // Reroute only when the override actually holds addresses; otherwise
+  // send to the recipients the caller asked for.
+  const override = readOverrideTo();
+  const intendedTo = (Array.isArray(to) ? to : [to])
+    .map((s) => String(s || '').trim())
+    .filter(Boolean);
+  const overriddenTo = override.length > 0 ? override : intendedTo;
+
+  if (overriddenTo.length === 0) {
+    logAttempt({ to: [], subject, status: 'failed', error: 'no recipients resolved' });
+    return { ok: false, status: 0, error: 'no recipients resolved' };
+  }
 
   // Auth — the only hard-throw path per the spec.
   let token;
