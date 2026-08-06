@@ -2728,7 +2728,6 @@ function CreateRFQModal({ activeEntity, role, onClose, onCreated }: { activeEnti
               rfq={createdRfq}
               role={role}
               panelAttachments={createdAttachments}
-              defaultBody={createNotifyBody(createdRfq)}
               sendContext="create_flow"
               onSent={() => { onCreated(); onClose() }}
             />
@@ -3522,7 +3521,10 @@ function EmailModal({ rfq, role, onClose }: { rfq: RFQ; role: string | null; onC
   const brandName = getBrandName(rfq.operating_entity)
   const [to, setTo] = useState(rfq.contact_email || '')
   const [subject, setSubject] = useState(template.subject.replace('{enq}', enqNo))
-  const [body, setBody] = useState(template.body.replace(/\{enq\}/g, enqNo).replace('{contact}', contactName).replace('{brand}', brandName))
+  // UAT: body opens blank so the sender writes their own message. The
+  // subject above stays pre-filled - it carries the enquiry number, which
+  // is what keeps a customer's replies threaded to the right job.
+  const [body, setBody] = useState('')
   const [sending, setSending] = useState(false)
   const [sent, setSent] = useState(false)
   const [attachments, setAttachments] = useState<File[]>([])
@@ -3717,8 +3719,11 @@ function CommunicationPanel({ rfq, role, panelAttachments = [], defaultBody, sen
   const brandName = getBrandName(rfq.operating_entity)
   const template = EMAIL_TEMPLATES[rfq.status] || EMAIL_TEMPLATES['NEW']
   const [subject, setSubject] = React.useState(template.subject.replace('{enq}', enqNo))
+  // UAT: body opens blank. Any defaultBody passed by a caller is
+  // deliberately ignored - the prop remains on the signature so callers
+  // do not need changing, but nothing is pre-typed for the user.
   const [body, setBody] = React.useState(
-    defaultBody ?? template.body.replace(/\{enq\}/g, enqNo).replace('{contact}', contactName).replace('{brand}', brandName)
+    ''
   )
 
   const [attachments, setAttachments] = React.useState<File[]>([])
