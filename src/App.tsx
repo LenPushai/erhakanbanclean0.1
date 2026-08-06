@@ -288,13 +288,18 @@ const QUOTERS = ['Hendrik', 'Dewald', 'Jaco']
 // is here for oversight. Names assigned on an RFQ but not present here
 // (e.g. 'Estimator') surface to the sender as "not a known recipient"
 // rather than silently dropping.
-const INTERNAL_DIRECTORY: Record<string, string> = {
-  Hendrik: PEOPLE.Hendrik,
-  Jeanic:  PEOPLE.Jeanic,
-  Dewald:  PEOPLE.Dewald,
-  Jaco:    PEOPLE.Jaco,
-  Len:     PEOPLE.Len,
-}
+// Everyone who can be picked as an internal recipient in the Communication
+// Panel. Derived from PEOPLE rather than listed by hand: this was five
+// hardcoded entries against a directory of thirteen, so people added to the
+// directory never appeared on screen. Deriving it means the two cannot
+// drift apart again - add someone to emailRecipients.ts and they show up
+// here automatically.
+//
+// Excluded: Noreply (the sending identity, not a person) and Len (a
+// consultant's personal address does not belong in ERHA's recipient list).
+const INTERNAL_DIRECTORY: Record<string, string> = Object.fromEntries(
+  Object.entries(PEOPLE).filter(([name]) => name !== 'Noreply' && name !== 'Len')
+)
 const DEPARTMENTS_CG_FALLBACK = ['MELTSHOP', 'MILLS', 'SHARON', 'OREN', 'STORES', 'GENERAL', 'MRSTO']
 const ACTIONS_LIST_FALLBACK = ['Manufacture', 'Sandblast', 'Service', 'Paint', 'Repair', 'Installation', 'Cutting', 'Modification', 'Machining', 'Supply']
 
@@ -3672,7 +3677,11 @@ function CommunicationPanel({ rfq, role, panelAttachments = [], defaultBody, sen
   const [internalChecked, setInternalChecked] = React.useState<Record<string, boolean>>(() => {
     const seed: Record<string, boolean> = {}
     for (const name of Object.keys(INTERNAL_DIRECTORY)) {
-      seed[name] = name === 'Jeanic' || (!!quoterEmail && name === quoterName)
+      // UAT 4 Aug 2026: nothing is pre-selected. Jeanic previously found
+      // herself and the assigned quoter already ticked, which meant people
+      // were copied without anyone choosing to. Every recipient is now a
+      // deliberate choice.
+      seed[name] = false
     }
     return seed
   })

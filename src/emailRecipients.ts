@@ -17,7 +17,7 @@
 export const PEOPLE = {
   Hendrik: 'hendrik@erha.co.za',
   Jeanic:  'pa@erha.co.za',
-  Cherise: 'cherise@erha.co.za',
+  Cherise: 'reception@erha.co.za',
   Dewald:  'dewald@erha.co.za',
   Jaco:    'jaco@erha.co.za',
   Sonja:   'buyer@erha.co.za',
@@ -26,6 +26,8 @@ export const PEOPLE = {
   Gideon:  'sitestores@erha.co.za',
   Elsje:   'siteadmin@erha.co.za',
   Alwyn:   'safety@erha.co.za',
+  Kobus:   'logistics@erha.co.za',
+  Franci:  'admin@erha.co.za',
   Len:     'lenklopper03@gmail.com',
   Noreply: 'noreply@erha.co.za',
 } as const
